@@ -1,0 +1,380 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  STAFF
+  CUSTOMER
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID 
+  PREPARING
+  READY 
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  SUCCESS 
+  FAILED  
+  PENDING
+}
+
+enum WalletTransactionType {
+  TOP_UP 
+  PAYMENT 
+  REFUND
+}
+
+enum FraudSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model User {
+  uuid             String      @id @default(uuid())
+  phoneNumber      String      @unique
+  email            String?     @unique
+  name             String?
+  password         String?
+
+  role             Role        @default(CUSTOMER)
+
+  tenantUuid       String?
+  tenant           Tenant?     @relation("TenantUsers", fields: [tenantUuid], references: [uuid])
+
+  ownedTenant      Tenant?     @relation("TenantOwner")
+
+  isVerified       Boolean     @default(false)
+  isBanned         Boolean     @default(false)
+
+  bannedAt         DateTime?
+  banReason        String?
+
+  otpCode          String?
+  otpExpiresAt     DateTime?
+  otpAttempts      Int          @default(0)
+
+  wallet           Wallet?
+  orders           Order[]
+  RefreshToken     RefreshToken[]
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  Session          Session[]
+  AuditLog         AuditLog[]
+  Admin2FA         Admin2FA[]
+  FraudEvent       FraudEvent[]
+  UserStore        UserStore[]
+
+  @@index([phoneNumber])
+}   
+
+model Tenant {
+  uuid             String        @id @default(uuid())
+  name             String
+  slug             String        @unique
+  email            String
+  phone            String?
+
+  status           TenantStatus  @default(ACTIVE)
+
+  ownerUuid        String        @unique
+  owner            User          @relation("TenantOwner", fields: [ownerUuid], references: [uuid])
+
+  users            User[]        @relation("TenantUsers")
+  stores           Store[]
+  subscription     Subscription?
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+model Store {
+  uuid             String          @id @default(uuid())
+  tenantUuid       String
+  name             String  
+  isActive         Boolean         @default(true)
+  city             String
+  active           Boolean         @default(true)
+
+  staff            UserStore[]
+  orders           Order[]
+  products         Product[]
+  auditLogs        AuditLog[]
+
+  createdAt        DateTime         @default(now())
+
+  Tenant           Tenant[]
+  FraudEvent       FraudEvent[]
+  Session          Session[]
+}
+
+model UserStore {
+  userUuid         String
+  storeUuid        String
+  role             Role  // MANAGER, ADMIN, STAFF
+
+  user             User             @relation(fields: [userUuid], references: [uuid])
+  store            Store            @relation(fields: [storeUuid], references: [uuid])
+
+  @@id([userUuid, storeUuid])
+}
+
+model LoginAttempt {
+  uuid              String       @id @default(uuid())
+  phoneNumber       String
+  otpCode           String
+  expiresAt         DateTime
+  attempts          Int           @default(0)
+  used              Boolean       @default(false)
+
+  createdAt         DateTime      @default(now())
+}
+
+model FraudEvent {
+  uuid              String        @id @default(uuid())
+  userUuid          String?
+  storeUuid         String
+
+  ipAddress         String
+  reason            String
+  severity          FraudSeverity
+ 
+  user              User?         @relation(fields: [userUuid], references: [uuid])
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+
+  createdAt         DateTime      @default(now())
+}
+
+model RefreshToken {
+  uuid              String        @id @default(uuid())
+  token             String        @unique
+  userUuid          String
+  revoked           Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+
+  user             User @relation(fields: [userUuid], references: [uuid])
+
+  Session Session[]
+}
+
+model Session {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  refreshTokenUuid  String        @unique
+  storeUuid         String
+
+  deviceId          String
+  deviceType        String        @default("UNKNOWN")
+  deviceFingerprint String
+  ipAddress         String
+  userAgent         String
+
+  user              User          @relation(fields: [userUuid], references: [uuid])
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+  refreshToken      RefreshToken  @relation(fields: [refreshTokenUuid], references: [uuid])
+
+  lastUsedAt        DateTime      @default(now())
+  revoked           Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+}
+
+model Admin2FA {
+  uuid              String        @id @default(uuid())
+  userUuid          String        @unique
+  secret            String
+  enabled           Boolean       @default(false)
+
+  user              User          @relation(fields: [userUuid], references: [uuid])
+}
+
+model AuditLog {
+  uuid              String        @id @default(uuid())
+  storeUuid         String
+  actorUuid         String
+  
+  action            String
+  targetType        String
+  targetUuid        String?
+  ipAddress         String
+  userAgent         String
+  createdAt         DateTime      @default(now())
+
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+  actor             User          @relation(fields: [actorUuid], references: [uuid])
+
+  @@index([actorUuid])
+  @@index([action])
+}
+
+model Subscription {
+  uuid              String         @id @default(uuid())
+  tenantUuid        String         @unique
+  tenant            Tenant         @relation(fields: [tenantUuid], references: [uuid])
+
+  status            SubscriptionStatus
+  price             Int             // cents
+  currency          String          @default("USD")
+
+  planUuid          String
+  plan              Plan            @relation(fields: [planUuid], references: [uuid])
+
+  stripeCustomerId  String?
+  stripeSubId       String?
+
+  startDate         DateTime
+  endDate           DateTime?
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+model Plan {
+  uuid              String          @id @default(uuid())
+  name              String
+  price             Int
+  currency          String
+  isActive          Boolean         @default(true)
+
+  maxStaff          Int
+  maxBranches       Int
+  maxOrdersMonth    Int?
+
+  createdAt         DateTime        @default(now())
+
+  Subscription Subscription[]
+}
+
+model Product {
+  uuid              String          @id @default(uuid())
+  storeUuid         String 
+  name              String
+  description       String?
+  basePrice         Int
+  imageUrl          String
+  isActive          Boolean         @default(true)
+ 
+  options           ProductOption[]
+  orderItems        OrderItem[]
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+model ProductOption {
+  uuid              String          @id @default(uuid())
+  productUuid       String
+  name              String   // Size, Milk, Sugar
+  extraCost         Int      // cents
+
+  product           Product         @relation(fields: [productUuid], references: [uuid])
+}
+
+model Order {
+  uuid              String          @id @default(uuid())
+  userUuid          String
+  status            OrderStatus     @default(PENDING)
+  totalAmount       Int          // cents
+
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  items             OrderItem[]
+  payment           Payment?
+
+  storeUuid         String
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @default(now())
+
+  @@index([userUuid])
+}
+
+model OrderItem {
+  uuid              String          @id @default(uuid())
+  orderUuid         String
+  productUuid       String
+  quantity          Int
+  price             Int     
+
+  order             Order           @relation(fields: [orderUuid], references: [uuid])
+  product           Product         @relation(fields: [productUuid], references: [uuid])
+}
+
+model Payment {
+  uuid              String          @id @default(uuid())
+  orderUuid         String          @unique
+  amount            Int
+  status            PaymentStatus
+  provider          String         // STRIPE / WALLET
+  providerRef       String?
+
+  order             Order           @relation(fields: [orderUuid], references: [uuid])
+  createdAt         DateTime        @default(now())
+}
+
+model Wallet {
+  uuid              String          @id @default(uuid())
+  userUuid          String          @unique
+  balance           Int             @default(0)
+
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  txns              WalletTransaction[]
+
+  createdAt         DateTime        @default(now()) 
+  updatedAt         DateTime        @updatedAt
+}
+
+model WalletTransaction {
+  uuid              String          @id @default(uuid())
+  walletUuid        String
+  amount            Int
+  type              WalletTransactionType
+  reference         String?
+
+  wallet            Wallet          @relation(fields: [walletUuid], references: [uuid])
+  createdAt         DateTime        @default(now())
+}
+
+model Webhook {
+  uuid              String          @id @default(uuid())
+  storeUuid         String
+  url               String
+  eventType         String // SECURITY_ALERT, FRAUD, PAYMENT_FAILED
+  secret            String
+  active            Boolean         @default(true)
+}
