@@ -21,6 +21,12 @@ enum Role {
   CUSTOMER
 }
 
+enum StoreRole {
+  ADMIN
+  MANAGER 
+  STAFF
+}
+ 
 enum TenantStatus {
   ACTIVE
   SUSPENDED
@@ -33,6 +39,7 @@ enum SubscriptionStatus {
   PAST_DUE
   CANCELED
   EXPIRED
+  PAUSED
 }
 
 enum OrderStatus {
@@ -61,6 +68,26 @@ enum FraudSeverity {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+enum SubscriptionEvent {
+  CREATED
+  MIGRATED
+  CANCELED
+  REACTIVATED
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  FAILED
 }
 
 model User {
@@ -121,13 +148,29 @@ model Tenant {
 
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
+
+  @@index([createdAt])
+  @@index([status])
+  Invoice Invoice[]
+  TenantAddOn TenantAddOn[]
+  BillingSnapshot BillingSnapshot[]
+  EnterpriseContract EnterpriseContract[]
+}
+
+model TenantAddOn {
+  uuid             String        @id @default(uuid())
+  tenantUuid       String
+  addOnUuid        String
+  quantity         Int
+
+  tenant           Tenant        @relation(fields: [tenantUuid], references: [uuid])
+  addOn            AddOn         @relation(fields: [addOnUuid], references: [uuid])
 }
 
 model Store {
   uuid             String          @id @default(uuid())
   tenantUuid       String
   name             String  
-  isActive         Boolean         @default(true)
   city             String
   active           Boolean         @default(true)
 
@@ -135,19 +178,19 @@ model Store {
   orders           Order[]
   products         Product[]
   auditLogs        AuditLog[]
-
-  createdAt        DateTime         @default(now())
-
-  Tenant           Tenant[]
+  tenant           Tenant @relation(fields: [tenantUuid], references: [uuid])
   FraudEvent       FraudEvent[]
   Session          Session[]
+
+  createdAt        DateTime         @default(now())
+  @@index([createdAt])
 }
 
 model UserStore {
   userUuid         String
   storeUuid        String
-  role             Role  // MANAGER, ADMIN, STAFF
 
+  role             StoreRole         
   user             User             @relation(fields: [userUuid], references: [uuid])
   store            Store            @relation(fields: [storeUuid], references: [uuid])
 
@@ -187,9 +230,9 @@ model RefreshToken {
   revoked           Boolean       @default(false)
   createdAt         DateTime      @default(now())
 
-  user             User @relation(fields: [userUuid], references: [uuid])
+  user              User          @relation(fields: [userUuid], references: [uuid])
 
-  Session Session[]
+  Session           Session[]
 }
 
 model Session {
@@ -242,41 +285,145 @@ model AuditLog {
 }
 
 model Subscription {
-  uuid              String         @id @default(uuid())
-  tenantUuid        String         @unique
-  tenant            Tenant         @relation(fields: [tenantUuid], references: [uuid])
+  uuid               String         @id @default(uuid())
+  tenantUuid         String         @unique
+  tenant             Tenant         @relation(fields: [tenantUuid], references: [uuid])
+  planVersionUuid    String
 
-  status            SubscriptionStatus
-  price             Int             // cents
-  currency          String          @default("USD")
+  status             SubscriptionStatus
+  price              Int             // cents
+  currency           String          @default("USD")
 
-  planUuid          String
-  plan              Plan            @relation(fields: [planUuid], references: [uuid])
+  planUuid           String
+  plan               Plan            @relation(fields: [planUuid], references: [uuid])
+  planVersion        PlanVersion     @relation(fields: [planVersionUuid], references: [uuid])
 
-  stripeCustomerId  String?
-  stripeSubId       String?
+  stripeCustomerId   String?
+  stripeSubId        String?
 
-  startDate         DateTime
-  endDate           DateTime?
+  startDate          DateTime
+  endDate            DateTime?
 
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean          @default(false)
+
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  histories          SubscriptionHistory[]
+
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  Invoice Invoice[]
+  BillingSnapshot BillingSnapshot[]
+}
+
+model SubscriptionHistory {
+  uuid                String           @id @default(uuid())
+  subscriptionUuid    String
+  event               SubscriptionEvent
+  oldPlanVersionUuid  String?
+  newPlanVersionUuid  String?
+  occurredAt          DateTime         @default(now())
+
+  subscription        Subscription     @relation(fields: [subscriptionUuid], references: [uuid])
+}
+
+model BillingSnapshot {
+  uuid                String           @id @default(uuid())
+  tenantUuid          String
+  subscriptionUuid    String
+  planVersionUuid     String
+
+  month               String // "2025-01"
+  baseAmount          Int
+  addonsAmount        Int
+  totalAmount         Int
+
+  tenant              Tenant           @relation(fields: [tenantUuid], references: [uuid])
+  subscription        Subscription     @relation(fields: [subscriptionUuid], references: [uuid])
+  planVersion         PlanVersion      @relation(fields: [planVersionUuid], references: [uuid])
+
+  createdAt           DateTime         @default(now())
+
+  @@unique([tenantUuid, month])
 }
 
 model Plan {
-  uuid              String          @id @default(uuid())
-  name              String
-  price             Int
-  currency          String
-  isActive          Boolean         @default(true)
+  uuid               String            @id @default(uuid())
+  name               String
+  currency           String
+  isActive           Boolean           @default(true)
 
-  maxStaff          Int
-  maxBranches       Int
-  maxOrdersMonth    Int?
+  maxStaff           Int
+  maxBranches        Int
+  maxOrdersMonth     Int?
 
-  createdAt         DateTime        @default(now())
+  Subscription       Subscription[]
+  interval           BillingInterval
 
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  PlanPricingVariant PlanPricingVariant[]
+
+  PlanVersion PlanVersion[]
+}
+
+model PlanPricingVariant {
+  uuid              String           @id @default(uuid())
+  planUuid          String
+  priceMonthly      Int
+  label             String // "A", "B", "BlackFriday"
+  isActive          Boolean          @default(true)
+
+  plan              Plan             @relation(fields: [planUuid], references: [uuid])
+}
+
+model PlanVersion {
+  uuid              String           @id @default(uuid())
+  planUuid          String
+  version           Int
+  priceMonthly      Int
+  features          Json
+  createdAt         DateTime         @default(now())
+  isActive          Boolean          @default(true)
+
+  plan              Plan             @relation(fields: [planUuid], references: [uuid])
+
+  @@unique([planUuid, version])
   Subscription Subscription[]
+  BillingSnapshot BillingSnapshot[]
+}
+
+model Invoice {
+  uuid              String         @id @default(uuid())
+
+  tenantUuid        String
+  subscriptionUuid  String
+
+  amount            Int            
+  currency          String         @default("USD")
+
+  status            InvoiceStatus
+  billingPeriod     String         
+  dueAt             DateTime?
+  paidAt            DateTime?
+
+  provider          String?       
+  providerRef       String?        
+
+  tenant            Tenant         @relation(fields: [tenantUuid], references: [uuid])
+  subscription      Subscription   @relation(fields: [subscriptionUuid], references: [uuid])
+
+  createdAt         DateTime       @default(now())
+
+  @@index([tenantUuid])
+  @@index([subscriptionUuid])
+  @@index([status])
+  @@index([paidAt])
+  @@unique([tenantUuid, billingPeriod])
 }
 
 model Product {
@@ -319,9 +466,10 @@ model Order {
   store             Store           @relation(fields: [storeUuid], references: [uuid])
 
   createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@index([userUuid])
+  @@index([createdAt])  
 }
 
 model OrderItem {
@@ -377,4 +525,34 @@ model Webhook {
   eventType         String // SECURITY_ALERT, FRAUD, PAYMENT_FAILED
   secret            String
   active            Boolean         @default(true)
+}
+
+model AnalyticsSnapshot {
+  uuid              String          @id @default(uuid())
+  type              String   // "REVENUE", "COHORT", "CHURN"
+  period            String   // "2025-01", "2025-Q1"
+  data              Json
+  createdAt         DateTime        @default(now())
+
+  @@index([type, period])
+}
+
+model AddOn {
+  uuid              String          @id @default(uuid())
+  name              String
+  priceMonthly      Int
+  metric            String // "orders", "stores"
+
+  TenantAddOn TenantAddOn[]
+}
+
+model EnterpriseContract {
+  uuid              String @id @default(uuid())
+  tenantUuid        String
+  priceMonthly      Int
+  customLimits      Json
+  signedAt          DateTime
+  expiresAt         DateTime?
+
+  tenant            Tenant            @relation(fields: [tenantUuid], references: [uuid])
 }

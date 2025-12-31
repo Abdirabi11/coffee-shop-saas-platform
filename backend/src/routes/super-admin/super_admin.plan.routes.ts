@@ -1,13 +1,23 @@
 import express from "express";
-import {getPlans, createPlan, updatePlan, cancelPlan} from "../../controllers/super-admin/plans.controller.ts"
+import {
+    listPlans, createPlan, updatePlan, disablePlan, enablePlan, migratePlan, deactivatePlan
+} from "../../controllers/super-admin/plans.controller.ts"
 
 const router= express.Router();
 
+router.get("/plans", listPlans);
+router.post("/plans", createPlan);
+router.patch("/plans/:planUuid", updatePlan);
+router.patch("/plans/:planUuid", disablePlan);
+router.patch("/plans/:planUuid", enablePlan);
+router.delete("/plans/:planUuid", deactivatePlan);
 
 router.get("/plans", getPlans);
 router.post("/plans", createPlan);
 router.patch("/plans/:planUuid", updatePlan);
-router.delete("/plans/:planUuid", cancelPlan);
+router.delete("/plans/:planUuid", deactivatePlan); // NOT hard delete
+
+router.patch("/subscriptions/:tenantUuid/migrate", migratePlan);
 
 // Controller Responsibilities
 // Create pricing plans

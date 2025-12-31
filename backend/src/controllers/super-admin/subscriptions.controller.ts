@@ -2,6 +2,25 @@ import { SubscriptionStatus, TenantStatus } from "@prisma/client";
 import type { Request, Response } from "express"
 import prisma from "../../config/prisma.ts"
 
+export const subscribe= async (req: Request, res: Response)=>{
+    const variant = await prisma.planPricingVariant.findFirst({
+          where: {
+            planUuid,
+            isActive: true
+          },
+          orderBy: { createdAt: "desc" }
+        });
+        
+        await prisma.subscription.create({
+          data: {
+            tenantUuid,
+            planUuid,
+            priceMonthly: variant.priceMonthly,
+            pricingVariantUuid: variant.uuid,
+          }
+    });
+}
+
 export const overrideSubscription= async (req: Request, res: Response)=>{
     const {tenantUuid}= req.params;
     const [
@@ -83,3 +102,8 @@ export const updateSubs= async(req:Request, res:Response)=>{
 export const cancelSubs= async(req:Request, res:Response)=>{
 
 };
+
+function addMonths(arg0: Date, arg1: number) {
+    throw new Error("Function not implemented.");
+};
+
