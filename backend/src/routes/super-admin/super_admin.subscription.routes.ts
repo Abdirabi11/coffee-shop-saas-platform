@@ -1,8 +1,11 @@
 import express from "express";
 import { getSubs, getSingleSubs, updateSubs, cancelSubs, overrideSubscription, migrateSubscription
 } from "../../controllers/super-admin/subscriptions.controller.ts"
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router()
+
+router.use(authenticate, authorize("SUPER_ADMIN"));
 
 router.get("/subscriptions", getSubs);
 router.get("/subscriptions/:tenantUuid", getSingleSubs);

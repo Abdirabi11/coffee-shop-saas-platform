@@ -1,6 +1,9 @@
 import express from "express";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
+
+// router.use(authenticate, authorize("SUPER_ADMIN"));
 
 
 // router.post("/auth/login", );

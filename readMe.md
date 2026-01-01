@@ -1,6 +1,6 @@
 # ☕ Coffee Shop SaaS Platform
 
-A **production-ready, multi-tenant Coffee Shop SaaS platform** inspired by Starbucks-style systems.  
+A **production-oriented, multi-tenant Coffee Shop SaaS platform** inspired by Starbucks-style systems.  
 Designed to support **multiple coffee businesses (tenants)** with full role-based access, subscriptions, dashboards, and scalable backend architecture.
 
 ---
@@ -36,6 +36,27 @@ Designed to support **multiple coffee businesses (tenants)** with full role-base
 - Plan limit enforcement middleware
 
 ---
+
+## ❌ Non-Goals
+
+- Not a UI-focused repository
+- Frontend apps are separate
+- Not a marketplace (single-tenant per business)
+
+## 🛠️ Getting Started
+
+Requirements:
+- Node.js 18+
+- PostgreSQL
+- Redis (Upstash)
+
+Environment variables:
+- DATABASE_URL
+- JWT_SECRET
+- STRIPE_SECRET_KEY
+- REDIS_URL
+
+Run migrations and start the server.
 
 ## 🧱 Tech Stack
 

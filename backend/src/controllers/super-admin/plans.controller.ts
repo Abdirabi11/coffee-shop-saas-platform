@@ -9,28 +9,27 @@ import prisma from "../../config/prisma.ts"
 // Churn per plan
 
 export const listPlans= async (req:Request, res:Response)=>{
-    const plans= await prisma.plans.findMany({
+    const plans= await prisma.plan.findMany({
+        where: { isActive: true},
+        include: {
+            versions: {
+                orderBy: { version: "desc" },
+                take: 1, // latest version only
+            },
+        },
         orderBy: { price: "asc" },
     });
 
     if (!plans.isActive) {
         throw new Error("Plan is not available");
-    }
+    };
 
     res.json(plans);
 };
 
 export const createPlan= async (req:Request, res:Response)=>{
-    const {
-        name,
-        price,
-        interval,
-        maxStaff,
-        maxStores,
-        maxOrders,
-    } = req.body;
-
-    if (!name || !price || !interval || !maxStaff || !maxStores) {
+    const { name, description } = req.body;
+    if (!name || !description) {
         return res.status(400).json({ message: "Missing required fields" });
     };
 
@@ -40,14 +39,7 @@ export const createPlan= async (req:Request, res:Response)=>{
     };
 
     const plan= await prisma.plan.create({
-        data: {
-            name,
-            price,
-            interval,
-            maxStaff,
-            maxStores,
-            maxOrders,
-        },
+        data: { name, description, isActive: true },
     });
 
     await prisma.auditLog.create({
@@ -63,23 +55,46 @@ export const createPlan= async (req:Request, res:Response)=>{
     res.status(201).json(plan);
 };
 
+export const createPlanVersion= async(req: Request, res: Response)=>{
+    const {planUuid}= req.params;
+    const {price, interval, features}= req.body;
+
+    const plan= await prisma.plan.findUnique({ where: {uuid: planUuid} });
+    if (!plan || !plan.isActive) {
+        return res.status(404).json({ message: "Plan not found or inactive" });
+    };
+
+    const lastVersion= await prisma.planversion.findFirst({
+        where: {planUuid},
+        orderBy: { version: "desc" }
+    });
+
+    const version = (lastVersion?.version ?? 0) + 1;
+
+    const planVersion= await prisma.planversion.create({
+        data: {
+            planUuid,
+            version,
+            price,
+            billingInterval: interval,
+            features,
+        }
+    });
+    res.status(201).json(planVersion);
+};
+
 export const updatePlan= async (req:Request, res:Response)=>{
     const {planUuid}= req.params;
-    const updates= req.body;
+    const {name, description}= req.body;
     
-    const plan= await prisma.plan.findUnique({
-        where: {uuid: planUuid},
-    });
+    const plan= await prisma.plan.findUnique({where: {uuid: planUuid}});
     if (!plan) {
         return res.status(404).json({ message: "Plan not found" });
     };
 
     const updated = await prisma.plan.update({
         where: { uuid: planUuid },
-        data: {
-          ...updates,
-          updatedAt: new Date(),
-        },
+        data: { name, description },
     });
 
     await prisma.auditLog.create({
@@ -96,24 +111,8 @@ export const updatePlan= async (req:Request, res:Response)=>{
     res.json(updated);
 };
 
-export const createPlanVersion= async(planUuid: string, data: any)=>{
-    const lastVersion= await prisma.planversion.findFirst({
-        where: {planUuid},
-        orderBy: { version: "desc" }
-    });
-    return await prisma.planversion.create({
-        data: {
-            planUuid,
-            version: (lastVersion?.version ?? 0) + 1,
-            priceMonthly: data.priceMonthly,
-            features: data.features
-        }
-    })
-}
-
 export const disablePlan= async (req:Request, res:Response)=>{
-    const {planUuid}= req.params;
-
+    const {planUuid}= req.params;;
     const plan= await prisma.plan.findUnique({
         where: {uuid: planUuid}
     });
@@ -165,7 +164,7 @@ export const enablePlan= async (req:Request, res:Response)=>{
 
 export const migratePlan= async (req:Request, res:Response)=>{
     const {tenantUuid}= req.params;
-    const {newPlanUuid, effective}= req.body;
+    const {newPlanVersionUuid, effective}= req.body;
 
     const subscription= await prisma.subscription.findFirst({
         where: {tenantUuid, status: "ACTIVE"}
@@ -175,14 +174,25 @@ export const migratePlan= async (req:Request, res:Response)=>{
     };
 
     if(effective === "IMMEDIATE"){
-        await prisma.subscription.update({
-            where: {uuid: subscription.uuid},
-            data: {
-                planUuid: newPlanUuid,
-                currentPeriodStart: new Date(),
-                currentPeriodEnd: addMonths(new Date(), 1)
-            }
-        })
+        await prisma.$transaction([
+            await prisma.subscription.update({
+                where: {uuid: subscription.uuid},
+                data: {
+                    planUuid: newPlanVersionUuid,
+                    currentPeriodStart: new Date(),
+                    currentPeriodEnd: addMonths(new Date(), 1)
+                }
+            }),
+
+            await prisma.subscriptionHistory.create({
+                data: {
+                  subscriptionUuid: subscription.uuid,
+                  event: "MIGRATED",
+                  oldPlanVersionUuid: subscription.planVersionUuid,
+                  newPlanVersionUuid,
+                },
+            }),
+        ])
     }else{
         await prisma.subscription.update({
             where: { uuid: subscription.uuid },
@@ -190,44 +200,16 @@ export const migratePlan= async (req:Request, res:Response)=>{
               cancelAtPeriodEnd: true
             }
         });
-
-        await prisma.subscription.create({
-            data: {
-                tenantUuid,
-                planUuid: newPlanUuid,
-                status: "ACTIVE",
-                currentPeriodStart: subscription.currentPeriodEnd,
-                currentPeriodEnd: addMonths(subscription.currentPeriodEnd, 1)
-            }
-        });
-
-
-        await prisma.$transaction([
-            prisma.subscription.update({
-              where: { uuid: subscription.uuid },
-              data: {
-                planVersionUuid: newPlanUuid
-              }
-            }),
-          
-            prisma.subscriptionHistory.create({
-              data: {
-                subscriptionUuid: subscription.uuid,
-                event: "MIGRATED",
-                oldPlanVersionUuid: subscription.planVersionUuid,
-                newPlanUuid
-              }
-            })
-        ]);
     };
     res.json({ message: "Plan migration scheduled" });
-}
+};
 
 export const calculateMonthlyBill= async (tenantUuid: string)=>{
     const subscription= await prisma.subscription.findFirst({
         where: {tenantUuid, status: "ACTIVE"},
-        include: {plan: true}
+        include: {planVersion: true}
     });
+    if(!subscription) throw new Error("No active subscription");
 
     const addOns= await prisma.tenantAddOn.findMany({
         where: { tenantUuid },
@@ -240,23 +222,21 @@ export const calculateMonthlyBill= async (tenantUuid: string)=>{
     );
 
     return {
-        basePrice: subscription.plan.priceMonthly,
-        addOnsTotal,
-        total: subscription.plan.priceMonthly + addOnsTotal
+        base: subscription.planVersion.price,
+        addOns: addOnsTotal,
+        total: subscription.planVersion.price + addOnsTotal
     };
 };
 
 export const resolveTenantLimits= async (tenantUuid: string)=>{
-    const enterprise= await prisma.enterpriseContract..findFirst({
+    const enterprise= await prisma.enterpriseContract.findFirst({
         where: {tenantUuid}
     });
-    if (enterprise) {
-        return enterprise.customLimits;
-    };
+    if (enterprise) return enterprise.customLimits;
 
     const subscription= await prisma.subscription.findFirst({
         where: { tenantUuid, status: "ACTIVE" },
-        include: { plan: true }
+        include: { planVersion: true }
     });
-    return subscription.plan.features;
+    return subscription.planVersion.features;
 };

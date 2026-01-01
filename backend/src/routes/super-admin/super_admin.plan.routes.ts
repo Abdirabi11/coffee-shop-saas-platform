@@ -1,23 +1,23 @@
 import express from "express";
 import {
-    listPlans, createPlan, updatePlan, disablePlan, enablePlan, migratePlan, deactivatePlan
+    listPlans, createPlan, updatePlan, disablePlan, enablePlan, migratePlan, deactivatePlan, createPlanVersion,
+    calculateMonthlyBill, resolveTenantLimits
 } from "../../controllers/super-admin/plans.controller.ts"
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
 
+router.use(authenticate, authorize("SUPER_ADMIN"));
+
 router.get("/plans", listPlans);
-router.post("/plans", createPlan);
+router.post("/plans", createPlan); 
+router.post("/plans/plan-version/:planUuid", createPlanVersion);
 router.patch("/plans/:planUuid", updatePlan);
-router.patch("/plans/:planUuid", disablePlan);
-router.patch("/plans/:planUuid", enablePlan);
-router.delete("/plans/:planUuid", deactivatePlan);
-
-router.get("/plans", getPlans);
-router.post("/plans", createPlan);
-router.patch("/plans/:planUuid", updatePlan);
-router.delete("/plans/:planUuid", deactivatePlan); // NOT hard delete
-
+router.patch("/plans/disable/:planUuid", disablePlan);
+router.patch("/plans/enable/:planUuid", enablePlan);
 router.patch("/subscriptions/:tenantUuid/migrate", migratePlan);
+router.get("/plans/calculate", calculateMonthlyBill);
+router.get("/plans/resolve", resolveTenantLimits);
 
 // Controller Responsibilities
 // Create pricing plans

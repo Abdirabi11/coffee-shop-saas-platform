@@ -547,7 +547,7 @@ model AddOn {
 }
 
 model EnterpriseContract {
-  uuid              String @id @default(uuid())
+  uuid              String           @id @default(uuid())
   tenantUuid        String
   priceMonthly      Int
   customLimits      Json
@@ -555,4 +555,42 @@ model EnterpriseContract {
   expiresAt         DateTime?
 
   tenant            Tenant            @relation(fields: [tenantUuid], references: [uuid])
+}
+
+model PlatformSetting {
+  key               String            @id
+  value             Json
+  description       String?
+  updatedBy         String?
+  updatedAt         DateTime          @updatedAt
+}
+
+model EmailTemplate {
+  uuid              String             @id @default(uuid())
+  key               String             @unique 
+  subject           String
+  bodyHtml          String
+  bodyText          String?
+  isActive          Boolean            @default(true)
+
+  updatedAt         DateTime           @updatedAt
+}
+
+model FeatureFlag {
+  key               String             @id
+  enabled           Boolean            @default(false)
+  description       String?
+  rollout           Int?    
+  updatedAt         DateTime           @updatedAt
+}
+
+model BrandingSetting {
+  uuid              String             @id @default(uuid())
+  logoUrl           String?
+  primaryColor      String?
+  secondaryColor    String?
+  appName           String
+  supportEmail      String?
+
+  updatedAt         DateTime           @updatedAt
 }
