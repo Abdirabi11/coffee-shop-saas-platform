@@ -1,6 +1,6 @@
 import prisma from "../config/prisma.ts"
 
-export const evaluateAutoBan= async (userUuid: String, storeUuid: String)=>{
+export const evaluateAutoBan= async (userUuid: String, storeUuid?: String)=>{
     const events= await prisma.fraudEvent.findMany({
         where: {userUuid, storeUuid},
         orderBy: {createdAt: "desc"},

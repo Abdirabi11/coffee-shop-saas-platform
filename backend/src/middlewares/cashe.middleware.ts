@@ -12,7 +12,7 @@ export const cache=
 
             const originalJson= res.json.bind(res);
             res.json = (data: any) => {
-                redisClient.set(key, data, { ex: ttlSeconds });
+                redisClient.set(key, JSON.stringify(data), { ex: ttlSeconds });
                 return originalJson(data);
             };
             

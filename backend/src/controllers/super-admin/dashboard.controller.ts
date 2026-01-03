@@ -1,6 +1,6 @@
-import type { Request, Response, NextFunction } from "express"
-import { stringify } from "querystring";
+import type { Request, Response } from "express"
 import prisma from "../../config/prisma.ts"
+import { AuthRequest } from "../../types/auth.types.ts";
 
 //UI-ready KPIs & cards
 export const dashboardOverview= async (req:Request, res:Response)=>{
@@ -288,4 +288,78 @@ export const risk= async (req: Request, res: Response)=>{
         console.error("Risk dashboard error:", err);
         return res.status(500).json({ message: "Failed to load risk dashboard" });
     }
+};
+
+export const fraudOverview= async (req: Request, res: Response)=>{
+    const storeUuid= req.user!.storeUuid;
+
+    const [total, high, medium, low] = await Promise.all([
+        prisma.fraudEvent.count({ where: { storeUuid } }),
+        prisma.fraudEvent.count({ where: { storeUuid, severity: "HIGH" } }),
+        prisma.fraudEvent.count({ where: { storeUuid, severity: "MEDIUM" } }),
+        prisma.fraudEvent.count({ where: { storeUuid, severity: "LOW" } }),
+    ]);
+    
+    res.json({
+    totalEvents: total,
+    severityBreakdown: { high, medium, low },
+    });
+};
+
+export const fraudEvents = async (req: AuthRequest, res: Response) => {
+    const storeUuid = req.user!.storeUuid;
+  
+    const events = await prisma.fraudEvent.findMany({
+      where: { storeUuid },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        user: { select: { uuid: true, email: true, phoneNumber: true } },
+      },
+    });
+  
+    res.json(events);
+};
+
+export const highRiskUsers= async (req: AuthRequest, res: Response)=>{
+    const storeUuid = req.user!.storeUuid;
+
+    const events = await prisma.fraudEvent.findMany({
+      where: { storeUuid },
+      select: { userUuid: true, severity: true },
+    });
+
+    const scoreMap = new Map<string, number>();
+
+    for (const e of events) {
+      const score =
+        e.severity === "LOW" ? 1 :
+        e.severity === "MEDIUM" ? 3 :
+        e.severity === "HIGH" ? 6 : 10;
+  
+      scoreMap.set(e.userUuid, (scoreMap.get(e.userUuid) || 0) + score);
+    }
+  
+    const riskyUsers = [...scoreMap.entries()]
+      .filter(([_, score]) => score >= 10)
+      .map(([userUuid, score]) => ({ userUuid, score }));
+  
+    res.json(riskyUsers);
+};
+
+export const suspiciousSessions = async (req: AuthRequest, res: Response) => {
+    const storeUuid = req.user!.storeUuid;
+  
+    const sessions = await prisma.session.findMany({
+      where: {
+        storeUuid,
+        revoked: false,
+        createdAt: {
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  
+    res.json(sessions);
 };

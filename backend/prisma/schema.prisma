@@ -522,15 +522,15 @@ model Webhook {
   uuid              String          @id @default(uuid())
   storeUuid         String
   url               String
-  eventType         String // SECURITY_ALERT, FRAUD, PAYMENT_FAILED
+  eventType         String 
   secret            String
   active            Boolean         @default(true)
 }
 
 model AnalyticsSnapshot {
   uuid              String          @id @default(uuid())
-  type              String   // "REVENUE", "COHORT", "CHURN"
-  period            String   // "2025-01", "2025-Q1"
+  type              String   
+  period            String   
   data              Json
   createdAt         DateTime        @default(now())
 
@@ -541,7 +541,7 @@ model AddOn {
   uuid              String          @id @default(uuid())
   name              String
   priceMonthly      Int
-  metric            String // "orders", "stores"
+  metric            String 
 
   TenantAddOn TenantAddOn[]
 }

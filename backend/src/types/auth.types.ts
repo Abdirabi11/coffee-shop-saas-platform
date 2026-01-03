@@ -9,10 +9,27 @@ export interface JwtPayload {
 
 export interface AccessTokenPayload {
   userUuid: string;
-  role: string;
-  storeUuid: string; 
+  role: StoreRole | "SUPER_ADMIN";
+  tenantUuid?: string;
+  storeUuid?: string;
+  tokenVersion: number; 
 };
 
 export interface RefreshTokenPayload {
   userUuid: string;
 };
+
+export interface RefreshTokenPayload {
+  userUuid: string;
+  tokenVersion: number;
+};
+
+export interface AuthRequest extends Request {
+  user?: {
+    userUuid: string;
+    role: string;
+    tenantUuid?: string;
+    storeUuid?: string;
+    tokenVersion: number;
+  };
+}

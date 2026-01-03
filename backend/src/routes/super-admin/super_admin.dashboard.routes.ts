@@ -23,6 +23,14 @@ router.get("/dashboard/subscription-breakdown", cache("sa:dashboard:subscription
 router.get("/dashboard/risk", risk);
 
 
+//FRAUD DASHBOARD: 
+
+// GET /admin/fraud/overview
+// GET /admin/fraud/events
+// GET /admin/fraud/users/high-risk
+// GET /admin/fraud/sessions/suspicious
+
+
 // Revenue Snapshot (quick business view)
 // GET /super-admin/dashboard/revenue-snapshot
 // Shows, Today, This month, MRR, ARPU
