@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 export const hashOtp = async (otp: string) => {
   return bcrypt.hash(otp, 10);

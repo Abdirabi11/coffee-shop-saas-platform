@@ -1,5 +1,5 @@
-import prisma from "../utils/prisma";
-import { Request } from "express";
+import prisma from "../config/prisma.ts"
+import type { Request, Response, NextFunction } from "express";
 
 export const createUserSession = async (
   userUuid: string,

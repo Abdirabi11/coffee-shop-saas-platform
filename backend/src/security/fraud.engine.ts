@@ -16,9 +16,13 @@ export const evaluateAutoBan= async (userUuid: String, storeUuid?: String)=>{
     }, 0);
 
     if(score >=20 ){
-        await prisma.user.update({
-            where: {uuid: userUuid},
+        await prisma.userStore.update({
+            where: {
+                userUuid_storeUuid: { userUuid, storeUuid },
+            },
             data: {
+                blockedAt: new Date(),
+                blockReason: "Automatic fraud protection",
                 isBanned: true,
                 bannedAt: new Date(),
                 banReason: "Automatic ban due to repeated suspicious activity",

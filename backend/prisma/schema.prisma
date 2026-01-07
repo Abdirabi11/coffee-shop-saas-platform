@@ -83,6 +83,7 @@ enum BillingInterval {
 }
 
 enum InvoiceStatus {
+  PENDING
   DRAFT
   OPEN
   PAID
@@ -331,23 +332,70 @@ model SubscriptionHistory {
 }
 
 model BillingSnapshot {
-  uuid                String           @id @default(uuid())
+  uuid                String     @id @default(uuid())
+
   tenantUuid          String
   subscriptionUuid    String
   planVersionUuid     String
 
-  month               String // "2025-01"
+  planName            String
+  billingInterval     BillingInterval
+  billingMonth        DateTime
+
   baseAmount          Int
-  addonsAmount        Int
+  addonsSnapshot      Json?
   totalAmount         Int
+  currency            String        @default("USD")
 
-  tenant              Tenant           @relation(fields: [tenantUuid], references: [uuid])
-  subscription        Subscription     @relation(fields: [subscriptionUuid], references: [uuid])
-  planVersion         PlanVersion      @relation(fields: [planVersionUuid], references: [uuid])
+  periodStart         DateTime
+  periodEnd           DateTime
 
-  createdAt           DateTime         @default(now())
+  tenant              Tenant
+  subscription        Subscription
+  planVersion         PlanVersion
 
-  @@unique([tenantUuid, month])
+  invoices            Invoice[]
+
+  createdAt           DateTime      @default(now())
+
+  @@unique([tenantUuid, billingMonth])
+}
+
+model Invoice {
+  uuid                 String       @id @default(uuid())
+
+  tenantUuid           String
+  subscriptionUuid     String
+  billingSnapshotUuid  String
+
+  invoiceNumber        String        @unique
+
+  subtotal             Int
+  tax                  Int
+  total                Int
+  currency             String         @default("USD")
+
+  status               InvoiceStatus
+  dueAt                DateTime?
+  paidAt               DateTime?
+
+  pdfUrl               String?
+  provider             String?
+  providerRef          String?
+
+  locked               Boolean         @default(false)
+
+  tenant               Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  subscription         Subscription    @relation(fields: [subscriptionUuid], references: [uuid])
+
+  billingSnapshot      BillingSnapshot @relation(fields: [billingSnapshotUuid], references: [uuid])
+
+  issuedAt             DateTime        @default(now())
+  createdAt            DateTime        @default(now())
+
+  @@index([tenantUuid])
+  @@index([subscriptionUuid])
+  @@index([billingSnapshotUuid])
 }
 
 model Plan {
@@ -363,12 +411,11 @@ model Plan {
   Subscription       Subscription[]
   interval           BillingInterval
 
+  PlanPricingVariant PlanPricingVariant[]
+  PlanVersion        PlanVersion[]
+
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
-
-  PlanPricingVariant PlanPricingVariant[]
-
-  PlanVersion PlanVersion[]
 }
 
 model PlanPricingVariant {
@@ -395,35 +442,6 @@ model PlanVersion {
   @@unique([planUuid, version])
   Subscription Subscription[]
   BillingSnapshot BillingSnapshot[]
-}
-
-model Invoice {
-  uuid              String         @id @default(uuid())
-
-  tenantUuid        String
-  subscriptionUuid  String
-
-  amount            Int            
-  currency          String         @default("USD")
-
-  status            InvoiceStatus
-  billingPeriod     String         
-  dueAt             DateTime?
-  paidAt            DateTime?
-
-  provider          String?       
-  providerRef       String?        
-
-  tenant            Tenant         @relation(fields: [tenantUuid], references: [uuid])
-  subscription      Subscription   @relation(fields: [subscriptionUuid], references: [uuid])
-
-  createdAt         DateTime       @default(now())
-
-  @@index([tenantUuid])
-  @@index([subscriptionUuid])
-  @@index([status])
-  @@index([paidAt])
-  @@unique([tenantUuid, billingPeriod])
 }
 
 model Product {

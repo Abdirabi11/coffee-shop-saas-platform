@@ -24,6 +24,7 @@
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.3",
     "node-cron": "^4.2.1",
+    "pdfkit": "^0.17.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

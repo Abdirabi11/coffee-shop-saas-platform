@@ -1,5 +1,6 @@
-import prisma from "../utils/prisma";
-import { evaluateAutoBan, notifyAdmins } from "../security";
+import prisma from "../config/prisma.ts"
+import { evaluateAutoBan } from "../security/fraud.engine.ts"
+import { notifyAdmins } from "../utils/adminAlert.ts";
 
 export const recordOtpFraud = async ({
   userUuid,

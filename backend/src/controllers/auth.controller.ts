@@ -285,7 +285,7 @@ export const selectStore = async (req: AuthRequest, res: Response) => {
         req.user!.role
       );
   
-      res.json({ accessToken });
+      res.status(200).json({ accessToken });
     } catch (err: any) {
       if (err.message === "Not a member of this store") {
         return res.status(403).json({ message: err.message });

@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.ts"
 import dayjs from "dayjs";
+import { createMonthlyBillingSnapshot } from "../services/billingSnapshot.service.ts";
 
 
 export async function generateBillingSnapshots(){
@@ -24,5 +25,16 @@ export async function generateBillingSnapshots(){
                 totalAmount: sub.planVersion.priceMonthly + addonsAmount
             }
         })
+    }
+};
+
+export const runMonthlyBilling = async () => {
+    const tenants = await prisma.tenant.findMany({
+      where: { isActive: true },
+      select: { uuid: true },
+    });
+  
+    for (const tenant of tenants) {
+      await createMonthlyBillingSnapshot(tenant.uuid);
     }
 };

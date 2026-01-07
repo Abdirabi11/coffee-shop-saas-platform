@@ -1,9 +1,9 @@
-import { Request } from "express";
-import prisma from "../utils/prisma.ts";
+import type { Request, Response, NextFunction } from "express";
+import prisma from "../config/prisma.ts"
 import { hashOtp, compareOtp, generateOtp, otpExpiry } from "./otp.service.ts";
 import { recordOtpFraud } from "./fraud.service.ts";
 import { createUserSession } from "./session.service.ts";
-import { signAccessToken, signRefreshToken, signJwt } from "./token.service.ts";
+import { signAccessToken, signRefreshToken } from "../utils/jwt.ts"
 import { evaluateAutoBan } from "../security/fraud.engine.ts";
 import { analyzeSessionRisk } from "./security/analyzeSessionRisk.service.ts";
 
@@ -299,11 +299,13 @@ export const selectStoreService = async (
       throw new Error("Not a member of this store");
     }
   
-    return signJwt({
+    const accessToken= signAccessToken({
       userUuid,
       role,
       storeUuid,
     });
+
+    return accessToken;
 };
   
   

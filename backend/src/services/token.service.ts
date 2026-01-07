@@ -1,5 +1,5 @@
-import prisma from "../utils/prisma.ts";
-import { verifyRefreshToken, signAccessToken, signRefreshToken } from "./token.service.ts";
+import prisma from "../config/prisma.ts"
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt.ts"
 import { createUserSession } from "./session.service.ts";
 
 export const rotateRefreshTokenService = async (token: string, req: any) => {
