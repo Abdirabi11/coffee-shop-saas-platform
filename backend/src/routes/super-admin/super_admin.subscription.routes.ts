@@ -1,5 +1,5 @@
 import express from "express";
-import { getSubs, getSingleSubs, updateSubs, cancelSubs, overrideSubscription, migrateSubscription
+import { subscribe, getSubs, getSingleSubs, updateSubs, cancelSubs, overrideSubscription, migrateSubscription
 } from "../../controllers/super-admin/subscriptions.controller.ts"
 import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
@@ -7,12 +7,14 @@ const router= express.Router()
 
 router.use(authenticate, authorize("SUPER_ADMIN"));
 
+router.post("/subscriptions/:tenantUuid", subscribe);
 router.get("/subscriptions", getSubs);
 router.get("/subscriptions/:tenantUuid", getSingleSubs);
 router.patch("/subscriptions/:tenantUuid", updateSubs);
 router.post("/subscriptions/:tenantUuid/cancel", cancelSubs);
-
 router.patch("/subscriptions/:tenantUuid/override", overrideSubscription);
+
+
 router.patch("/subscriptions/:tenantUuid/migrate", migrateSubscription);
 
 

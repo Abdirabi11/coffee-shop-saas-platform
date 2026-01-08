@@ -1,9 +1,12 @@
 import prisma from "../config/prisma.ts"
 import { SubscriptionStatus, TenantStatus } from "@prisma/client";
 import { auditLogService } from "./auditLog.service.ts"
+import { invalidateCache } from "../utils/cache.ts";
+import { invalidateAdminDashboards, invalidateTenantCaches } from "../cache/cache.js";
 
 
 export class SuperAdminSubscriptionService {
+
     static async subscriptionTenant({
         tenantUuid,
         planUuid,
@@ -26,8 +29,8 @@ export class SuperAdminSubscriptionService {
             throw new Error("No active pricing variant found");
         };
 
-        return prisma.$transaction(async (tx)=>{
-            const subscription= await tx.subscription.upsert({
+        const subscription = prisma.$transaction(async (tx)=>{
+            const sub= await tx.subscription.upsert({
                 where: {tenantUuid},
                 update:{
                     planUuid,
@@ -58,9 +61,12 @@ export class SuperAdminSubscriptionService {
                 ipAddress,
                 storeUuid: tenantUuid,
             });
-
-            return subscription;
+            return sub;
         });
+        await invalidateAdminDashboards();
+        await invalidateTenantCaches(tenantUuid);
+    
+        return subscription; 
     }
 
     static async overrideSubscription({
@@ -80,7 +86,7 @@ export class SuperAdminSubscriptionService {
         actorUuid: string;
         ipAddress?: string;
     }) {
-        return prisma.$transaction(async (tx) => {
+        const updated= prisma.$transaction(async (tx) => {
             const subscription= await tx.subscription.findUnique({
                 where: {tenantUuid}
             });
@@ -88,7 +94,7 @@ export class SuperAdminSubscriptionService {
                 throw new Error("Subscription not found");
             };
 
-            const updated= await prisma.subscription.update({
+            const sub= await prisma.subscription.update({
                 where: {tenantUuid},
                 data: {
                     status,
@@ -120,8 +126,12 @@ export class SuperAdminSubscriptionService {
                 storeUuid: tenantUuid,
             });
 
-            return updated;
+            return sub;
         });
+        await invalidateAdminDashboards();
+        await invalidateTenantCaches(tenantUuid);
+          
+        return updated;
     }
 
     static async cancelSubscription ({
@@ -161,4 +171,4 @@ export class SuperAdminSubscriptionService {
             },
         });
     }
-}
+};

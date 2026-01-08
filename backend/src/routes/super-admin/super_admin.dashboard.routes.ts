@@ -1,26 +1,98 @@
 import express from "express";
 import { 
     DashboardOverview, 
-    revenueSnap, 
+    revenueSnapshot, 
     tenantDashboard,
     tenantHealth,
     subscriptionBreakdown,
-    risk
+    platformHealth,
+    riskOverview
 } from "../../controllers/super-admin/dashboard.controller.ts";
 import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 import { cache } from "../../middlewares/cashe.middleware.ts";
+import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
 
 
 const router= express.Router();
 
-router.use(authenticate, authorize("SUPER_ADMIN"));
+router.use(authenticate);
+router.use(authorize("SUPER_ADMIN"));
 
-router.get("/dashboard/overview", cache("sa:dashboard:overview", 60), DashboardOverview);
-router.get("/dashboard/revenue-snapshot", revenueSnap);
-router.get("/dashboard/tenants", cache("sa:dashboard:tenants", 120), tenantDashboard);
-router.get("/dashboard/tenant-health",cache("sa:dashboard:tenant-health", 120), tenantHealth);
-router.get("/dashboard/subscription-breakdown", cache("sa:dashboard:subscriptions", 300), subscriptionBreakdown);
-router.get("/dashboard/risk", risk);
+router.get(
+  "/dashboard",
+  rateLimit({
+    keyPrefix: "super-dashboard",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getDashboard
+);
+
+router.get(
+  "/dashboard/health",
+  rateLimit({
+    keyPrefix: "super-dashboard-health",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getHealth
+);
+
+router.get(
+  "/dashboard/revenue-snapshot",
+  rateLimit({
+    keyPrefix: "super-dashboard-revenue",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getRevenueSnapshot
+);
+
+router.get(
+  "/dashboard/tenants",
+  rateLimit({
+    keyPrefix: "super-dashboard-tenants",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getTenants
+);
+
+router.get(
+  "/dashboard/tenant-health",
+  rateLimit({
+    keyPrefix: "super-dashboard-tenant-health",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getTenantHealth
+);
+
+router.get(
+  "/dashboard/subscription-breakdown",
+  rateLimit({
+    keyPrefix: "super-dashboard-subscriptions",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getSubscriptionBreakdown
+);
+
+router.get(
+  "/dashboard/risk-overview",
+  rateLimit({
+    keyPrefix: "super-dashboard-risk",
+    limit: 30,
+    windowSeconds: 60,
+  }),
+  superDashboardController.getRiskOverview
+);
+
+
+// fraudOverview
+// fraudEvents
+// highRiskUsers
+// suspiciousSessions
 
 
 //FRAUD DASHBOARD: 

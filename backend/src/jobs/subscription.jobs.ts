@@ -1,7 +1,6 @@
 import prisma from "../config/prisma.ts"
 import dayjs from "dayjs";
 
-
 export async function suspendOverdueTenants(){
     console.log("🚫 Checking overdue tenants");
 

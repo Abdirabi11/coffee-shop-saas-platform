@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { monthlyRevenueAnalytics } from "../../jobs/analytics.jobs.ts";
 import { generateMonthlyInvoices, markOverdueInvoices } from "../../jobs/invoice.jobs.ts";
 import { suspendOverdueTenants } from "../../jobs/subscription.jobs.ts";
+import { prewarmDashboards } from "../jobs/dashboardPrewarm.job.ts";
 import { runChurnAnalytics } from "./analytics.jobs.ts";
 import { generateBillingSnapshots, runArpuLtv, runCohortRetention, runTenantCohortGrowth } from "./billing.jobs.ts";
 
@@ -25,4 +26,6 @@ export function startScheduler() {
         await runTenantCohortGrowth();
         await runArpuLtv();
     });
+
+    cron.schedule("*/10 * * * *", prewarmDashboards);
 }

@@ -1,15 +1,12 @@
+import { withCache } from "../cache/cache.ts";
 import prisma from "../config/prisma.ts"
+import { DomainEvent } from "../events/event.types.ts";
+import { eventBus } from "../events/eventBus.ts";
 
 export const createMonthlyBillingSnapshot= async (tenantUuid: string)=>{
     const subscription= await prisma.subscription.findFirst({
-        where: {
-            tenantUuid, 
-            status: "ACTIVE"
-        },
-        include: {
-            planVersion: {
-                include: {plan: true}
-            }
+        where: {tenantUuid, status: "ACTIVE"},
+        include: { planVersion: { include: {plan: true} }
         }
     });
     if (!subscription) {
@@ -20,11 +17,7 @@ export const createMonthlyBillingSnapshot= async (tenantUuid: string)=>{
     const periodEnd = subscription.currentPeriodEnd;
 
     const existing= await prisma.billingSnapshot.findFirst({
-        where: {
-            tenantUuid,
-            periodStart,
-            periodEnd,
-        }
+        where: { tenantUuid, periodStart, periodEnd, }
     });
     if(existing) return existing;
 
@@ -41,7 +34,7 @@ export const createMonthlyBillingSnapshot= async (tenantUuid: string)=>{
     const basePrice = subscription.planVersion.price;
     const total = basePrice + addOnsTotal;
 
-    return prisma.billingSnapshot.create({
+    const snapshot= await prisma.billingSnapshot.create({
         data: {
             tenantUuid, 
             subscriptionUuid: subscription.uuid,
@@ -57,4 +50,28 @@ export const createMonthlyBillingSnapshot= async (tenantUuid: string)=>{
             planVersion: subscription.planVersion.version,
         }
     });
+
+    await eventBus.emit(DomainEvent.BILLING_SNAPSHOT_CREATED, {
+        tenantUuid,
+        billingSnapshotUuid: snapshot.uuid,
+    });
+    
+    return snapshot;
 };
+
+export async function getBillingSnapshots(
+    tenantUuid: string,
+    page = 1,
+    limit = 12
+){
+    const key= `tenant:${tenantUuid}:billing-snapshots:p${page}:l${limit}`;
+
+    return withCache(key, 120, async () => {
+        return prisma.billingSnapshot.findMany({
+          where: { tenantUuid },
+          orderBy: { periodStart: "desc" },
+          skip: (page - 1) * limit,
+          take: limit,
+        });
+    });
+}

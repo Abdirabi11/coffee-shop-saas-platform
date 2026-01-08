@@ -1,6 +1,4 @@
-import { SubscriptionStatus, TenantStatus } from "@prisma/client";
 import type { Request, Response } from "express"
-import prisma from "../../config/prisma.ts"
 import { SuperAdminSubscriptionService } from "../../services/subscription.service.ts";
 
 
@@ -53,6 +51,10 @@ export const getSingleSubs= async(req:Request, res:Response)=>{
     };
 
     res.json(sub);
+};
+
+export const updateSubs= async (req:Request, res:Response)=>{
+
 };
 
 export const cancelSubs= async(req:Request, res:Response)=>{

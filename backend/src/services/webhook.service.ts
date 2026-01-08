@@ -7,9 +7,8 @@ function signPayload(payload: any, secret: string): string {
       .createHmac("sha256", secret)
       .update(JSON.stringify(payload))
       .digest("hex");
-  }
+};
   
-
 export const dispatchWebhook= async (
     storeUuid: string,
     eventType: string,

@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.ts"
 import dayjs from "dayjs";
 import { createMonthlyBillingSnapshot } from "../services/billingSnapshot.service.ts";
+import { invalidateAdminDashboards } from "../utils/cache.ts";
 
 
 export async function generateBillingSnapshots(){
@@ -36,5 +37,7 @@ export const runMonthlyBilling = async () => {
   
     for (const tenant of tenants) {
       await createMonthlyBillingSnapshot(tenant.uuid);
-    }
+    };
+
+    await invalidateAdminDashboards();
 };

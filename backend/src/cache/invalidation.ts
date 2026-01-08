@@ -1,0 +1,9 @@
+import { invalidateCache } from "./cache.ts";
+
+export const invalidateAdminDashboards = async () => {
+  await invalidateCache("dashboard:admin:*");
+};
+
+export const invalidateTenantCaches = async (tenantUuid: string) => {
+  await invalidateCache(`dashboard:tenant:${tenantUuid}:*`);
+};

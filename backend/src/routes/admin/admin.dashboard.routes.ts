@@ -1,4 +1,5 @@
 import express from "express"
+import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
 import { 
     activeOrders, 
     failedPayments, 
@@ -12,13 +13,27 @@ import { adminLimiter } from "../utils/rateLimit.ts";
 
 const router= express.Router();
 
+router.use(authenticate);
+router.use(authorize("ADMIN"));
 router.use(adminLimiter);
 router.use(adminIpAllowlist);
 
-router.get("/active-orders", authenticate, authorize("ADMIN"), activeOrders); 
-router.get("/revenue", authenticate, authorize("MANAGER", "ADMIN"), getRevenue);
-router.get("/peak-hours", authenticate, authorize("ADMIN"), peakHours); 
-router.get("/failed-Payments", authenticate, authorize("ADMIN"), failedPayments);
+router.use(
+  authenticate,
+  authorize("ADMIN"),
+  rateLimit({
+    keyPrefix: "tenant-admin",
+    limit: 60,
+    windowSeconds: 60,
+  })
+);
+
+router.get("/dashboard", dashboardController.getDashboard);
+router.get("/active-orders", activeOrders);
+router.get("/revenue", authorize("MANAGER", "ADMIN"), getRevenue);
+router.get("/peak-hours", peakHours);
+router.get("/failed-payments", failedPayments);
+
 
 
 export default router;

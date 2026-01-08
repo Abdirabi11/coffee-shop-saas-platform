@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import "@/events/listeners/cache.listener";
 import superRoutes from "./routes/super-admin/super_admin.auth.routes.ts"
 import adminRoutes from "./routes/admin/admin.routes.ts"
 import authRoutes from "./routes/auth.routes.ts"

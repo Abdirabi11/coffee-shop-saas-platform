@@ -1,6 +1,19 @@
 import type { Request, Response } from "express"
 import prisma from "../config/prisma.ts"
 
+export const getTenantDashboard = async (req: AuthRequest, res: Response) => {
+    const tenantUuid = req.user!.tenantUuid;
+    const data = await TenantDashboardService.getDashboard(tenantUuid);
+    res.json({ success: true, data });
+  };
+
+export const getDashboard = async (req: AuthRequest, res: Response) => {
+    const tenantUuid = req.user!.tenantUuid;
+  
+    const data = await DashboardService.getTenantDashboard(tenantUuid);
+  
+    res.json({ success: true, data });
+};
 
 export const activeOrders= async (req: Request, res: Response)=>{
     try {
