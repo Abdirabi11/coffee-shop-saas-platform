@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.ts"
-import { validatePlanDowngrade } from "./planDowngrade.service.js";
+import { validatePlanDowngrade } from "../planDowngrade.service.js";
 
 
 export const listActivePlans= async ()=>{

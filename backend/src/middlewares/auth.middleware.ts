@@ -1,9 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import { canAccess } from "../utils/role.ts";
 import prisma from "../config/prisma.ts"
 import { verifyAccessToken } from "../utils/jwt.ts";
-
 
 export interface AuthRequest extends Request {
     user?: {

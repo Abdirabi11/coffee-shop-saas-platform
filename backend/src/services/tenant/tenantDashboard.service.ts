@@ -2,12 +2,12 @@ import { withCache } from "../cache/cache.ts";
 import { getCacheVersion } from "../cache/cacheVersion.ts";
 import prisma from "../config/prisma.ts"
 
-export class DashboardService {
+export class TenantDashboardService {
     static async getDashboard(tenantUuid: string){
         const version = await getCacheVersion(`tenant:${tenantUuid}:dashboard`);
         const cacheKey= `tenant:${tenantUuid}:dashboard:v${version}`;
         
-        return withCache(cacheKey, 60, async ()=>{
+        return withCache(cacheKey, 120, async ()=>{
             const [
                 activeOrders,
                 revenue,
@@ -16,10 +16,7 @@ export class DashboardService {
             ]= await Promise.all([
                 prisma.order.count({where: {tenantUuid, status: "IN_PROGRESS"}}),
                 prisma.payment.aggregate({ 
-                    where: {
-                        tenantUuid, 
-                        status: "SUCCESS"
-                    },
+                    where: { tenantUuid, status: "SUCCESS"},
                     _sum: { amount: true },
                 }),
                 prisma.payment.count({ where: {tenantUuid, status: "FAILED"}}),

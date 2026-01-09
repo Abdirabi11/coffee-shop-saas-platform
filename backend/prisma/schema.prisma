@@ -159,31 +159,55 @@ model Tenant {
 }
 
 model TenantAddOn {
-  uuid             String        @id @default(uuid())
-  tenantUuid       String
-  addOnUuid        String
-  quantity         Int
+  uuid              String        @id @default(uuid())
+  tenantUuid        String
+  addOnUuid         String
+  quantity          Int
 
-  tenant           Tenant        @relation(fields: [tenantUuid], references: [uuid])
-  addOn            AddOn         @relation(fields: [addOnUuid], references: [uuid])
+  tenant            Tenant        @relation(fields: [tenantUuid], references: [uuid])
+  addOn             AddOn         @relation(fields: [addOnUuid], references: [uuid])
+}
+
+model TenantQuota {
+  id                Int           @id @default(autoincrement())
+  tenantUuid        String        @unique
+  maxRequests       Int      
+  windowSeconds     Int      
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Permission {
+  id                Int           @id @default(autoincrement())
+  key               String        @unique
+
+  RolePermission    RolePermission[]
+}
+
+model RolePermission {
+  id                Int            @id @default(autoincrement())
+  role              String
+  permissionId      Int
+
+  permission        Permission     @relation(fields: [permissionId], references: [id])
 }
 
 model Store {
-  uuid             String          @id @default(uuid())
-  tenantUuid       String
-  name             String  
-  city             String
-  active           Boolean         @default(true)
+  uuid              String        @id @default(uuid())
+  tenantUuid        String
+  name              String  
+  city              String
+  active            Boolean       @default(true)
 
-  staff            UserStore[]
-  orders           Order[]
-  products         Product[]
-  auditLogs        AuditLog[]
-  tenant           Tenant @relation(fields: [tenantUuid], references: [uuid])
-  FraudEvent       FraudEvent[]
-  Session          Session[]
+  staff             UserStore[]
+  orders            Order[]
+  products          Product[]
+  auditLogs         AuditLog[]
+  tenant            Tenant        @relation(fields: [tenantUuid], references: [uuid])
+  FraudEvent        FraudEvent[]
+  Session           Session[]
 
-  createdAt        DateTime         @default(now())
+  createdAt         DateTime      @default(now())
   @@index([createdAt])
 }
 
@@ -329,6 +353,18 @@ model SubscriptionHistory {
   occurredAt          DateTime         @default(now())
 
   subscription        Subscription     @relation(fields: [subscriptionUuid], references: [uuid])
+}
+
+model SubscriptionRetention {
+  id              Int      @id @default(autoincrement())
+  tenantUuid      String
+  cohortMonth     DateTime
+  activeCount     Int
+  totalCount      Int
+  retentionRate   Float
+  createdAt       DateTime @default(now())
+
+  @@index([tenantUuid, cohortMonth])
 }
 
 model BillingSnapshot {
@@ -553,6 +589,7 @@ model AnalyticsSnapshot {
   createdAt         DateTime        @default(now())
 
   @@index([type, period])
+  @@unique([type, period])
 }
 
 model AddOn {

@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.ts"
-import { getCache, setCache } from "../cache/cache.js";
+import { getCache, setCache } from "../../cache/cache.js";
 import { withCache } from "../utils/cache.ts";
 import { buildDateFilter } from "../utils/date.ts";
 

@@ -1,4 +1,6 @@
 import type { Request, Response } from "express"
+import { TenantDashboardService } from "../../services/Tenant/tenantDashboard.service.ts";
+import { AuthRequest } from "../../types/auth.types.ts";
 import prisma from "../config/prisma.ts"
 
 export const getTenantDashboard = async (req: AuthRequest, res: Response) => {

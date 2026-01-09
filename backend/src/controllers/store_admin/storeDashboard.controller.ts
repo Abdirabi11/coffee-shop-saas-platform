@@ -1,3 +1,8 @@
+import type { Request, Response } from "express"
+import { StoreDashboardService } from "../../services/store/storeDashboard.service.ts";
+import { AuthRequest } from "../../types/auth.types.ts";
+
+
 export const getStoreDashboard = async (req: AuthRequest, res: Response) => {
     const storeUuid = req.user!.storeUuid;
     const data = await StoreDashboardService.getDashboard(storeUuid);

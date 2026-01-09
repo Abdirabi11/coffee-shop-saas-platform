@@ -1,4 +1,4 @@
-import { withCache } from "../cache/cache.js";
+import { withCache } from "../../cache/cache.js";
 import { getCacheVersion } from "../cache/cacheVersion.ts";
 import prisma from "../config/prisma.ts"
 
@@ -67,14 +67,22 @@ export class StoreDashboardService {
     }
 
     static async getPeakHours(storeUuid: string) {
-        return prisma.$queryRaw`
-          SELECT 
-            EXTRACT(HOUR FROM "createdAt") AS hour,
-            COUNT(*)::int AS orders
-          FROM "Order"
-          WHERE "storeUuid" = ${storeUuid}
-          GROUP BY hour
-          ORDER BY orders DESC;
-        `;
+        const cacheKey = `store:${storeUuid}:peak-hours`;
+        return withCache(cacheKey, 300, async () => {
+            const orders= await prisma.order.findMany({
+                where: {storeUuid},
+                select: { createdAt: true }
+            });
+
+            const hoursMap= new Map<number, number>();
+            for(const order of orders){
+                const hour = order.createdAt.getHours();
+                hoursMap.set(hour, (hoursMap.get(hour) ?? 0) + 1);
+            };
+
+            return Array.from(hoursMap.entries())
+              .map(([hour, orders]) => ({ hour, orders }))
+              .sort((a, b) => b.orders - a.orders);
+        }); 
     }
-}
+};

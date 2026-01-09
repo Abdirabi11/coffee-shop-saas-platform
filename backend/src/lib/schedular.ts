@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { monthlyRevenueAnalytics } from "../../jobs/analytics.jobs.ts";
 import { generateMonthlyInvoices, markOverdueInvoices } from "../../jobs/invoice.jobs.ts";
 import { suspendOverdueTenants } from "../../jobs/subscription.jobs.ts";
+import { invalidateSuperAdminAnalyticsCache } from "../cache/analyticsCache.ts";
 import { prewarmDashboards } from "../jobs/dashboardPrewarm.job.ts";
 import { runChurnAnalytics } from "./analytics.jobs.ts";
 import { generateBillingSnapshots, runArpuLtv, runCohortRetention, runTenantCohortGrowth } from "./billing.jobs.ts";
@@ -20,12 +21,15 @@ export function startScheduler() {
     cron.schedule("0 3 1 * *", monthlyRevenueAnalytics);
 
     cron.schedule("0 3 1 * *", async () => {
+        await monthlyRevenueAnalytics();
         await generateBillingSnapshots();
         await runChurnAnalytics();
         await runCohortRetention();
         await runTenantCohortGrowth();
         await runArpuLtv();
-    });
+      
+        await invalidateSuperAdminAnalyticsCache();
+      });
 
     cron.schedule("*/10 * * * *", prewarmDashboards);
-}
+};

@@ -16,13 +16,20 @@ export async function monthlyRevenueAnalytics(){
         _sum: {amount: true}
     });
 
-    await prisma.analyticsSnapshot.create({
+    await prisma.analyticsSnapshot.upsert({ //create
         data: {
-            type: "MONTHLY_REVENUE",
-            period,
-            data: {
-                revenue: revenue._sum.amount ?? 0,
-            } 
+            type_period: {
+                type: "MONTHLY_REVENUE",
+                period,
+            },
+            update: {
+                data: { revenue: revenue._sum.amount ?? 0 },
+            },
+            create: {
+                type: "MONTHLY_REVENUE",
+                period,
+                data: { revenue: revenue._sum.amount ?? 0 },
+            },
         }
     });
 
@@ -36,7 +43,7 @@ export async function runChurnAnalytics(){
     const start = dayjs(period).startOf("month").toDate();
     const end = dayjs(period).endOf("month").toDate();
 
-    const tenantStartAt= await prisma.subscription.count({
+    const tenantsAtPeriodStart= await prisma.subscription.count({
         where: {
             startDate: {lte: start},
             status: {in: ["ACTIVE", "PAST_DUE"]}
@@ -50,7 +57,7 @@ export async function runChurnAnalytics(){
         }
     });
 
-    const churnRate= tenantStartAt === 0 ? 0 : Number(((churnedStatus / tenantStartAt) * 100).toFixed(2));
+    const churnRate= tenantsAtPeriodStart === 0 ? 0 : Number(((churnedStatus / tenantsAtPeriodStart) * 100).toFixed(2));
     const retentionRate= Number((100 - churnRate).toFixed(2));
 
     await prisma.analyticsSnapshot.create({
@@ -58,7 +65,7 @@ export async function runChurnAnalytics(){
             type: "CHURN",
             period,
             data: {
-                tenantStartAt,
+                tenantsAtPeriodStart,
                 churnedStatus,
                 churnRate,
                 retentionRate,
@@ -129,6 +136,7 @@ export async function runTenantCohortGrowth(){
 
     for(const month of uniqueMonths){
         const start = dayjs(month).startOf("month").toDate();
+        const checkDate = dayjs(start).add(3, "month").toDate();
         const end = dayjs(start).add(1, "month").toDate();
 
         const newTenants= await prisma.tenant.count({
@@ -137,7 +145,7 @@ export async function runTenantCohortGrowth(){
 
         const activeAfter3Months= await prisma.subscription.count({
             where: {
-                startDate: {gte: start, lt: end},
+                startDate: { lte: checkDate },
                 status: { in: ["ACTIVE", "PAST_DUE"] },
             }
         });
@@ -157,7 +165,7 @@ export async function runArpuLtv() {
     console.log("💰 Running ARPU / LTV");
 
     const period = dayjs().subtract(1, "month").format("YYYY-MM");
-
+    
     const revenue= await prisma.payment.aggregate({
         where: {status: "PAID"},
         _sum: {amount: true},
@@ -168,17 +176,42 @@ export async function runArpuLtv() {
     });
 
     const arpu= activeTenants === 0 ? 0 : (revenue._sum.amount ?? 0) / activeTenants;
-    const avgLifetimeMonths= 12;
-    const ltv= arpu * avgLifetimeMonths;
 
-    await prisma.analyticsSnapshot.create({
-        data: {
+    const churnSnapshot= await prisma.analyticsSnapshot.findFirst({
+        where: {
+            type: "CHURN",
+            period
+        },
+        orderBy: { createdAt: "desc" }
+    });
+
+    const churnRatePercent= churnSnapshot?.data?.churnRate ?? 0;
+    const churnRate= churnRatePercent / 100
+    const ltv= churnRate === 0 ? arpu * 12 : arpu / churnRate;
+
+    await prisma.analyticsSnapshot.upsert({
+        where: {
+            type_period: {
+                type: "ARPU_LTV",
+                period,
+            },
+        },
+        update: {
+            data: {
+                arpu: Number(arpu.toFixed(2)),
+                ltv: Number(ltv.toFixed(2)),
+                churnRate: churnRatePercent,
+            },
+        },
+        create: {
             type: "ARPU_LTV",
             period,
             data: {
                 arpu: Number(arpu.toFixed(2)),
                 ltv: Number(ltv.toFixed(2)),
-            },
+                churnRate: churnRatePercent,
+            }
         }
     });
+    console.log("✅ ARPU / LTV snapshot saved");
 };

@@ -2,7 +2,7 @@ import { redisClient } from "../lib/redis.ts";
 import {redis} from "../lib/redis.ts"
 
 export const getCacheVersion = async (key: string) => {
-    const version = await redisClient.get(`v:${key}`);
+    const version = await redis.get(`v:${key}`);
     return version ?? "1";
 };
   

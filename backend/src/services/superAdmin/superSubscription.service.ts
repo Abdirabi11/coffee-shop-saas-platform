@@ -2,7 +2,7 @@ import prisma from "../config/prisma.ts"
 import { SubscriptionStatus, TenantStatus } from "@prisma/client";
 import { auditLogService } from "./auditLog.service.ts"
 import { invalidateCache } from "../utils/cache.ts";
-import { invalidateAdminDashboards, invalidateTenantCaches } from "../cache/cache.js";
+import { invalidateAdminDashboards, invalidateTenantCaches } from "../../cache/cache.js";
 
 
 export class SuperAdminSubscriptionService {
