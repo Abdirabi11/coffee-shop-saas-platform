@@ -12,6 +12,16 @@ import {authenticate, authorize} from "../middlewares/auth.middleware.ts"
 
 const router= express.Router();
 
+// Option Groups
+// POST   /products/:productUuid/options/groups
+// GET    /products/:productUuid/options/groups
+// PATCH  /option-groups/:groupUuid
+// DELETE /option-groups/:groupUuid
+
+// Options
+// POST   /option-groups/:groupUuid/options
+// PATCH  /options/:optionUuid
+// DELETE /options/:optionUuid
 
 
 router.use(authenticate, requireStoreAccess);

@@ -1,4 +1,4 @@
-import { invalidateCache } from "./cache.ts";
+import { invalidateCache } from "./cache.ts.js";
 
 export const invalidateAdminDashboards = async () => {
   await invalidateCache("dashboard:admin:*");

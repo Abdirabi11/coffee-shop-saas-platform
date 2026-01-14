@@ -91,6 +91,27 @@ enum InvoiceStatus {
   FAILED
 }
 
+enum MenuEventType {
+  MENU_VIEW
+  CATEGORY_VIEW
+  PRODUCT_VIEW
+  ADD_TO_CART
+}
+
+enum MenuEntityType {
+  CATEGORY
+  PRODUCT
+}
+
+enum MenuSnapshotReason {
+  AUTO
+  PRODUCT_CHANGE
+  CATEGORY_CHANGE
+  AVAILABILITY_CHANGE
+  STORE_OPEN
+  ADMIN_PREVIEW
+}
+
 model User {
   uuid             String      @id @default(uuid())
   phoneNumber      String      @unique
@@ -129,6 +150,7 @@ model User {
   UserStore        UserStore[]
 
   @@index([phoneNumber])
+  UserFavorite UserFavorite[]
 }   
 
 model Tenant {
@@ -209,6 +231,27 @@ model Store {
 
   createdAt         DateTime      @default(now())
   @@index([createdAt])
+  Category Category[]
+  StoreOpeningHour StoreOpeningHour[]
+  MenuSnapshot MenuSnapshot[]
+}
+
+model StoreOpeningHour {
+  uuid              String   @id @default(uuid())
+  storeUuid         String
+
+  dayOfWeek         Int      // 0 = Sunday ... 6 = Saturday
+  openTime          String   // "08:00"
+  closeTime         String   // "22:00"
+  isClosed          Boolean  @default(false)
+
+  store             Store    @relation(fields: [storeUuid], references: [uuid])
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([storeUuid, dayOfWeek])
+  @@index([storeUuid, dayOfWeek])
 }
 
 model UserStore {
@@ -483,27 +526,198 @@ model PlanVersion {
 model Product {
   uuid              String          @id @default(uuid())
   storeUuid         String 
+
   name              String
   description       String?
   basePrice         Int
   imageUrl          String
+
   isActive          Boolean         @default(true)
- 
-  options           ProductOption[]
+  isDeleted         Boolean         @default(true)
+
+  categoryUuid      String?
+  category          Category?       @relation(fields: [categoryUuid], references: [uuid])
+
+  optionGroups      ProductOptionGroup[]
   orderItems        OrderItem[]
+      
   store             Store           @relation(fields: [storeUuid], references: [uuid])
 
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+
+  @@index([storeUuid])
+  ProductAvailability ProductAvailability[]
+  UserFavorite UserFavorite[]
+}
+
+model ProductOptionGroup {
+  uuid              String          @id @default(uuid())
+  productUuid       String
+
+  name              String   // Size, Milk, Sugar
+  required          Boolean         @default(false)
+  multiSelect       Boolean         @default(false)
+  min               Int?
+  max               Int?
+
+  options           ProductOption[]
+  product           Product         @relation(fields: [productUuid], references: [uuid])
+
+  @@index([productUuid])
 }
 
 model ProductOption {
-  uuid              String          @id @default(uuid())
-  productUuid       String
-  name              String   // Size, Milk, Sugar
-  extraCost         Int      // cents
+  uuid              String             @id @default(uuid())
+  optionGroupUuid   String
 
-  product           Product         @relation(fields: [productUuid], references: [uuid])
+  name              String   
+  extraCost         Int     
+  isDefault         Boolean            @default(false)
+
+  optionGroup       ProductOptionGroup @relation(fields: [optionGroupUuid], references: [uuid])
+}
+
+model ProductAvailability {
+  uuid              String             @id @default(uuid())
+  productUuid       String
+
+  dayOfWeek         Int      
+  startTime         String   
+  endTime           String   
+
+  isActive          Boolean             @default(true)
+
+  product           Product             @relation(fields: [productUuid], references: [uuid])
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([productUuid, dayOfWeek])
+}
+
+model Category {
+  uuid                 String       @id @default(uuid())
+  storeUuid            String
+  name                 String
+  order                Int          @default(0)
+  isActive             Boolean      @default(true)
+
+  products             Product[]
+  store                Store        @relation(fields: [storeUuid], references: [uuid])
+
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  CategoryAvailability CategoryAvailability[]
+  visibilitySchedules CategoryVisibilitySchedule[]
+
+  @@unique([storeUuid, name])
+  @@index([storeUuid, order]) 
+}
+
+model CategoryVisibilitySchedule {
+  uuid                 String       @id @default(uuid())
+  categoryUuid         String
+
+  dayOfWeek            Int?    // 0 = Sunday, 6 = Saturday (null = everyday)
+  startTime            String  // "06:00"
+  endTime              String  // "11:00"
+
+  category             Category @relation(fields: [categoryUuid], references: [uuid])
+
+  createdAt            DateTime @default(now())
+}
+
+model CategoryAvailability {
+  uuid                 String        @id @default(uuid())
+  categoryUuid         String
+
+  dayOfWeek            Int
+  startTime            String
+  endTime              String
+  isActive             Boolean        @default(true)
+
+  category             Category       @relation(fields: [categoryUuid], references: [uuid])
+
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([categoryUuid, dayOfWeek])
+}
+
+model MenuAnalyticEvents {
+  uuid              String        @id @default(uuid())
+
+  storeUuid         String
+  tenantUuid        String?
+
+  eventType         MenuEventType
+  entityType        MenuEntityType?
+  entityUuid        String?
+
+  sessionId         String?
+  deviceType        String?   // ios | android | web
+  country           String?
+  city              String?
+
+  occurredAt        DateTime       @default(now())
+  createdAt         DateTime       @default(now())
+
+  @@index([storeUuid, occurredAt])
+  @@index([eventType, occurredAt])
+}
+
+model MenuSnapshot {
+  uuid                String   @id @default(uuid())
+  storeUuid           String
+
+  menuHash            String   
+  menuJson            Json     
+
+  totalCategories     Int
+  totalProducts       Int
+  totalOptions        Int
+
+  reason              String   
+  triggeredBy         String? // userUuid / system
+
+  version             Int      // menu version at snapshot
+  generatedAt         DateTime @default(now())
+
+  store               Store    @relation(fields: [storeUuid], references: [uuid])
+
+  createdAt           DateTime @default(now())
+
+  @@index([storeUuid, createdAt])
+}
+
+model MenuDiff {
+  id            Int      @id @default(autoincrement())
+  storeUuid     String
+  fromSnapshot  String
+  toSnapshot    String
+
+  addedProducts   Json
+  removedProducts Json
+  priceChanges    Json
+
+  createdAt     DateTime @default(now())
+}
+
+model UserFavorite {
+  uuid               String        @id @default(uuid())
+  userUuid           String
+  productUuid        String
+  storeUuid          String
+
+  createdAt          DateTime      @default(now())
+
+  user               User          @relation(fields: [userUuid], references: [uuid])
+  product            Product       @relation(fields: [productUuid], references: [uuid])
+
+  @@unique([userUuid, productUuid])
+  @@index([storeUuid])
 }
 
 model Order {
@@ -515,6 +729,9 @@ model Order {
   user              User            @relation(fields: [userUuid], references: [uuid])
   items             OrderItem[]
   payment           Payment?
+
+  menuSnapshot      Json
+  menuVersion       String
 
   storeUuid         String
   store             Store           @relation(fields: [storeUuid], references: [uuid])

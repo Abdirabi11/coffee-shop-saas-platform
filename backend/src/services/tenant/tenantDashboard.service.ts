@@ -1,3 +1,4 @@
+import { withAvailabilityCache } from "../../cache/withAvailabilityCache.s";
 import { withCache } from "../cache/cache.ts";
 import { getCacheVersion } from "../cache/cacheVersion.ts";
 import prisma from "../config/prisma.ts"
@@ -6,6 +7,12 @@ export class TenantDashboardService {
     static async getDashboard(tenantUuid: string){
         const version = await getCacheVersion(`tenant:${tenantUuid}:dashboard`);
         const cacheKey= `tenant:${tenantUuid}:dashboard:v${version}`;
+
+        withAvailabilityCache({
+            prefix: "tenant-dashboard",
+            entityUuid: tenantUuid,
+            fetcher: () => TenantDashboardService.build(tenantUuid),
+        });
         
         return withCache(cacheKey, 120, async ()=>{
             const [

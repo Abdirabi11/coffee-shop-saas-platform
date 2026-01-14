@@ -14,7 +14,7 @@
       "noImplicitAny": true,
       "forceConsistentCasingInFileNames": true
     },
-    "include": ["src", "../config"],
+    "include": ["src", "../config", "src/cache"],
     "exclude": ["node_modules"]
   }
   
