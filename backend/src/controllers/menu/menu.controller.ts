@@ -1,6 +1,7 @@
 import type { Request, Response } from "express"
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import { MenuAnalyticsService } from "../../services/menu/menu-analytics.service.ts";
+import { MenuFilterService } from "../../services/menu/menu-filter.service.ts";
 import { MenuPrewarmService } from "../../services/menu/menu-prewarm.service.ts";
 import { MenuPersonalizationService } from "../../services/menu/menu.service.ts";
 import { MenuPolicyService } from "../../services/menu/menu.service.ts";
@@ -13,13 +14,14 @@ export const getStoreMenu= async(req: Request, res: Response)=>{
             return res.status(400).json({ message: "storeUuid is required" });
         };
 
-        const menu = await MenuService.getStoreMenu(storeUuid);
-
-        const finalMenu = MenuPersonalizationService.apply(
-            menu,
+        const baseMenu = await MenuService.getStoreMenu(storeUuid);
+        const personalized = MenuPersonalizationService.apply(
+            baseMenu,
             req.user
         );
-        res.json(finalMenu);
+        const filtered = MenuFilterService.apply(personalized, req.query);
+
+        res.json(filtered);
     } catch (err) {
         console.error("[MENU_FETCH_FAILED]", err);
         res.status(500).json({ message: "Failed to load menu" });
