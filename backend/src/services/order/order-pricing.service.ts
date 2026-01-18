@@ -6,10 +6,19 @@ type ResolvedOrderItem = {
     price: number; // per item (including modifiers)
 };
 
+interface CreateOrderItemInput {
+    productUuid: string;
+    quantity: number;
+    modifiers?: {
+      optionUuid: string;
+      quantity?: number;
+    }[];
+};
+
 export class OrderPricingService{
-    static async resolveItems(menu: any, items: CreateOrderItemInput[]){
+    static resolveItems(menu: any, items: CreateOrderItemInput[]){
         const resolvedItems: ResolvedOrderItem[] = [];
-        let total = 0;
+        let subtotal = 0;
 
         for(const inputItem of items){
             const product = this.findProduct(menu, inputItem.productUuid);
@@ -33,20 +42,21 @@ export class OrderPricingService{
                 }
             };
 
-            const lineTotal = unitPrice * inputItem.quantity;
+            subtotal += unitPrice * inputItem.quantity;
 
             resolvedItems.push({
                 productUuid: product.uuid,
                 quantity: inputItem.quantity,
                 price: unitPrice,
             });
-    
-            total += lineTotal;
         };
+
+        const tax = Math.round(subtotal * 0.1); // example
+        const total = subtotal + tax;
 
         return {
             items: resolvedItems,
-            total,
+            subtotal, tax, total
         };
     };
     

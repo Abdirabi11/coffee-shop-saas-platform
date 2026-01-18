@@ -39,3 +39,46 @@ export class TenantDashboardService {
         })
     }
 };
+
+export class AdminDashboardService {
+    static async getDashboard() {
+      const cacheKey = "admin:dashboard";
+  
+      return withCache(cacheKey, 60, async () => {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+  
+        const [
+          revenue,
+          ordersToday,
+          failedPayments,
+          activeStores,
+        ] = await Promise.all([
+          prisma.order.aggregate({
+            where: { status: "COMPLETED" },
+            _sum: { totalAmount: true },
+          }),
+  
+          prisma.order.count({
+            where: { createdAt: { gte: todayStart } },
+          }),
+  
+          prisma.payment.count({
+            where: { status: "FAILED" },
+          }),
+  
+          prisma.store.count({
+            where: { isActive: true },
+          }),
+        ]);
+  
+        return {
+          totalRevenue: revenue._sum.totalAmount ?? 0,
+          ordersToday,
+          failedPayments,
+          activeStores,
+        };
+      });
+    }
+};
+  

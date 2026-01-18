@@ -1,5 +1,7 @@
 import cron from "node-cron";
+import { AnalyticsAggregationJob } from "../../jobs/analytics-aggregation.job.ts";
 import { monthlyRevenueAnalytics } from "../../jobs/analytics.jobs.ts";
+import { AutoCancelOrdersJob } from "../../jobs/autoCancel-orders.job.ts";
 import { generateMonthlyInvoices, markOverdueInvoices } from "../../jobs/invoice.jobs.ts";
 import { suspendOverdueTenants } from "../../jobs/subscription.jobs.ts";
 
@@ -22,4 +24,12 @@ export function startScheduler() {
 
     // 📊 Analytics (after billing)
     cron.schedule("0 3 1 * *", monthlyRevenueAnalytics);
+
+    cron.schedule("* * * * *", async () => {
+        await AutoCancelOrdersJob.run();
+    });
+
+    cron.schedule("5 0 * * *", async () => {
+        await AnalyticsAggregationJob.run();
+    });
 };

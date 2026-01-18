@@ -1,4 +1,3 @@
-import cron from "node-cron";
 import prisma from "../../config/prisma.ts"
 import dayjs from "dayjs";
 

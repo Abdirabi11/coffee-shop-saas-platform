@@ -1,7 +1,7 @@
 type EventPayload = Record<string, any>;
 type EventHandler = (payload: EventPayload) => Promise<void> | void;
 
-class EventBus {
+class eventBus {
     private listeners= new Map<string, EventHandler[]>();
 
     on(event: string, handler: EventHandler){
@@ -18,4 +18,4 @@ class EventBus {
     }
 };
 
-export const eventBus = new EventBus();
+export const EventBus = new eventBus();

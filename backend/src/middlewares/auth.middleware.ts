@@ -117,4 +117,4 @@ export const enforceStoreLimit = async (req: AuthRequest, res: Response, next: N
     };
 
     next();
-}
+};

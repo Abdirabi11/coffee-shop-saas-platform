@@ -8,27 +8,45 @@ export class StoreDashboardService {
         const cacheKey= `store:${storeUuid}:dashboard:v${version}`;
 
         return withCache(cacheKey, 60, async ()=>{
+            const todayStart = new Date();
             const [
                 activeOrders,
                 revenue,
                 failedPayments,
+                prepStats,
             ]= await Promise.all([
                 prisma.order.count({
-                    where: { storeUuid, status: "IN_PROGRESS" },
+                    where: { 
+                        storeUuid, 
+                        status: {
+                            in: ["PENDING", "PAYMENT_PENDING", "PAID", "PREPARING"],
+                        }
+                    },
                 }),
+
                 prisma.order.aggregate({
-                    where: { storeUuid, status: "COMPLETED" },
+                    where: { storeUuid, status: "COMPLETED",  createdAt: { gte: todayStart }, },
                     _sum: { totalPrice: true },
                 }),
+
                 prisma.payment.count({
-                    where: { storeUuid, status: "FAILED" },
+                    where: { storeUuid, status: "FAILED",  createdAt: { gte: todayStart }, },
                 }),
+            
+                prisma.$queryRaw<{ avg_minutes: number }[]>`
+                    SELECT AVG(EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60)
+                    AS avg_minutes
+                    FROM "Order"
+                    WHERE "storeUuid" = ${storeUuid}
+                    AND status = 'COMPLETED'
+                `
             ]);
 
             return {
                 orders: { active: activeOrders },
                 revenue: revenue._sum.totalPrice ?? 0,
                 failedPayments,
+                avgPrepTimeMinutes: prepStats[0]?.avg_minutes ?? 0,
             };
         })
     }

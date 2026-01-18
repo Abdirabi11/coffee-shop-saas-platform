@@ -29,7 +29,7 @@ export const forceLogoutUsers= async(
             data: { revoked: true },
         }),
     ])
-}
+};
     
 export const revokeSession= async (sessionUuid: string)=>{
     await prisma.session.update({

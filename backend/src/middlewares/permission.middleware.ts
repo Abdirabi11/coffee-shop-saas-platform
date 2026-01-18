@@ -17,4 +17,4 @@ export const requirePermission= (permissionKey: string)=>{
 
         next()
     }
-}
+};

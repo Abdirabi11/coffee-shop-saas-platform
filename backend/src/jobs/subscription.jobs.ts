@@ -21,4 +21,4 @@ export async function suspendOverdueTenants(){
     };
 
     console.log(`🚨 ${overdueSubs.length} tenants suspended`);
-}
+};

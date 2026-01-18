@@ -596,6 +596,64 @@ model ProductAvailability {
   @@index([productUuid, dayOfWeek])
 }
 
+model ProductSales {
+  productUuid String
+  date        DateTime
+  quantity    Int
+  @@id([productUuid, date])
+}
+
+model InventoryItem {
+  uuid              String      @id @default(uuid())
+  storeUuid         String
+  productUuid       String
+
+  stock             Int
+
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([storeUuid, productUuid])
+}
+
+model StoreDailyMetrics {
+  uuid                 String       @id @default(uuid())
+  storeUuid      String
+  date           DateTime
+
+  totalRevenue   Int
+  ordersCount    Int
+  failedPayments Int
+  avgPrepTimeMin Float
+
+  createdAt      DateTime @default(now())
+
+  @@unique([storeUuid, date])
+  @@index([date])
+}
+
+model OrderMetricsDaily {
+  date        DateTime @id
+  storeUuid  String
+  revenue    Int
+  orders     Int
+}
+
+
+model ProductDailyMetrics {
+  uuid                 String       @id @default(uuid())
+  productUuid  String
+  storeUuid    String
+  date         DateTime
+
+  quantitySold Int
+  revenue      Int
+
+  createdAt    DateTime @default(now())
+
+  @@unique([productUuid, storeUuid, date])
+  @@index([date])
+}
+
 model Category {
   uuid                 String       @id @default(uuid())
   storeUuid            String
@@ -757,13 +815,19 @@ model OrderItem {
 model Payment {
   uuid              String          @id @default(uuid())
   orderUuid         String          @unique
+  storeUuid         String
+
   amount            Int
+  currency          String
   status            PaymentStatus
   provider          String         // STRIPE / WALLET
   providerRef       String?
+  snapshot          Json     
 
   order             Order           @relation(fields: [orderUuid], references: [uuid])
+
   createdAt         DateTime        @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 model Wallet {
@@ -865,4 +929,13 @@ model BrandingSetting {
   supportEmail      String?
 
   updatedAt         DateTime           @updatedAt
+}
+
+model DeadLetterJob {
+  uuid          String     @id @default(uuid())
+  jobType       String
+  payload       Json
+  error         String
+  createdAt     DateTime   @default(now())
+  resolved      Boolean    @default(false)
 }

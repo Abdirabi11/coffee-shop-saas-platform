@@ -28,6 +28,6 @@ export const dispatchWebhook= async (
             body: JSON.stringify(payload),
         })
     }
-}
+};
 
 

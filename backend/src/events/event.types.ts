@@ -9,4 +9,4 @@ export enum DomainEvent {
     INVOICE_CREATED = "INVOICE_CREATED",
     INVOICE_PAID = "INVOICE_PAID",
     INVOICE_OVERDUE = "INVOICE_OVERDUE",
-}
+};

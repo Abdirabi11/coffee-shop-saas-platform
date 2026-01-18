@@ -2,7 +2,6 @@ import cron from "node-cron";
 import prisma from "../../config/prisma.ts"
 import dayjs from "dayjs";
 
-
 export const churnCron= ()=>{
     cron.schedule("0 3 * * *", async () => {
         console.log("📉 Running nightly churn analytics");
@@ -183,4 +182,4 @@ export const generateBillingSnapshots= async ()=>{
             }
         })
     }
-}
+};

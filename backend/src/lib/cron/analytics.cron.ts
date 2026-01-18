@@ -32,4 +32,4 @@ export const analyticsCron= ()=>{
 
         console.log("✅ Analytics snapshot saved");
     })
-}
+};

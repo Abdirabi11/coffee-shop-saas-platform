@@ -183,4 +183,4 @@ export const generateBillingSnapshots= async ()=>{
             }
         })
     }
-}
+};

@@ -1,4 +1,4 @@
-import prisma from "../config/prisma";
+import prisma from "../../config/prisma.js";
 
 
 export const getAuditLogs = async (query: any, storeUuid: string,) => {
@@ -21,4 +21,4 @@ export const getAuditLogs = async (query: any, storeUuid: string,) => {
             }
         }
     })
-}
+};
