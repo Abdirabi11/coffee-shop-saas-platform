@@ -1,4 +1,4 @@
-import prisma from "../../config/prisma.js";
+import prisma from "../../config/prisma.ts";
 
 
 export const getAuditLogs = async (query: any, storeUuid: string,) => {
@@ -21,4 +21,30 @@ export const getAuditLogs = async (query: any, storeUuid: string,) => {
             }
         }
     })
+};
+
+export class AuditLogService{
+    static async record({
+        storeUuid,
+        action,
+        entityUuid,
+        actorUuid,
+        metadata,
+    }: {
+        storeUuid?: string;
+        action: string;
+        entityUuid: string;
+        actorUuid?: string;
+        metadata?: any;
+    }){
+        await prisma.auditLog.create({
+            data: {
+                storeUuid,
+                action,
+                entityUuid,
+                actorUuid,
+                metadata,
+            },
+        })
+    }
 };

@@ -8,6 +8,34 @@ function signPayload(payload: any, secret: string): string {
       .update(JSON.stringify(payload))
       .digest("hex");
 };
+
+export class WebhookDispatcher {
+    static async dispatch(
+      storeUuid: string,
+      eventType: string,
+      payload: any
+    ){
+        return dispatchWebhook(storeUuid, eventType, payload);
+    }
+
+    static async dispatchByOrder(
+        orderUuid: string,
+        eventType: string
+    ){
+        const order = await prisma.order.findUnique({
+            where: { uuid: orderUuid },
+            select: { storeUuid: true },
+        });
+      
+        if (!order) return;
+      
+        return dispatchWebhook(order.storeUuid, eventType, {
+            orderUuid,
+            eventType,
+        });
+    }
+
+}
   
 export const dispatchWebhook= async (
     storeUuid: string,

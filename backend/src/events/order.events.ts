@@ -22,6 +22,23 @@ type OrderEvent =
 EventBus.on("ORDER_CREATED", ({ storeUuid }) => {
     bumpCacheVersion(`store:${storeUuid}:dashboard`);
     bumpCacheVersion(`store:${storeUuid}:active-orders`);
+
+    //     When do we create EmailOutbox records?
+    // Inside events, NOT controllers.
+    // This happens inside the same DB transaction as the business event
+    // ✔️ No email is sent yet
+    await prisma.emailOutbox.create({
+      data: {
+        storeUuid,
+        to: customerEmail,
+        subject: "Refund completed",
+        template: "refund_completed",
+        payload: {
+          orderUuid,
+          refundAmount,
+        },
+      },
+    });
 });
   
 EventBus.on("ORDER_STATUS_CHANGED", ({ storeUuid }) => {

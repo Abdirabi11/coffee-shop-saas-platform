@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.ts"
-import { OrderStatusService } from "../../services/order/order-status.service.js";
+import { OrderStatusService } from "../../services/order/order-status.service.ts";
 
 const AUTO_CANCEL_MINUTES = 15;
 

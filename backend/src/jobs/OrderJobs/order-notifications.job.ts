@@ -1,8 +1,6 @@
 import prisma from "../../config/prisma.ts"
 import { NotificationService } from "../../services/notification.service.ts";
 
-//⚠️ Ensure all calls are event-driven, not manual
-
 export class OrderNotificationJob{
     static async orderReady(orderUuid: string){
         const order= await prisma.order.findUnique({

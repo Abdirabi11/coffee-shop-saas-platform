@@ -47,3 +47,36 @@ export const calculateFraudScore = ({
     if (score >= 40) return "MEDIUM";
     return "LOW";
 };
+
+export class FraudSignalService{
+  static async signal(
+    type: string,
+    payload: {
+      orderUuid?: string;
+      userUuid?: string;
+      amount?: number;
+      reason?: string;
+    }
+  ){
+    await prisma.fraudEvent.create({
+      data: {
+        userUuid: payload.userUuid,
+        reason: type,
+        metadata: payload,
+        severity: this.mapSeverity(type),
+      },
+    })
+  };
+
+  private static mapSeverity(type: string) {
+    switch (type) {
+      case "MULTIPLE_PAYMENT_FAILED":
+      case "REFUND_ABUSE":
+        return "HIGH";
+      case "PAYMENT_TIMEOUT":
+        return "MEDIUM";
+      default:
+        return "LOW";
+    }
+  }
+}

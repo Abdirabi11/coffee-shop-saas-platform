@@ -35,7 +35,7 @@ export class RefundOnCancelJob{
                 orderUuid,
                 amount: payment.total,
             });
-        } catch (error) {
+        } catch (error:any) {
             await DeadLetterQueue.record("REFUND_ON_CANCEL", {
                 orderUuid,
                 reason: error.message,

@@ -12,41 +12,40 @@ const paymentSnapshot = {
 };
 
 export class PaymentService{
-    static async confirmPayment({
-        orderUuid,
-        provider,
-        providerRef,
-        snapshot,
-    }: {
+    static async confirmPayment(input: {
         orderUuid: string;
         provider: string;
-        providerRef?: string;
+        providerRef: string;
         snapshot: any;
-    }) {
+      }) {
         const order= await prisma.order.findUnique({
-            where: { uuid: orderUuid },
+            where: { uuid: input.orderUuid },
         });
         if (!order) throw new Error("Order not found");
+        if (order.status !== "PENDING_PAYMENT") {
+            throw new Error("INVALID_ORDER_STATE");
+        };
 
         await prisma.$transaction(async (tx)=> {
             await tx.payment.create({
                 data: {
-                    orderUuid,
+                    orderUuid: order.uuid,
                     storeUuid: order.storeUuid,
                     amount: order.totalAmount,
-                    currency: "USD",
-                    provider,
-                    providerRef,
+                    currency: order.currency,
+                    provider: input.provider,
+                    providerRef: input.providerRef,
                     status: "PAID",
-                    snapshot,
+                    snapshot: input.snapshot,
                 }
             });
 
-            await OrderStatusService.transition(orderUuid, "PAID");
+            await tx.paymentSnapshot.update({
+                where: { orderUuid: order.uuid },
+                data: { status: "PAID" },
+            });
+
+            await OrderStatusService.transition(tx, order.uuid, "PAID");
         })
     };
-
-    static async retry(){
-
-    }
 }

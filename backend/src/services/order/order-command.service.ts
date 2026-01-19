@@ -41,6 +41,10 @@ export class OrderCommandService{
 
             // const inventoryResult = await InventoryService.reserveItems(tx, pricingResult.items);
 
+            if (pricing.items.length === 0) {
+                throw new Error("Order must contain at least one item");
+            }
+
             const order= await tx.order.create({
                 data: {
                   storeUuid,

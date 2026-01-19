@@ -57,6 +57,20 @@ enum PaymentStatus {
   PENDING
 }
 
+enum PaymentSnapshotStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum RefundStatus {
+  REQUESTED
+  PROCESSING
+  REFUNDED
+  FAILED
+}
+
 enum WalletTransactionType {
   TOP_UP 
   PAYMENT 
@@ -110,6 +124,27 @@ enum MenuSnapshotReason {
   AVAILABILITY_CHANGE
   STORE_OPEN
   ADMIN_PREVIEW
+}
+
+enum EmailStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD
+}
+
+enum AlertLevel {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum WebhookStatus {
+  PENDING
+  SENT
+  FAILED
 }
 
 model User {
@@ -331,6 +366,17 @@ model Admin2FA {
   enabled           Boolean       @default(false)
 
   user              User          @relation(fields: [userUuid], references: [uuid])
+}
+
+model AdminAlert {
+  uuid        String   @id @default(uuid())
+  storeUuid   String?
+  level       AlertLevel
+  title       String
+  message     String?
+  context     Json?
+  resolved    Boolean  @default(false)
+  createdAt  DateTime @default(now())
 }
 
 model AuditLog {
@@ -638,7 +684,6 @@ model OrderMetricsDaily {
   orders     Int
 }
 
-
 model ProductDailyMetrics {
   uuid                 String       @id @default(uuid())
   productUuid  String
@@ -799,6 +844,7 @@ model Order {
 
   @@index([userUuid])
   @@index([createdAt])  
+  PaymentSnapshot PaymentSnapshot[]
 }
 
 model OrderItem {
@@ -827,7 +873,58 @@ model Payment {
   order             Order           @relation(fields: [orderUuid], references: [uuid])
 
   createdAt         DateTime        @default(now())
-  updatedAt       DateTime      @updatedAt
+  updatedAt         DateTime        @updatedAt
+}
+
+model PaymentSnapshot {
+  uuid              String           @id @default(uuid())
+
+  orderUuid         String           @unique
+  storeUuid         String
+
+  currency          String
+  subtotal          Int
+  tax               Int
+  discount          Int      @default(0)
+  total             Int
+
+  pricingRules      Json     // taxes, discounts, promos
+  itemsSnapshot     Json     // frozen items + prices
+
+  provider          String   // stripe / wallet / evc
+  status            PaymentSnapshotStatus @default(PENDING)
+
+  createdAt         DateTime @default(now())
+
+  order             Order    @relation(fields: [orderUuid], references: [uuid])
+}
+
+model Refund {
+  uuid              String        @id @default(uuid())
+
+  orderUuid         String
+  paymentUuid       String
+  storeUuid         String
+
+  amount            Int
+  currency          String
+
+  reason            String
+  status            RefundStatus
+
+  provider          String
+  providerRef       String?
+  snapshot          Json
+
+  requestedBy       String?       // admin / system
+  requestedAt       DateTime      @default(now())
+
+  processedAt       DateTime?
+
+  order             Order         @relation(fields: [orderUuid], references: [uuid])
+  payment           Payment       @relation(fields: [paymentUuid], references: [uuid])
+
+  @@index([orderUuid])
 }
 
 model Wallet {
@@ -912,6 +1009,20 @@ model EmailTemplate {
   updatedAt         DateTime           @updatedAt
 }
 
+model EmailOutbox {
+  uuid        String   @id @default(uuid())
+  storeUuid   String?
+  to          String
+  subject     String
+  template    String
+  payload     Json
+  status      EmailStatus @default(PENDING)
+  attempts    Int      @default(0)
+  lastError   String?
+  createdAt  DateTime @default(now())
+  sentAt     DateTime?
+}
+
 model FeatureFlag {
   key               String             @id
   enabled           Boolean            @default(false)
@@ -938,4 +1049,23 @@ model DeadLetterJob {
   error         String
   createdAt     DateTime   @default(now())
   resolved      Boolean    @default(false)
+}
+
+model WebhookOutbox {
+  uuid        String   @id @default(uuid())
+  storeUuid   String
+  eventType   String
+  payload     Json
+  attempts    Int      @default(0)
+  lastError   String?
+  status      WebhookStatus @default(PENDING)
+  nextRetryAt DateTime?
+  createdAt  DateTime @default(now())
+}
+
+model JobHeartbeat {
+  jobName     String   @id
+  lastRunAt   DateTime
+  status      String
+  updatedAt  DateTime @updatedAt
 }
