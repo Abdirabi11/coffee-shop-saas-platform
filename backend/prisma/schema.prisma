@@ -315,10 +315,14 @@ model FraudEvent {
   uuid              String        @id @default(uuid())
   userUuid          String?
   storeUuid         String
+  orderUuid         String?
+  paymentUuid       String?
 
+  type              String
   ipAddress         String
   reason            String
   severity          FraudSeverity
+  metadata          Json?
  
   user              User?         @relation(fields: [userUuid], references: [uuid])
   store             Store         @relation(fields: [storeUuid], references: [uuid])
@@ -868,10 +872,13 @@ model Payment {
   status            PaymentStatus
   provider          String         // STRIPE / WALLET
   providerRef       String?
-  snapshot          Json     
+  snapshot          Json  
+  lockedAt          DateTime?   
+  expiresAt         DateTime?
 
   order             Order           @relation(fields: [orderUuid], references: [uuid])
 
+  retries           Int             @default(0)
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 }
@@ -948,15 +955,6 @@ model WalletTransaction {
 
   wallet            Wallet          @relation(fields: [walletUuid], references: [uuid])
   createdAt         DateTime        @default(now())
-}
-
-model Webhook {
-  uuid              String          @id @default(uuid())
-  storeUuid         String
-  url               String
-  eventType         String 
-  secret            String
-  active            Boolean         @default(true)
 }
 
 model AnalyticsSnapshot {
@@ -1051,16 +1049,47 @@ model DeadLetterJob {
   resolved      Boolean    @default(false)
 }
 
+model Webhook {
+  uuid              String          @id @default(uuid())
+  storeUuid         String
+  url               String
+  eventType         String 
+  secret            String
+  active            Boolean         @default(true)
+}
+
 model WebhookOutbox {
-  uuid        String   @id @default(uuid())
-  storeUuid   String
-  eventType   String
-  payload     Json
-  attempts    Int      @default(0)
-  lastError   String?
-  status      WebhookStatus @default(PENDING)
-  nextRetryAt DateTime?
-  createdAt  DateTime @default(now())
+  uuid            String        @id @default(uuid())
+  storeUuid       String
+  eventType       String
+  payload         Json
+  attempts        Int            @default(0)
+  lastError       String?
+  status          WebhookStatus  @default(PENDING)
+  nextRetryAt     DateTime?
+  createdAt       DateTime       @default(now())
+}
+
+model WebhookEvent {
+  uuid            String         @id @default(uuid())
+  provider        String   // stripe, paypal, internal
+  eventId         String   // provider event id or generated nonce
+  receivedAt      DateTime       @default(now())
+  eventType       String
+  payload         Json
+  processedAt     DateTime       @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model WebhookSecret {
+  uuid            String         @id @default(uuid())
+  provider        String   // stripe, paypal
+  secretHash      String
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  rotatedAt       DateTime?
+  expiresAt       DateTime?
 }
 
 model JobHeartbeat {
@@ -1068,4 +1097,22 @@ model JobHeartbeat {
   lastRunAt   DateTime
   status      String
   updatedAt  DateTime @updatedAt
+}
+
+model IdempotencyKey {
+  uuid              String     @id @default(uuid())
+  key               String
+  route             String
+  response          Json
+  statusCode        Int
+  createdAt         DateTime   @default(now())
+
+  @@unique([key, route])
+}
+
+model PaymentIntent {
+  uuid            String       @id @default(uuid())
+  orderUuid       String       @unique
+  lockedAt        DateTime?
+  status          String
 }

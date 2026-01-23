@@ -10,7 +10,8 @@ export class FailedPaymentRetryJob{
             where: {
                 status: "FAILED",
                 retries: { lt: MAX_RETRIES },
-            }
+            },
+            take: 20
         });
 
         for (const payment of failedPayments) {
@@ -31,15 +32,16 @@ export class FailedPaymentRetryJob{
                     })
                 }
             } catch (error) {
-                await prisma.payment.update({
+                const updated= await prisma.payment.update({
                     where: { uuid: payment.uuid },
                     data: { retries: { increment: 1 } },
-                  });
+                });
           
-                if (payment.retries + 1 >= MAX_RETRIES) {
+                if (updated.retries + 1 >= MAX_RETRIES) {
                     EventBus.emit("PAYMENT_RETRY_EXHAUSTED", {
                       paymentUuid: payment.uuid,
                       orderUuid: payment.orderUuid,
+                      storeUuid: payment.storeUuid
                     });
                 }
             }

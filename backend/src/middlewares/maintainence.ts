@@ -11,6 +11,5 @@ export const maintenanceGuard = async (_: Request, res: Response, next: NextFunc
         message: setting.value.message || "Service under maintenance",
       });
     }
-  
     next();
 };

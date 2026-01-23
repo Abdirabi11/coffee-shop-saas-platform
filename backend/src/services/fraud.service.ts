@@ -49,7 +49,7 @@ export const calculateFraudScore = ({
 };
 
 export class FraudSignalService{
-  static async signal(
+  static async signalAuth(
     type: string,
     payload: {
       orderUuid?: string;
@@ -68,9 +68,48 @@ export class FraudSignalService{
     })
   };
 
-  private static mapSeverity(type: string) {
+  static async signalPayment(
+    type: PaymentFraudType,
+    payload: {
+      userUuid?: string;
+      orderUuid?: string;
+      paymentUuid?: string;
+      storeUuid?: string;
+      amount?: number;
+      ipAddress?: string;
+    }
+  ){
+    await prisma.fraudEvent.create({
+      data: {
+        type,
+        severity: this.mapPaymentSeverity(type),
+        ...payload,
+        metadata: payload,
+      },
+    });
+
+    await PaymentFraudEvaluator.evaluate(type, payload);
+  }
+
+  static async signalAuth(
+    type: AuthFraudType,
+    payload: any
+  ) {
+    await prisma.fraudEvent.create({
+      data: {
+        type,
+        severity: "HIGH",
+        metadata: payload,
+      },
+    });
+  }
+
+  private static mapPaymentSeverity(type: string) {
     switch (type) {
+      case "PAYMENT_FAILED":
+        return "LOW";
       case "MULTIPLE_PAYMENT_FAILED":
+        return "HIGH";
       case "REFUND_ABUSE":
         return "HIGH";
       case "PAYMENT_TIMEOUT":

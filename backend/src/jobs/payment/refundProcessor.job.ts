@@ -13,10 +13,11 @@ export class RefundProcessorJob{
         for (const refund of refunds){
             try {
                 await RefundService.processRefund(refund.uuid);
-            } catch (error:any) {
+            } catch (err:any) {
                 await DeadLetterQueue.record("REFUND_PROCESSOR", {
                     refundUuid: refund.uuid,
-                    reason: error.message,
+                    orderUuid: refund.orderUuid,
+                    reason: err.message,
                 });
 
                 EventBus.emit("REFUND_FAILED", {
@@ -24,7 +25,7 @@ export class RefundProcessorJob{
                     orderUuid: refund.orderUuid,
                 });
 
-                console.error("Refund failed", refund.uuid, e);
+                console.error("Refund failed", refund.uuid, err);
             }
         }
     }

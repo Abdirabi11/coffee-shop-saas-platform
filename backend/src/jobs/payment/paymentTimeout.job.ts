@@ -11,13 +11,22 @@ export class PaymentTimeoutJob{
                 createdAt: {
                     lt: new Date(Date.now() - 15 * 60 * 1000)
                 }
-            }
+            },
+            take: 20
         });
 
         for(const order of expiredOrders){
             await prisma.$transaction(async (tx) => {
-                await OrderStatusService.transition(order.uuid, "CANCELLED"),
-                await InventoryReleaseService.release(tx, order.uuid);
+                await OrderStatusService.transition(
+                    tx, 
+                    order.uuid, 
+                    "CANCELLED"
+                ),
+
+                await InventoryReleaseService.release(
+                    tx,
+                    order.uuid
+                );
             });
 
             EventBus.emit("ORDER_PAYMENT_TIMEOUT", {

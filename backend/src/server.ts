@@ -23,6 +23,8 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use( "/api/payments", express.raw({ type: "application/json" }) );
+
 app.use("/api/auth", authRoutes);
 app.use("/api/super_admin", superRoutes);
 app.use("/api/admin", adminRoutes);

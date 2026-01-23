@@ -71,6 +71,10 @@ export const require2FA= async(req: AuthRequest, res: Response, next: NextFuncti
         where: { userUuid: req.user!.userUuid },
     });
 
+    if (!req.user) {
+        return res.status(401).json({ message: "Unauthenticated" });
+    }
+
     if (!record?.enabled) {
         return res.status(403).json({ message: "2FA required" });
     };

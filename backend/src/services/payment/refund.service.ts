@@ -12,7 +12,6 @@ export class RefundService{
             where: {uuid: input.orderUuid},
             include: {
                 payment: true,
-                paymentSnapshot: true,
                 refunds: true,
             },
         });
@@ -21,18 +20,17 @@ export class RefundService{
         if (!order.payment) throw new Error("NO_PAYMENT_FOUND");
 
         const totalPaid = order.payment.amount;
-        const refundedSoFar = order.refunds.reduce(
-            (sum, r) => sum + r.amount,
-            0
-        );
+        const refundedSoFar = order.refunds
+           .filter(r => r.status === "COMPLETED")
+           .reduce((s, r) => s + r.amount, 0);
 
         const refundableAmount = totalPaid - refundedSoFar;
         if (refundableAmount <= 0) {
             throw new Error("NOTHING_TO_REFUND");
         };
 
-        const refundAmount= input.amount ?? refundableAmount;
-        if (refundAmount > refundableAmount) {
+        const amount= input.amount ?? refundableAmount;
+        if (amount > refundableAmount) {
             throw new Error("REFUND_AMOUNT_EXCEEDS_LIMIT");
         };
 
@@ -41,27 +39,27 @@ export class RefundService{
                 orderUuid: order.uuid,
                 paymentUuid: order.payment.uuid,
                 storeUuid: order.storeUuid,
-                amount: refundAmount,
+                amount,
                 currency: order.payment.currency,
                 reason: input.reason,
                 status: "REQUESTED",
                 provider: order.payment.provider,
-                snapshot: {
-                    requestedAmount: refundAmount,
-                    originalPayment: order.payment.snapshot,
-                },
                 requestedBy: input.requestedBy,
+                snapshot: {
+                    originalPayment: order.payment.snapshot,
+                    requestedAmount: amount,
+                }, 
             }
-        })
+        });
 
         EventBus.emit("REFUND_REQUESTED", {
             refundUuid: refund.uuid,
             orderUuid: order.uuid,
-            // storeUuid,
-            // amount,
-            // currency,
-            // reason,
-            // requestedBy,
+            storeUuid: order.storeUuid,
+            amount,
+            currency: order.payment.currency,
+            reason: input.reason,
+            requestedBy: input.requestedBy,
         });
       
         return refund;
@@ -81,6 +79,12 @@ export class RefundService{
             data: { status: "PROCESSING" },
         });
 
+        EventBus.emit("REFUND_PROCESSING", {
+            refundUuid: refund.uuid,
+            orderUuid: refund.orderUuid,
+            storeUuid: refund.storeUuid,
+        });
+
         try {
             // 🔌 Provider adapter (Stripe / Wallet / Mobile Money)
             const providerRef = await PaymentProviderAdapter.refund({
@@ -89,26 +93,26 @@ export class RefundService{
                 paymentRef: refund.payment.providerRef!,
             });
 
-            await prisma.$transaction.(async (tx)=> {
+            await prisma.$transaction(async (tx) => {
                 await tx.refund.update({
                     where: { uuid: refund.uuid },
                     data: {
-                      status: "REFUNDED",
+                      status: "COMPLETED",
                       providerRef,
                       processedAt: new Date(),
                     },
                 });
 
-                const totalRefunded = await tx.refund.aggregate({
+                const totals = await tx.refund.aggregate({
                     where: {
                       paymentUuid: refund.paymentUuid,
-                      status: "REFUNDED",
+                      status: "COMPLETED",
                     },
                     _sum: { amount: true },
                 });
 
                 if (
-                    totalRefunded._sum.amount === refund.payment.amount
+                    totals._sum.amount === refund.payment.amount
                   ) {
                     await tx.paymentSnapshot.update({
                       where: { orderUuid: refund.orderUuid },
@@ -120,19 +124,38 @@ export class RefundService{
             EventBus.emit("REFUND_COMPLETED", {
                 refundUuid: refund.uuid,
                 orderUuid: refund.orderUuid,
+                storeUuid: refund.storeUuid,
+                amount: refund.amount,
             });
-        } catch (error) {
+        } catch (err: any) {
             await prisma.refund.update({
                 where: { uuid: refund.uuid },
-                data: { status: "FAILED" },
+                data: { 
+                    status: "FAILED",
+                    failureReason: err.message,
+                },
             });
 
             EventBus.emit("REFUND_FAILED", {
                 refundUuid: refund.uuid,
-                error,
+                orderUuid: refund.orderUuid,
+                storeUuid: refund.storeUuid,
+                reason: err.message,
             });
 
-            throw error;
+            throw err;
         }
+    }  
+};
+
+const ALLOWED_TRANSITIONS = {
+    CREATED: ["LOCKED"],
+    LOCKED: ["PAID", "FAILED"],
+    PAID: ["REFUNDED"],
+};
+  
+export function assertTransition(from: string, to: string) {
+    if (!ALLOWED_TRANSITIONS[from]?.includes(to)) {
+      throw new Error(`INVALID_PAYMENT_TRANSITION ${from} → ${to}`);
     }
 };
