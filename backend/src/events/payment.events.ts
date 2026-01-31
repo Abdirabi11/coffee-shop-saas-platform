@@ -61,6 +61,3 @@ FraudSignalService.signalPayment("REFUND_COMPLETED", {
 FraudSignalService.signalPayment("PAYMENT_TIMEOUT", {
   orderUuid,
 });
-
-//REFUND EVENTS
-

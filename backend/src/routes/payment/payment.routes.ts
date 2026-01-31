@@ -14,12 +14,13 @@ const router = express.Router();
 
 router.use(authenticate);
 
+// 8️⃣ Security Gap in Routes (small but real)
+// Why does a client route need webhook verification?
 router.post(
     "/confirm",
     maintenanceGuard,
     rateLimit("payment.confirm"),
     idempotencyMiddleware,
-    verifyPaymentWebhook, 
     PaymentController.confirmPayment
 );
 

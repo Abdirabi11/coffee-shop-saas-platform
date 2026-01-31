@@ -26,10 +26,10 @@ export class OrderAutoRefundJob{
             requestedBy: "SYSTEM",
         });
 
-        EventBus.emit("AUTO_REFUND_TRIGGERED", {
-            orderUuid,
-            storeUuid: order.storeUuid,
-            reason,
-        });
+        // EventBus.emit("AUTO_REFUND_TRIGGERED", {
+        //     orderUuid,
+        //     storeUuid: order.storeUuid,
+        //     reason,
+        // });
     }
 };

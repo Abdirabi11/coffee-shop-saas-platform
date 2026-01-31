@@ -31,6 +31,9 @@ export class FailedPaymentRetryJob{
                         data: {retries: { increment: 1}}
                     })
                 }
+
+                //skip blocked users
+                await RiskPolicyEnforcer.apply()
             } catch (error) {
                 const updated= await prisma.payment.update({
                     where: { uuid: payment.uuid },

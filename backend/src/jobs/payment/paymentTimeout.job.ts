@@ -29,7 +29,7 @@ export class PaymentTimeoutJob{
                 );
             });
 
-            EventBus.emit("ORDER_PAYMENT_TIMEOUT", {
+            EventBus.emit("PAYMENT_TIMEOUT", {
                 orderUuid: order.uuid,
                 storeUuid: order.storeUuid,
             });

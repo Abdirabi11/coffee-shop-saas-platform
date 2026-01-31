@@ -1,5 +1,11 @@
 import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.js";
+import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
+import { RefundStateMachine } from "../../domain/payments/refundStateMachine.ts";
+import { EventBus } from "../../events/eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { MetricsService } from "../../infrastructure/observability/metrics.js";
+import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/payment-provider.adapter.js";
+import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 
 export class RefundService{
     static async requestRefund(input: {
@@ -18,6 +24,7 @@ export class RefundService{
 
         if (!order) throw new Error("ORDER_NOT_FOUND");
         if (!order.payment) throw new Error("NO_PAYMENT_FOUND");
+        if (order.payment.status !== "PAID") throw new Error("PAYMENT_NOT_REFUNDABLE");
 
         const totalPaid = order.payment.amount;
         const refundedSoFar = order.refunds
@@ -33,6 +40,10 @@ export class RefundService{
         if (amount > refundableAmount) {
             throw new Error("REFUND_AMOUNT_EXCEEDS_LIMIT");
         };
+
+        RefundStateMachine.assertTransition("REQUESTED", "PROCESSING");
+
+        await RiskPolicyEnforcer.apply()
 
         const refund= await prisma.refund.create({
             data: {
@@ -74,6 +85,11 @@ export class RefundService{
         if (!refund) throw new Error("REFUND_NOT_FOUND");
         if (refund.status !== "REQUESTED") return;
 
+        RefundStateMachine.assertTransition(
+            refund.status,
+            "PROCESSING"
+        );
+        
         await prisma.refund.update({
             where: { uuid: refund.uuid },
             data: { status: "PROCESSING" },
@@ -85,8 +101,23 @@ export class RefundService{
             storeUuid: refund.storeUuid,
         });
 
+        MetricsService.increment(
+            refund.amount < refund.payment.amount
+              ? "refund.partial.count"
+              : "refund.full.count",
+            1,
+            { provider: refund.provider }
+        );
+          
+          logWithContext("info", "Refund completed", {
+            traceUuid,
+            refundUuid: refund.uuid,
+            paymentUuid: refund.paymentUuid,
+            amount: refund.amount,
+          });
+          
+
         try {
-            // 🔌 Provider adapter (Stripe / Wallet / Mobile Money)
             const providerRef = await PaymentProviderAdapter.refund({
                 provider: refund.provider,
                 amount: refund.amount,
@@ -94,6 +125,11 @@ export class RefundService{
             });
 
             await prisma.$transaction(async (tx) => {
+                RefundStateMachine.assertTransition(
+                    "PROCESSING",
+                    "COMPLETED"
+                );
+
                 await tx.refund.update({
                     where: { uuid: refund.uuid },
                     data: {
@@ -114,6 +150,11 @@ export class RefundService{
                 if (
                     totals._sum.amount === refund.payment.amount
                   ) {
+                    await tx.payment.update({
+                        where: { uuid: refund.paymentUuid },
+                        data: { status: "REFUNDED" },
+                    });
+
                     await tx.paymentSnapshot.update({
                       where: { orderUuid: refund.orderUuid },
                       data: { status: "REFUNDED" },
@@ -128,6 +169,11 @@ export class RefundService{
                 amount: refund.amount,
             });
         } catch (err: any) {
+            RefundStateMachine.assertTransition(
+                refund.status,
+                "FAILED"
+            );
+          
             await prisma.refund.update({
                 where: { uuid: refund.uuid },
                 data: { 
@@ -146,16 +192,76 @@ export class RefundService{
             throw err;
         }
     }  
-};
 
-const ALLOWED_TRANSITIONS = {
-    CREATED: ["LOCKED"],
-    LOCKED: ["PAID", "FAILED"],
-    PAID: ["REFUNDED"],
-};
-  
-export function assertTransition(from: string, to: string) {
-    if (!ALLOWED_TRANSITIONS[from]?.includes(to)) {
-      throw new Error(`INVALID_PAYMENT_TRANSITION ${from} → ${to}`);
+    static async processProviderRefund(providerRefund: any, event: any){
+        const paymentUuid= providerRefund.metadata?.paymentUuid;
+        if (!paymentUuid) {
+            throw new Error("MISSING_PAYMENT_UUID_IN_REFUND");
+        };
+        
+        const payment= await prisma.payment.findUnique({
+            where: {uuid: paymentUuid},
+            include: { refunds: true },
+        });
+
+        if (!payment) {
+            throw new Error("PAYMENT_NOT_FOUND");
+        };
+
+        const existing = await prisma.refund.findFirst({
+            where: { providerRef: event.uuid },
+        });
+        if (existing) return;
+
+        // PaymentStateMachine.assertTransition(
+        //     payment.status,
+        //     "REFUNDED"
+        // );
+        
+        await prisma.$transaction([
+            prisma.refund.create({
+              data: {
+                paymentUuid,
+                orderUuid: payment.orderUuid,
+                provider: payment.provider,
+                providerRef: event.id,
+                amount: event.amount,
+                currency: event.currency,
+                status: "COMPLETED",
+                raw: event,
+              },
+            }),
+            
+            // prisma.payment.update({
+            //     where: { uuid: paymentUuid },
+            //     data: {
+            //       status: "REFUNDED",
+            //       refundedAt: new Date(),
+            //     },
+            // }),
+        ]);
+
+        const totals = await tx.refund.aggregate({
+            where: {
+              paymentUuid,
+              status: "COMPLETED",
+            },
+            _sum: { amount: true },
+        });
+
+        if (totals._sum.amount === payment.amount) {
+            PaymentStateMachine.assertTransition(
+              payment.status,
+              "REFUNDED"
+            );
+      
+            await tx.payment.update({
+              where: { uuid: paymentUuid },
+              data: { status: "REFUNDED" },
+            });
+        }
+
+        EventBus.emit("PAYMENT_REFUNDED", {paymentUuid} );
     }
 };
+

@@ -1,0 +1,6 @@
+export type NormalizedProviderError =
+  | "INSUFFICIENT_FUNDS"
+  | "CARD_DECLINED"
+  | "PROVIDER_TIMEOUT"
+  | "PROVIDER_UNAVAILABLE"
+  | "FRAUD_SUSPECTED";

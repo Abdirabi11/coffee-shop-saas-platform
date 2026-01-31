@@ -19,4 +19,4 @@ export class WebhookDedupService {
             data: event,
         });
     }
-}
+};

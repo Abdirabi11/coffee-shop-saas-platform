@@ -849,6 +849,7 @@ model Order {
   @@index([userUuid])
   @@index([createdAt])  
   PaymentSnapshot PaymentSnapshot[]
+  Refund Refund[]
 }
 
 model OrderItem {
@@ -881,6 +882,8 @@ model Payment {
   retries           Int             @default(0)
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+
+  Refund Refund[]
 }
 
 model PaymentSnapshot {
@@ -904,6 +907,22 @@ model PaymentSnapshot {
   createdAt         DateTime @default(now())
 
   order             Order    @relation(fields: [orderUuid], references: [uuid])
+}
+
+model PaymentRisk {
+  userUuid     String    @id @default(uuid())
+  score        Int       @default(0)
+  updatedAt    DateTime  @updatedAt
+}
+
+model PaymentRestriction {
+  userUuid String
+  type     String   // BLOCK_RETRY, DISABLE_WALLET, MANUAL_REVIEW
+  active   Boolean  @default(true)
+  reason   String?
+  createdAt DateTime @default(now())
+
+  @@unique([userUuid, type])
 }
 
 model Refund {
@@ -1073,13 +1092,13 @@ model WebhookOutbox {
 model WebhookEvent {
   uuid            String         @id @default(uuid())
   provider        String   // stripe, paypal, internal
-  eventId         String   // provider event id or generated nonce
+  eventUuid       String   // provider event id or generated nonce
   receivedAt      DateTime       @default(now())
   eventType       String
   payload         Json
   processedAt     DateTime       @default(now())
 
-  @@unique([provider, eventId])
+  @@unique([provider, eventUuid])
 }
 
 model WebhookSecret {
@@ -1115,4 +1134,14 @@ model PaymentIntent {
   orderUuid       String       @unique
   lockedAt        DateTime?
   status          String
+}
+
+model LedgerEntry {
+  uuid            String   @id @default(uuid())
+  type            String   
+  amount          Int
+  currency        String
+  refType         String  
+  refUuid         String
+  createdAt       DateTime @default(now())
 }
