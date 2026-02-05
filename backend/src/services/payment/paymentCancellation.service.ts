@@ -2,6 +2,10 @@ import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payments/paymentStateMachine.ts";
 import { EventBus } from "../../events/eventBus.ts";
 
+// PaymentCancellationService.cancel should:
+// lock payment
+// mark failed / cancelled
+// emit domain event
 export class PaymentCancellationService{
     static async cancel(input: {
         paymentUuid: string;
@@ -38,4 +42,4 @@ export class PaymentCancellationService{
             cancelledBy: input.cancelledBy,
         });
     }
-}
+};

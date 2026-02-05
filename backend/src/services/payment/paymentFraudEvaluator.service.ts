@@ -46,7 +46,11 @@ export class PaymentFraudEvaluator{
     });
 
     if (recentFailures >= 3) {
-      await PaymentRiskScoreService.increase(userUuid, 30, "FAILURE_VELOCITY");
+      await PaymentRiskScoreService.increase(
+        userUuid, 
+        30, 
+        "MULTIPLE_PAYMENT_FAILED"
+      );
     };
 
     if (
@@ -60,6 +64,20 @@ export class PaymentFraudEvaluator{
     if (await isHighRiskIp(ipAddress)) {
       await PaymentRiskScoreService.increase(userUuid, 20, "RISKY_IP");
     };
+
+    //Simple failure
+    PaymentRiskScoreService.increase({
+      userUuid,
+      delta: 10,
+      reason: "PAYMENT_FAILED",
+    });
+
+    // Multiple failures (fraud detection)
+    PaymentRiskScoreService.increase({
+      userUuid,
+      delta: 40,
+      reason: "MULTIPLE_PAYMENT_FAILED",
+    });
 
     await RiskPolicyEnforcer.apply(userUuid);
   }

@@ -21,6 +21,8 @@ export class PaymentAdminOverrideService {
             input.targetState
         );
 
+        PaymentAdminOverrideService.forceState(...)
+
         await prisma.$transaction(async (tx)=> {
             await tx.payment.update({
                 where: { uuid: payment.uuid },

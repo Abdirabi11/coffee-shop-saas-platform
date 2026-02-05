@@ -15,6 +15,7 @@ export class FinalizeOrderJob{
                 if(!order) throw new Error("Order not found");
 
                 if (order.status === "PAID" || order.status === "PREPARING") {
+                    console.log(`[FinalizeOrderJob] Order ${orderUuid} already finalized`);
                     return;
                 };
 
@@ -24,17 +25,36 @@ export class FinalizeOrderJob{
                     );
                 };
 
-                await OrderStatusService.transition(order.uuid, "PAID", tx);
-
-                await InventoryCommitJob.run(tx, order.uuid);
+                await OrderStatusService.transition(
+                    order.uuid, "PAID", {
+                        changedBy: "system",
+                        reason: "Payment confirmed",
+                    }
+                );
+                await InventoryCommitJob.run( order.uuid );
             });
 
-            OrderEventBus.emit("ORDER_PAID", { orderUuid });
-        } catch (err) {
-            await DeadLetterQueue.record("FINALIZE_ORDER", {
-                orderUuid,
-                reason: err.message,
+            OrderEventBus.emit("ORDER_PAID", { orderUuid,} );
+            console.log(`[FinalizeOrderJob] Successfully finalized order: ${orderUuid}`);
+        } catch (err: any) {
+            console.error(`[FinalizeOrderJob] Failed for ${orderUuid}:`, err.message);
+            const order = await prisma.order.findUnique({
+                where: { uuid: orderUuid },
+                select: { tenantUuid: true, orderNumber: true, storeUuid: true },
             });
+
+            if (order) {
+                await DeadLetterQueue.record(
+                order.tenantUuid,
+                "FINALIZE_ORDER",
+                {
+                    orderUuid,
+                    orderNumber: order.orderNumber,
+                    storeUuid: order.storeUuid,
+                },
+                err.message
+                );
+            }
             throw err;
         }
     }

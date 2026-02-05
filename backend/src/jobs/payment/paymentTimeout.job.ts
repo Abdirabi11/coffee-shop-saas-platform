@@ -2,6 +2,7 @@ import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { InventoryReleaseService } from "../../services/order/inventoryRelease.service.ts";
 import { OrderStatusService } from "../../services/order/order-status.service.ts";
+import { PaymentCancellationService } from "../../services/payment/paymentCancellation.service.js";
 
 export class PaymentTimeoutJob{
     static async run(){
@@ -14,6 +15,8 @@ export class PaymentTimeoutJob{
             },
             take: 20
         });
+
+        PaymentCancellationService.cancel(...)
 
         for(const order of expiredOrders){
             await prisma.$transaction(async (tx) => {

@@ -33,6 +33,6 @@ if (
       userUuid,
       "DISABLE_WALLET"
     )
-  ) {
+  ){
     throw new Error("WALLET_DISABLED");
-  }
+}

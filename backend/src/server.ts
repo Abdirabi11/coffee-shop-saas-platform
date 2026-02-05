@@ -7,6 +7,7 @@ import superRoutes from "./routes/super-admin/super_admin.auth.routes.ts"
 import adminRoutes from "./routes/admin/admin.routes.ts"
 import authRoutes from "./routes/auth.routes.ts"
 import productRoutes from "./routes/product.routes.ts"
+import { startScheduler } from "./lib/cron/scheduler.js";
 
 
 dotenv.config();
@@ -30,7 +31,8 @@ app.use("/api/super_admin", superRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/product", productRoutes);
 
-
+startScheduler();
 app.listen(PORT, () => {
   console.log(`☕ Coffee API running on port ${PORT}`);
+  console.log(`🕒 Cron scheduler active`);
 });

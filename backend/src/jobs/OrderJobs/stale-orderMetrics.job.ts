@@ -3,12 +3,13 @@ import prisma from "../../config/prisma.ts"
 export class StaleOrderMetricsJob{
     static async runDaily(){
         const staleOrders= await prisma.order.groupBy({
-            by: ["storeUuid"],
+            by: ["tenantUuid", "storeUuid"],
             where: {
                 status: "PREPARING"
             },
             _count: { uuid: true },
         });
+        console.log(`[StaleOrderMetricsJob] Processing ${staleOrders.length} stores`);
 
         for (const stat of staleOrders){
             await prisma.storeOpsMetrics.upsert({
@@ -24,5 +25,6 @@ export class StaleOrderMetricsJob{
                 },
             })
         };
+        console.log(`[StaleOrderMetricsJob] Completed`);
     }
-}
+};

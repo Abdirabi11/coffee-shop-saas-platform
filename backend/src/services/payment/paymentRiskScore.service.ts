@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma.ts"
+import { EventBus } from "../../events/eventBus.js";
 
 
 export class PaymentRiskScoreService{
@@ -44,6 +45,11 @@ export class PaymentRiskScoreService{
                 },
             }); 
         })
+
+        EventBus.emit("PAYMENT_FAILED", {
+            orderUuid,
+            reason,
+        });
     }
 
     //reconciliation / admin / decay jobs

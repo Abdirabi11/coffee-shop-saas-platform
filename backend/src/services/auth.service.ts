@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from "express";
+import type { Request} from "express";
 import prisma from "../config/prisma.ts"
 import { hashOtp, compareOtp, generateOtp, otpExpiry } from "./otp.service.ts";
 import { recordOtpFraud } from "./fraud.service.ts";

@@ -2,6 +2,7 @@ import cron from "node-cron";
 import prisma from "../../config/prisma.ts"
 import dayjs from "dayjs";
 
+
 export const churnCron= ()=>{
     cron.schedule("0 3 * * *", async () => {
         console.log("📉 Running nightly churn analytics");
@@ -45,58 +46,7 @@ export const churnCron= ()=>{
     })
 };
 
-export const cohortRetentionCron= async ()=>{
-    cron.schedule("30 3 * * *", async () => {
-        console.log("📊 Running cohort retention cron");
-        const cohorts=  await prisma.tenant.groupBy({
-            by: ["createdAt"],
-        });
 
-        for(const cohort of cohorts ){
-            const cohortMonth= dayjs(cohort.createdAt.format("YYYY-MM"));
-            const cohortStart = dayjs(cohortMonth).startOf("month").toDate();
-
-            const cohortTenants= await prisma.tenant.findMany({
-                where: {
-                    createdAt: {
-                        gte: cohortStart,
-                        lt: dayjs(cohortStart).add(1, "month").toDate()
-                    }
-                },
-                select: {uuid: true}
-            });
-
-            const size= cohortTenants.length
-            if(size === 0) continue
-            
-            const tenantUuids= cohortTenants.map(t => t.uuid);
-
-            const retention= {};
-
-            for(const month of [1, 3, 6]){
-                const checkDate= dayjs(cohortStart).add(month, "month").toDate();
-
-                const activeTenant= await prisma.subscription.count({
-                    where: {
-                        tenantUuid: {in: tenantUuids},
-                        status: {in: ["ACTIVE", "PAST_DUE"]},
-                        startDate: { lte: checkDate },
-                    },
-                });
-                retention[`month_${month}`] = activeCount;
-            };
-
-            await prisma.analyticsSnapshot.create({
-                data: {
-                    type: "COHORT_RETENTION",
-                    period: cohortMonth,
-                    data: { cohort: cohortMonth, size, retention },
-                }
-            });
-        };
-        console.log("✅ Cohort retention snapshots saved");
-    })
-};
 
 export const tenantCohortGrowthCron= ()=>{
     cron.schedule("45 3 * * *", async()=>{

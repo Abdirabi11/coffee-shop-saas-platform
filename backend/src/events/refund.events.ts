@@ -25,6 +25,12 @@ EventBus.on("REFUND_REQUESTED", async (payload) => {
       payload
     );
 });
+
+EventBus.emit("REFUND_CREATED", {
+  refundUuid,
+  userUuid,
+  amount,
+});
   
 EventBus.on("REFUND_PROCESSING", async (payload) => {
   const { refundUuid, orderUuid, storeUuid }= payload;
