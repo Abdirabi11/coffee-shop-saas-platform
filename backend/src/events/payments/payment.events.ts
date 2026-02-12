@@ -1,13 +1,14 @@
+import { PaymentEventBus } from "../eventBus.ts";
 import { EmailService } from "../services/email.service.ts";
 import { FraudSignalService } from "../services/fraud.service.ts";
 import { MetricsService } from "../services/metrics.service.ts";
 import { OrderStatusService } from "../services/order/order-status.service.ts";
 import { InventoryService } from "../services/products/inventory.service.ts";
 import { AuditLogService } from "../services/superAdmin/auditLog.service.ts";
-import { EventBus } from "./eventBus.ts";
+
 
 //PAYMENT REFUNDS
-EventBus.on("PAYMENT_CONFIRMED", async (payload) => {
+PaymentEventBus.on("PAYMENT_CONFIRMED", async (payload) => {
   const { orderUuid, storeUuid, amount }= payload;
 
   await InventoryService.deductForOrder(orderUuid);
@@ -15,7 +16,7 @@ EventBus.on("PAYMENT_CONFIRMED", async (payload) => {
   EmailService.sendPaymentReceipt(orderUuid);
 });
 
-EventBus.on("PAYMENT_FAILED", async (payload) => {
+PaymentEventBus.on("PAYMENT_FAILED", async (payload) => {
   const { orderUuid, reason }= payload;
 
   await OrderStatusService.transition(orderUuid, "PAYMENT_FAILED");
@@ -26,7 +27,7 @@ EventBus.on("PAYMENT_FAILED", async (payload) => {
   });
 });
 
-EventBus.on("PAYMENT_TIMEOUT", async (payload) => {
+PaymentEventBus.on("PAYMENT_TIMEOUT", async (payload) => {
   const { orderUuid, storeUuid }= payload;
 
   MetricsService.increment("checkout.timeout", 1, { storeUuid });
@@ -35,7 +36,7 @@ EventBus.on("PAYMENT_TIMEOUT", async (payload) => {
   });
 });
 
-EventBus.on("PAYMENT_RECONCILED", async (payload) => {
+PaymentEventBus.on("PAYMENT_RECONCILED", async (payload) => {
   const { paymentUuid, orderUuid, storeUuid }= payload;
 
   await AuditLogService.record({

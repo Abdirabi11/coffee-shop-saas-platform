@@ -2,9 +2,9 @@ import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
 import { RefundStateMachine } from "../../domain/payments/refundStateMachine.ts";
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
-import { MetricsService } from "../../infrastructure/observability/metrics.js";
-import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/payment-provider.adapter.js";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/metrics.ts";
+import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.js";
 import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 
 export class RefundService{
@@ -29,52 +29,119 @@ export class RefundService{
         const totalPaid = order.payment.amount;
         const refundedSoFar = order.refunds
            .filter(r => r.status === "COMPLETED")
-           .reduce((s, r) => s + r.amount, 0);
+           .reduce((sum, r) => sum + r.amount, 0);
 
         const refundableAmount = totalPaid - refundedSoFar;
         if (refundableAmount <= 0) {
             throw new Error("NOTHING_TO_REFUND");
         };
 
-        const amount= input.amount ?? refundableAmount;
-        if (amount > refundableAmount) {
+        const refundAmount = input.amount ?? refundableAmount;
+        if (refundAmount > refundableAmount) {
             throw new Error("REFUND_AMOUNT_EXCEEDS_LIMIT");
         };
+        if (refundAmount <= 0) {
+            throw new Error("INVALID_REFUND_AMOUNT");
+        }
 
-        RefundStateMachine.assertTransition("REQUESTED", "PROCESSING");
+        // RefundStateMachine.assertTransition("REQUESTED", "PROCESSING");
 
-        await RiskPolicyEnforcer.apply()
+        await RiskPolicyEnforcer.apply(input.requestedBy);
 
+        //create refund record
         const refund= await prisma.refund.create({
             data: {
-                orderUuid: order.uuid,
+                tenantUuid: order.tenantUuid,
                 paymentUuid: order.payment.uuid,
+                orderUuid: order.uuid,
                 storeUuid: order.storeUuid,
-                amount,
+                amount: refundAmount,
                 currency: order.payment.currency,
-                reason: input.reason,
                 status: "REQUESTED",
-                provider: order.payment.provider,
+                reason: input.reason,
                 requestedBy: input.requestedBy,
+                provider: order.payment.provider,
                 snapshot: {
-                    originalPayment: order.payment.snapshot,
-                    requestedAmount: amount,
-                }, 
+                  originalPayment: {
+                    amount: order.payment.amount,
+                    status: order.payment.status,
+                  },
+                  requestedAmount: refundAmount,
+                  refundableAmount,
+                },
             }
         });
 
-        EventBus.emit("REFUND_REQUESTED", {
+        PaymentEventBus.emit("REFUND_REQUESTED", {
             refundUuid: refund.uuid,
+            paymentUuid: order.payment.uuid,
             orderUuid: order.uuid,
+            tenantUuid: order.tenantUuid,
             storeUuid: order.storeUuid,
-            amount,
+            amount: refundAmount,
             currency: order.payment.currency,
             reason: input.reason,
             requestedBy: input.requestedBy,
         });
       
+        logWithContext("info", "Refund requested", {
+            refundUuid: refund.uuid,
+            paymentUuid: order.payment.uuid,
+            amount: refundAmount,
+        });
+      
         return refund;
     };
+
+    // ✅ ADD: Check risk before processing refund
+    const order = await prisma.order.findUnique({
+        where: { uuid: input.orderUuid },
+        include: { tenantUser: true },
+    });
+
+    if (order?.tenantUser) {
+        // Apply risk policy
+        await RiskPolicyEnforcer.apply(order.tenantUser.uuid);
+        
+        // Check if manual review is required
+        const requiresReview = await PaymentRestrictionService.hasRestriction(
+          order.tenantUser.uuid,
+          "MANUAL_REVIEW"
+        );
+    
+        if (requiresReview) {
+          // Create refund but mark as requiring approval
+          const refund = await prisma.refund.create({
+            data: {
+              // ... existing fields ...
+              status: "REQUESTED",
+              requiresApproval: true, // ✅ NEW field
+              approvalReason: "High fraud risk - manual review required",
+            },
+          });
+    
+          // Create admin alert
+          await prisma.adminAlert.create({
+            data: {
+              tenantUuid: order.tenantUuid,
+              storeUuid: order.storeUuid,
+              alertType: "REFUND_REQUIRES_APPROVAL",
+              category: "FINANCIAL",
+              level: "WARNING",
+              priority: "HIGH",
+              title: "Refund Requires Manual Approval",
+              message: `Refund for order ${order.orderNumber} requires approval due to high fraud risk`,
+              context: {
+                refundUuid: refund.uuid,
+                orderUuid: order.uuid,
+                amount: refund.amount,
+              },
+            },
+          });
+    
+          return refund;
+        }
+      }    
 
     static async processRefund(refundUuid: string){
         const refund= await prisma.refund.findUnique({
@@ -83,7 +150,13 @@ export class RefundService{
         });
 
         if (!refund) throw new Error("REFUND_NOT_FOUND");
-        if (refund.status !== "REQUESTED") return;
+        if (refund.status !== "REQUESTED") {
+            logWithContext("warn", "Refund not in REQUESTED status", {
+              refundUuid: refund.uuid,
+              status: refund.status,
+            });
+            return refund;
+        };
 
         RefundStateMachine.assertTransition(
             refund.status,
@@ -95,112 +168,128 @@ export class RefundService{
             data: { status: "PROCESSING" },
         });
 
-        EventBus.emit("REFUND_PROCESSING", {
+        PaymentEventBus.emit("REFUND_PROCESSING", {
             refundUuid: refund.uuid,
+            paymentUuid: refund.paymentUuid,
             orderUuid: refund.orderUuid,
             storeUuid: refund.storeUuid,
         });
 
-        MetricsService.increment(
-            refund.amount < refund.payment.amount
-              ? "refund.partial.count"
-              : "refund.full.count",
-            1,
-            { provider: refund.provider }
-        );
-          
-          logWithContext("info", "Refund completed", {
-            traceUuid,
-            refundUuid: refund.uuid,
-            paymentUuid: refund.paymentUuid,
-            amount: refund.amount,
-          });
-          
-
         try {
-            const providerRef = await PaymentProviderAdapter.refund({
+            const result = await PaymentProviderAdapter.refund({
                 provider: refund.provider,
+                providerRef: refund.payment.providerRef!,
                 amount: refund.amount,
-                paymentRef: refund.payment.providerRef!,
             });
 
+            // Update refund and payment status
             await prisma.$transaction(async (tx) => {
-                RefundStateMachine.assertTransition(
-                    "PROCESSING",
-                    "COMPLETED"
-                );
+                // Marking refund as completed
+                RefundStateMachine.assertTransition("PROCESSING", "COMPLETED");
 
                 await tx.refund.update({
                     where: { uuid: refund.uuid },
                     data: {
                       status: "COMPLETED",
-                      providerRef,
+                      providerRef: result.providerRef,
                       processedAt: new Date(),
+                      snapshot: result.snapshot || {},
                     },
                 });
 
                 const totals = await tx.refund.aggregate({
                     where: {
-                      paymentUuid: refund.paymentUuid,
-                      status: "COMPLETED",
+                        paymentUuid: refund.paymentUuid,
+                        status: "COMPLETED",
                     },
                     _sum: { amount: true },
                 });
 
-                if (
-                    totals._sum.amount === refund.payment.amount
-                  ) {
+                const totalRefunded = totals._sum.amount || 0;
+
+                if ( totalRefunded >= refund.payment.amount ) {
+                    PaymentStateMachine.assertTransition(refund.payment.status, "REFUNDED");
+          
                     await tx.payment.update({
                         where: { uuid: refund.paymentUuid },
                         data: { status: "REFUNDED" },
                     });
-
-                    await tx.paymentSnapshot.update({
-                      where: { orderUuid: refund.orderUuid },
-                      data: { status: "REFUNDED" },
+                }else {
+                    // Partially refunded
+                    PaymentStateMachine.assertTransition(refund.payment.status, "PARTIALLY_REFUNDED");
+                    
+                    await tx.payment.update({
+                        where: { uuid: refund.paymentUuid },
+                        data: { status: "PARTIALLY_REFUNDED" },
                     });
-                };
+                }
             });
 
             EventBus.emit("REFUND_COMPLETED", {
                 refundUuid: refund.uuid,
+                paymentUuid: refund.paymentUuid,
                 orderUuid: refund.orderUuid,
+                tenantUuid: refund.tenantUuid,
                 storeUuid: refund.storeUuid,
                 amount: refund.amount,
             });
-        } catch (err: any) {
-            RefundStateMachine.assertTransition(
-                refund.status,
-                "FAILED"
+
+            logWithContext("info", "Refund completed", {
+                refundUuid: refund.uuid,
+                paymentUuid: refund.paymentUuid,
+                amount: refund.amount,
+            });
+        
+            MetricsService.increment(
+                refund.amount < refund.payment.amount
+                  ? "refund.partial.count"
+                  : "refund.full.count",
+                1,
+                { provider: refund.provider }
             );
-          
+        
+            return refund;
+        } catch (error: any) {
+            // Mark as failed
+            RefundStateMachine.assertTransition(refund.status, "FAILED");
+
             await prisma.refund.update({
                 where: { uuid: refund.uuid },
-                data: { 
-                    status: "FAILED",
-                    failureReason: err.message,
+                data: {
+                status: "FAILED",
+                failureReason: error.message,
                 },
             });
 
-            EventBus.emit("REFUND_FAILED", {
+            PaymentEventBus.emit("REFUND_FAILED", {
                 refundUuid: refund.uuid,
+                paymentUuid: refund.paymentUuid,
                 orderUuid: refund.orderUuid,
                 storeUuid: refund.storeUuid,
-                reason: err.message,
+                reason: error.message,
             });
 
-            throw err;
+            logWithContext("error", "Refund failed", {
+                refundUuid: refund.uuid,
+                error: error.message,
+            });
+
+            throw error;
         }
     }  
 
-    static async processProviderRefund(providerRefund: any, event: any){
-        const paymentUuid= providerRefund.metadata?.paymentUuid;
-        if (!paymentUuid) {
-            throw new Error("MISSING_PAYMENT_UUID_IN_REFUND");
-        };
-        
-        const payment= await prisma.payment.findUnique({
-            where: {uuid: paymentUuid},
+    static async processProviderRefund(input: {
+        provider: string;
+        providerRef: string;
+        amount: number;
+        snapshot: any;
+    }){
+        // Find payment by provider ref
+        const payment = await prisma.payment.findFirst({
+            where: {
+                provider: input.provider.toUpperCase(),
+                providerRef: input.providerRef,
+            },
             include: { refunds: true },
         });
 
@@ -208,60 +297,93 @@ export class RefundService{
             throw new Error("PAYMENT_NOT_FOUND");
         };
 
+        // Checking if refund already exists (idempotency)
         const existing = await prisma.refund.findFirst({
-            where: { providerRef: event.uuid },
-        });
-        if (existing) return;
-
-        // PaymentStateMachine.assertTransition(
-        //     payment.status,
-        //     "REFUNDED"
-        // );
-        
-        await prisma.$transaction([
-            prisma.refund.create({
-              data: {
-                paymentUuid,
-                orderUuid: payment.orderUuid,
-                provider: payment.provider,
-                providerRef: event.id,
-                amount: event.amount,
-                currency: event.currency,
-                status: "COMPLETED",
-                raw: event,
-              },
-            }),
-            
-            // prisma.payment.update({
-            //     where: { uuid: paymentUuid },
-            //     data: {
-            //       status: "REFUNDED",
-            //       refundedAt: new Date(),
-            //     },
-            // }),
-        ]);
-
-        const totals = await tx.refund.aggregate({
             where: {
-              paymentUuid,
-              status: "COMPLETED",
+                paymentUuid: payment.uuid,
+                providerRef: input.snapshot.uuid, 
             },
-            _sum: { amount: true },
+        });
+    
+        if (existing) {
+            logWithContext("info", "Refund already processed", {
+                refundUuid: existing.uuid,
+                providerRef: input.snapshot.id,
+            });
+            return existing;
+        };
+
+        // Create refund record from webhook
+        const refund = await prisma.$transaction(async (tx) => {
+            const refund = await tx.refund.create({
+                data: {
+                    tenantUuid: payment.tenantUuid,
+                    paymentUuid: payment.uuid,
+                    orderUuid: payment.orderUuid,
+                    storeUuid: payment.storeUuid,
+                    
+                    provider: payment.provider,
+                    providerRef: input.snapshot.id,
+                    
+                    amount: input.amount,
+                    currency: payment.currency,
+                    
+                    status: "COMPLETED",
+                    reason: "Refund processed by provider",
+                    requestedBy: "SYSTEM",
+                    processedAt: new Date(),
+                    
+                    snapshot: input.snapshot,
+                },
+            });
+
+            // Calculating total refunded
+            const totals = await tx.refund.aggregate({
+                where: {
+                    paymentUuid: payment.uuid,
+                    status: "COMPLETED",
+                },
+                _sum: { amount: true },
+            });
+
+            const totalRefunded = totals._sum.amount || 0;
+
+            // Update payment status
+            if (totalRefunded >= payment.amount) {
+                PaymentStateMachine.assertTransition(payment.status, "REFUNDED");
+                
+                await tx.payment.update({
+                where: { uuid: payment.uuid },
+                data: { status: "REFUNDED" },
+                });
+            } else {
+                PaymentStateMachine.assertTransition(payment.status, "PARTIALLY_REFUNDED");
+                
+                await tx.payment.update({
+                where: { uuid: payment.uuid },
+                data: { status: "PARTIALLY_REFUNDED" },
+                });
+            };
+
+            return refund;
         });
 
-        if (totals._sum.amount === payment.amount) {
-            PaymentStateMachine.assertTransition(
-              payment.status,
-              "REFUNDED"
-            );
-      
-            await tx.payment.update({
-              where: { uuid: paymentUuid },
-              data: { status: "REFUNDED" },
-            });
-        }
+        // Emit event
+        PaymentEventBus.emit("REFUND_COMPLETED", {
+            refundUuid: refund.uuid,
+            paymentUuid: payment.uuid,
+            orderUuid: payment.orderUuid,
+            tenantUuid: payment.tenantUuid,
+            storeUuid: payment.storeUuid,
+            amount: refund.amount,
+        });
 
-        EventBus.emit("PAYMENT_REFUNDED", {paymentUuid} );
+        logWithContext("info", "Refund processed from webhook", {
+            refundUuid: refund.uuid,
+            providerRef: input.snapshot.id,
+        });
+      
+        return refund;
     }
 };
 

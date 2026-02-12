@@ -1,6 +1,8 @@
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import prisma from "../../config/prisma.ts"
 import { OrderEventBus, OrderEventEmitter } from "../../events/order.events.ts";
+import { AccountService } from "../account/account.service.ts";
+import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 import { MenuExperimentService } from "../menu/menu-experiment.service.ts";
 import { MenuSnapshotService } from "../menu/menu-snapshot.service.ts";
 import { MenuPersonalizationService, MenuService } from "../menu/menu.service.ts";
@@ -218,6 +220,14 @@ export class OrderCommandService{
             items: order.items,
         });
         return order;
+    }
+
+    static async checkout(input) {
+        await RiskPolicyEnforcer.apply(input.tenantUserUuid);
+        
+        if (await AccountService.isPaymentLocked(input.tenantUserUuid)) {
+          throw new Error("CHECKOUT_BLOCKED_FRAUD_RISK");
+        }
     }
 
     private static async generateOrderNumber(

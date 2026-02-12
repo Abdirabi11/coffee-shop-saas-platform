@@ -104,7 +104,6 @@ export const createOrder= async (req: Request, res: Response)=>{
         return res.status(201).json(response);
     } catch (error: any) {
         console.error("[CREATE_ORDER_ERROR]", error);
-        // Handle specific errors
         if (error.message === "Store is currently closed") {
             return res.status(400).json({ message: error.message });
         }
@@ -242,6 +241,6 @@ export const listOrders= async (req: Request, res: Response)=>{
         console.error("[LIST_ORDERS_ERROR]", error);
         return res.status(500).json({ message: "Failed to fetch orders" });
     }
-}
+};
 
 

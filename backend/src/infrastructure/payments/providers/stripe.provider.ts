@@ -70,4 +70,4 @@ export class StripeProvider implements PaymentProvider {
       snapshot: refund,
     };
   }
-}
+};

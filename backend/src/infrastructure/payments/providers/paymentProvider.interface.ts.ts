@@ -23,4 +23,4 @@ export interface PaymentProvider {
     providerRef: string;
     snapshot?: any;
   }>;
-}
+};

@@ -1,12 +1,11 @@
 import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
-import { EventBus } from "../../events/eventBus.ts";
+import { PaymentEventBus } from "../../events/eventBus.js";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metrics.ts";
 import { PaymentProviderAdapter } from "../../payment/providers/payment-provider.adapter.ts";
+import { AccountService } from "../account/account.service.js";
 import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
-import { OrderStatusService } from "../order/order-status.service.ts";
-import { assertTransition, PaymentIntentService } from "./payment-intent.service.ts";
 import { PaymentRiskScoreService } from "./paymentRiskScore.service.ts";
 
 const paymentSnapshot = {
@@ -20,10 +19,21 @@ const paymentSnapshot = {
 };
 
 export class PaymentService{
-  static async startPayment(orderUuid: string, provider: string, userUuid: string){
+  static async startPayment(input: {  
+    orderUuid: string;
+    provider: "STRIPE" | "WALLET" | "EVC_PLUS";
+    tenantUserUuid: string;
+  }) {
+    const traceUuid = `pay_${Date.now()}`;
+
+    //get order
     const order= await prisma.order.findUnique({
-      where: {uuid: orderUuid},
-      include: {store: true}
+      where: {uuid: input.orderUuid},
+      include: {
+        store: true,
+        tenantUser: { include: { user: true } },
+        payment: true,
+      }
     });
 
     if (!order) throw new Error("ORDER_NOT_FOUND");
@@ -32,107 +42,256 @@ export class PaymentService{
       throw new Error("INVALID_ORDER_STATE");
     };
 
-    const existing= await prisma.order.findFirst({
-      where: {
-        orderUuid,
+    //Check if payment already exists
+    if (order.payment) {
+      if (order.payment.status === "PENDING" && order.payment.expiresAt && order.payment.expiresAt > new Date()) {
+        return {
+          paymentUuid: order.payment.uuid,
+          clientSecret: order.payment.clientSecret,
+          providerRef: order.payment.providerRef,
+        };
       }
-    });
-
-    if (existing) {
-      throw new Error("PAYMENT_ALREADY_IN_PROGRESS");
+      
+      throw new Error("PAYMENT_ALREADY_EXISTS");
     };
 
-    const risk = await PaymentRiskScoreService.get(userUuid);
-    if (risk >= 80) {
-      throw new Error("PAYMENT_REQUIRES_MANUAL_REVIEW");
-    }
+    const userUuid = order.tenantUser.userUuid;
+    const riskScore = await PaymentRiskScoreService.get(order.tenantUuid, userUuid);
 
-    //  SERVER-SIDE OFFLINE ENFORCEMENT
-    if (order.store.isOffline && provider !== "WALLET") {
+    if (riskScore >= 80) {
+      throw new Error("PAYMENT_REQUIRES_MANUAL_REVIEW");
+    };
+
+    //Offline enforcement (if store is offline, only wallet allowed)
+    if (order.store.isOffline && input.provider !== "WALLET") {
       throw new Error("PAYMENT_DISABLED_OFFLINE");
     };
 
-    await RiskPolicyEnforcer.apply()
+    await RiskPolicyEnforcer.apply(input.tenantUserUuid);
+    
+    // Check if locked
+    if (await AccountService.isPaymentLocked(input.tenantUserUuid)) {
+      throw new Error("PAYMENT_LOCKED_BY_RISK_POLICY");
+    }
 
-    await PaymentIntentService.lock(orderUuid);
-
-    const intent= await PaymentProviderAdapter.createPaymentIntent({
-      provider,
+    //Create payment intent with provider
+    const intent = await PaymentProviderAdapter.createPaymentIntent({
+      provider: input.provider,
       amount: order.totalAmount,
       currency: order.currency,
-      metadata: { orderUuid },
+      metadata: {
+        orderUuid: order.uuid,
+        tenantUuid: order.tenantUuid,
+        storeUuid: order.storeUuid,
+      },
     });
+
+    //Create payment record in database
+    const payment = await prisma.payment.create({
+      data: {
+        orderUuid: order.uuid,
+        tenantUuid: order.tenantUuid,
+        storeUuid: order.storeUuid,
         
-    return intent;
+        // Amounts
+        amount: order.totalAmount,
+        currency: order.currency,
+        subtotal: order.subtotal,
+        tax: order.taxAmount,
+        discount: order.discountAmount,
+        
+        // Provider details
+        paymentFlow: "PROVIDER",
+        paymentMethod: input.provider,
+        provider: input.provider,
+        providerRef: intent.providerRef,
+        clientSecret: intent.clientSecret,
+        
+        status: "PENDING",
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        snapshot: intent.snapshot || {},
+        orderSnapshot: {
+          orderNumber: order.orderNumber,
+          totalAmount: order.totalAmount,
+        },
+        pricingRules: {
+          subtotal: order.subtotal,
+          tax: order.taxAmount,
+          discount: order.discountAmount,
+        },
+      },
+    });
+
+    logWithContext("info", "Payment started", {
+      traceUuid,
+      paymentUuid: payment.uuid,
+      orderUuid: order.uuid,
+      provider: input.provider,
+      amount: order.totalAmount,
+    });
+
+    MetricsService.increment("payment.started", 1, {
+      provider: input.provider,
+    });
+
+    return {
+      paymentUuid: payment.uuid,
+      providerRef: payment.providerRef,
+      clientSecret: payment.clientSecret,
+      expiresAt: payment.expiresAt,
+    };
   }
 
   //webhook driven confirmation 
   static async confirmFromProviderEvent(input: {
-    orderUuid: string,
-    provider: string,
-    providerRef: string,
-    snapshot: any,
+    paymentUuid: string;
+    providerRef: string;
+    snapshot: any;
   }){
-    const order= await prisma.order.findUnique({
-      where: { uuid: input.orderUuid },
-      include: {
-        payment: true,
-        paymentIntent: true
-      }
-    })
-
-    if (!order) throw new Error("Order not found");
-
-    if (order.payment?.providerRef === input.providerRef) {
-      return order.payment;
-    };
-
-    if (!order.paymentIntent) {
-      throw new Error("PAYMENT_INTENT_NOT_FOUND");
-    }
-
-    if (order.status !== "PAYMENT_PENDING") {
-      throw new Error("INVALID_ORDER_STATE");
-    };
-
-    if (order.paymentIntent.status !== "LOCKED") {
-      throw new Error("PAYMENT_NOT_LOCKED");
-    }
-
-    assertTransition(order.paymentIntent.status, "PAID");
-
-    await prisma.$transaction(async (tx)=> {
-      await tx.payment.create({
-        data:{
-          orderUuid: order.uuid,
-          storeUuid: order.storeUuid,
-          amount: order.totalAmount,
-          currency: order.currency,
-          provider: input.provider,
-          providerRef: input.providerRef,
-          status: "PAID",
-          snapshot: input.snapshot,
-        }
-      });
-
-      await tx.paymentIntent.update({
-        where: { orderUuid: order.uuid},
-        data: { status: "PAID", locketAt: null}
-      })
-
-      await tx.paymentSnapshot.update({
-        where: { orderUuid: order.uuid },
-        data: { status: "PAID" },
-      });
-
-      await OrderStatusService.transition(tx, order.uuid, "PAID");
-    })
-
-    EventBus.emit("PAYMENT_CONFIRMED", {
-      orderUuid: order.uuid,
-      storeUuid: order.storeUuid,
-      amount: order.totalAmount,
+    const payment = await prisma.payment.findUnique({
+      where: { uuid: input.paymentUuid },
+      include: { order: true },
     });
+
+    if (!payment) {
+      throw new Error("PAYMENT_NOT_FOUND");
+    };
+
+    if (payment.status === "PAID") {
+      logWithContext("info", "Payment already confirmed", {
+        paymentUuid: payment.uuid,
+        orderUuid: payment.orderUuid,
+      });
+      return payment;
+    };
+
+    PaymentStateMachine.assertTransition(payment.status, "PAID");
+
+    // Update payment and order
+    const updated = await prisma.$transaction(async (tx) => {
+      const updated = await tx.payment.update({
+        where: { uuid: payment.uuid },
+        data: {
+          status: "PAID",
+          paidAt: new Date(),
+          snapshot: input.snapshot,
+        },
+      });
+
+      await tx.order.update({
+        where: { uuid: payment.orderUuid },
+        data: {
+          status: "PAID",
+          paymentStatus: "COMPLETED",
+        },
+      });
+
+      await tx.paymentAuditSnapshot.create({
+        data: {
+          tenantUuid: payment.tenantUuid,
+          paymentUuid: payment.uuid,
+          orderUuid: payment.orderUuid,
+          storeUuid: payment.storeUuid,
+          reason: "PAYMENT_CONFIRMED",
+          triggeredBy: "SYSTEM",
+          beforeStatus: payment.status,
+          afterStatus: "PAID",
+          paymentState: updated,
+          orderState: payment.order,
+          metadata: {
+            provider: payment.provider,
+            providerRef: input.providerRef,
+          },
+        },
+      });
+
+      return updated;
+    });
+
+    // Emit event
+    PaymentEventBus.emit("PAYMENT_CONFIRMED", {
+      paymentUuid: updated.uuid,
+      orderUuid: payment.orderUuid,
+      tenantUuid: payment.tenantUuid,
+      storeUuid: payment.storeUuid,
+      amount: payment.amount,
+    });
+
+    logWithContext("info", "Payment confirmed from webhook", {
+      paymentUuid: updated.uuid,
+      orderUuid: payment.orderUuid,
+    });
+
+    MetricsService.increment("payment.confirmed", 1, {
+      provider: payment.provider,
+      method: "webhook",
+    });
+
+    return updated;
+  }
+
+  // Mark payment as failed from provider
+  static async markFailedFromProvider(input: {
+    paymentUuid: string;
+    failureCode: string;
+    failureReason?: string;
+    snapshot: any;
+  }) {
+    const payment = await prisma.payment.findUnique({
+      where: { uuid: input.paymentUuid },
+    });
+
+    if (!payment) {
+      throw new Error("PAYMENT_NOT_FOUND");
+    }
+
+    // Validate transition
+    PaymentStateMachine.assertTransition(payment.status, "FAILED");
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const updated = await tx.payment.update({
+        where: { uuid: payment.uuid },
+        data: {
+          status: "FAILED",
+          failureCode: input.failureCode,
+          failureReason: input.failureReason,
+          failedAt: new Date(),
+          snapshot: input.snapshot,
+        },
+      });
+
+      await tx.order.update({
+        where: { uuid: payment.orderUuid },
+        data: {
+          status: "PAYMENT_FAILED",
+          paymentStatus: "FAILED",
+        },
+      });
+
+      return updated;
+    });
+
+    PaymentEventBus.emit("PAYMENT_FAILED", {
+      paymentUuid: updated.uuid,
+      orderUuid: payment.orderUuid,
+      tenantUuid: payment.tenantUuid,
+      storeUuid: payment.storeUuid,
+      failureCode: input.failureCode,
+      failureReason: input.failureReason,
+    });
+
+    logWithContext("warn", "Payment failed", {
+      paymentUuid: updated.uuid,
+      orderUuid: payment.orderUuid,
+      failureCode: input.failureCode,
+    });
+
+    MetricsService.increment("payment.failed", 1, {
+      provider: payment.provider,
+      failureCode: input.failureCode,
+    });
+
+    return updated;
   }
 
   //ACTIVE PROVIDER CONFIRMATION
@@ -143,13 +302,13 @@ export class PaymentService{
     });
 
     if (!payment) throw new Error("PAYMENT_NOT_FOUND");
-
-    const provider = PaymentProviderAdapter.get(
-      payment.provider
-    );
+    if (!payment.providerRef) {
+      throw new Error("MISSING_PROVIDER_REF");
+    };
 
     try {
-      const result = await provider.confirm( payment.providerRef );
+      // Query provider
+      const result = await PaymentProviderAdapter.lookup(payment);
 
       MetricsService.timing(
         "payment.provider.latency",
@@ -157,111 +316,130 @@ export class PaymentService{
         { provider: payment.provider }
       );
 
-      logWithContext("info", "Payment confirmed", {
-        traceUuid,
-        paymentUuid: payment.uuid,
-        orderUuid: payment.orderUuid,
-        provider: payment.provider,
-        providerRef: payment.providerRef,
-      });
-
-      PaymentStateMachine.assertTransition(
-        payment.status,
-        "PAID"
-      );
-
-      await prisma.payment.update({
-        where: { uuid: payment.uuid },
-        data: {
-          status: "PAID",
+      // Handle based on provider status
+      if (result.status === "PAID") {
+        return this.confirmFromProviderEvent({
+          paymentUuid: payment.uuid,
+          providerRef: payment.providerRef,
           snapshot: result.snapshot,
-        },
-      });
+        });
+      } else if (result.status === "FAILED") {
+        return this.markFailedFromProvider({
+          paymentUuid: payment.uuid,
+          failureCode: "PROVIDER_DECLINED",
+          failureReason: "Payment declined by provider",
+          snapshot: result.snapshot,
+        });
+      };
 
-      EventBus.emit("PAYMENT_SUCCEEDED", {
-        paymentUuid,
-      });
-    } catch (err: any) {
-      const provider = PaymentProviderAdapter.get(
-        payment.provider
-      );
-
-      const failureCode = provider.normalizeError(err);
-
-      MetricsService.increment(
-        `payment.provider.error.${failureCode}`,
-        1,
-        { provider: payment.provider }
-      );
-    
-      logWithContext("error", "Payment provider error", {
-        traceUuid,
+      return payment;
+    } catch (error: any) {
+      logWithContext("error", "Payment polling failed", {
         paymentUuid: payment.uuid,
         provider: payment.provider,
-        failureCode,
+        error: error.message,
       });
 
-      await prisma.payment.update({
+      throw error;
+    };
+  }
+
+  static async retryFailedPayment(paymentUuid: string){
+    const payment = await prisma.payment.findUnique({
+      where: { uuid: paymentUuid },
+    });
+
+    if (!payment) {
+      throw new Error("PAYMENT_NOT_FOUND");
+    }
+
+    if (payment.retries >= payment.maxRetries) {
+      throw new Error("MAX_RETRIES_EXCEEDED");
+    }
+
+    // Validate transition
+    PaymentStateMachine.assertTransition(payment.status, "RETRYING");
+
+    const updated = await prisma.payment.update({
+      where: { uuid: paymentUuid },
+      data: {
+        status: "RETRYING",
+        retries: { increment: 1 },
+        lastRetryAt: new Date(),
+      },
+    });
+
+    MetricsService.increment("payment.retry.attempt", 1, {
+      provider: payment.provider,
+    });
+
+    logWithContext("warn", "Retrying failed payment", {
+      paymentUuid,
+      retryCount: updated.retries,
+    });
+
+    // Attempt to confirm by polling
+    try {
+      return await this.confirmByPolling(paymentUuid);
+    } catch (error: any) {
+      logWithContext("error", "Payment retry failed", {
+        paymentUuid,
+        error: error.message,
+      });
+
+      if (updated.retries >= updated.maxRetries) {
+        // Mark as permanently failed
+        await this.markFailedFromProvider({
+          paymentUuid,
+          failureCode: "MAX_RETRIES_EXCEEDED",
+          failureReason: "Payment failed after maximum retries",
+          snapshot: {},
+        });
+      }
+
+      throw error;
+    };
+  }
+
+  static async cancelFromProvider(input: {
+    paymentUuid: string;
+    snapshot: any;
+  }) {
+    const payment = await prisma.payment.findUnique({
+      where: { uuid: input.paymentUuid },
+    });
+
+    if (!payment) {
+      throw new Error("PAYMENT_NOT_FOUND");
+    }
+
+    PaymentStateMachine.assertTransition(payment.status, "CANCELLED");
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const updated = await tx.payment.update({
         where: { uuid: payment.uuid },
         data: {
-          status: "FAILED",
-          failureCode, // ✅ THIS is where it’s stored
+          status: "CANCELLED",
+          snapshot: input.snapshot,
         },
       });
 
-      EventBus.emit("PAYMENT_FAILED", {
-        paymentUuid,
-        failureCode,
+      await tx.order.update({
+        where: { uuid: payment.orderUuid },
+        data: {
+          status: "CANCELLED",
+          paymentStatus: "CANCELLED",
+        },
       });
 
-      throw err;
-    }
-  }
-
-  static async markPaid(paymentUuid: string){
-    const payment= await prisma.payment.findUnique({
-      where: {uuid: paymentUuid}
+      return updated;
     });
 
-    if (!payment) throw new Error("PAYMENT_NOT_FOUND");
-
-    PaymentStateMachine.assertTransition(
-      payment.status,
-      "PAID"
-    );
-
-    await prisma.payment.update({
-      where: { uuid: paymentUuid },
-      data: {
-        status: "PAID",
-        lockedAt: null,
-        paidAt: new Date(),
-      },
+    PaymentEventBus.emit("PAYMENT_CANCELLED", {
+      paymentUuid: updated.uuid,
+      orderUuid: payment.orderUuid,
     });
-  }
 
-  static async unlockPayment(paymentUuid: string) {
-    await prisma.payment.update({
-      where: { uuid: paymentUuid },
-      data: {
-        lockedAt: null,
-      },
-    });
-  }
-
-  static async retryFailedPayment(){
-    MetricsService.increment(
-      "payment.retry.attempt",
-      1,
-      {
-        provider: payment.provider,
-      }
-    );
-    
-    logWithContext("warn", "Retrying failed payment", {
-      traceUuid,
-      paymentUuid,
-      retryCount: payment.retryCount + 1,
-    });
+    return updated;
   }
 };

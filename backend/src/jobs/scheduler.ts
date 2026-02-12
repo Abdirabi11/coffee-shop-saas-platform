@@ -1,26 +1,35 @@
 import cron from "node-cron";
-import { invalidateSuperAdminAnalyticsCache } from "../cache/analyticsCache.ts";
 import { trackJobExecution } from "../lib/jobMonitor.ts";
 import { IdempotencyService } from "../services/order/idempotency.service.ts";
-import { monthlyRevenueAnalytics, runChurnAnalytics } from "./analytics.jobs.ts";
 import { ArpuLtvJob } from "./analytics/arpuLtv.job.ts";
 import { ChurnAnalyticsJob } from "./analytics/churnAnalytics.job.ts";
 import { CohortRetentionJob } from "./analytics/cohortRetention.job.ts";
 import { GenerateBillingSnapshotsJob } from "./analytics/generateBillingSnapshots.job.ts";
+import { MonthlyRevenueJob } from "./analytics/monthlyRevenue.job.ts";
 import { TenantCohortGrowthJob } from "./analytics/tenantCohortGrowth.job.ts";
+import { generateMonthlyInvoices, markOverdueInvoices, suspendOverdueTenants } from "./billing/generateInvoiceNumber.jobs.ts";
 import { prewarmDashboards } from "./dashboardPrewarm.job.ts";
-import { generateMonthlyInvoices, markOverdueInvoices } from "./invoice.jobs.ts";
-import { AutoCompleteOrdersJob } from "./OrderJobs/auto-complete-orders.job.ts";
-import { AutoCancelOrdersJob } from "./OrderJobs/autoCancel-orders.job.ts";
-import { DailyStoreMetricsJob } from "./OrderJobs/dailyStore-metrics.job.ts";
-import { DetectStuckOrdersJob } from "./OrderJobs/detect-stuck-orders.job.ts";
-import { HourlyRevenueJob } from "./OrderJobs/hourly-revenue.job.ts";
-import { OrderTimeoutAlertJob } from "./OrderJobs/order-timeoutAlert.job.ts";
-import { StaleOrderMetricsJob } from "./OrderJobs/stale-orderMetrics.job.ts";
+import { AutoCompleteOrdersJob } from "./OrderJobs/autoCompleteOrders.job.ts";
+import { AutoCancelOrdersJob } from "./OrderJobs/autoCancelOrders.job.ts";
+import { DailyStoreMetricsJob } from "./OrderJobs/dailyStoreMetrics.job.ts";
+import { DetectStuckOrdersJob } from "./OrderJobs/detectStuckOrders.job.ts";
+import { HourlyRevenueJob } from "./OrderJobs/hourlyRevenue.job.ts";
+import { OrderTimeoutAlertJob } from "./OrderJobs/orderTimeoutAlert.job.ts";
+import { StaleOrderMetricsJob } from "./OrderJobs/staleOrderMetrics.job.ts";
 import { PaymentRetryJob } from "./payment/payment-retry.job.ts";
-import { PaymentTimeoutJob } from "./payment/payment_timeout.job.ts";
-import { ProductPopularityJob } from "./productJobs/product-popularity.job.ts";
-import { suspendOverdueTenants } from "./subscription.jobs.ts";
+import { PaymentTimeoutJob } from "./payment/paymentTimeout.job.ts";
+import { ProductPopularityJob } from "./OrderJobs/product-popularity.job.ts";
+import { DailyReconciliationJob } from "./payment/dailyReconciliation.job.ts";
+import { AnomalyReviewJob } from "./payment/anomalyReview.job.ts";
+import { CashDrawerReminderJob } from "./payment/cashDrawerReminder.job.ts";
+import { PaymentPollingReconciliationJob } from "./payment/paymentPollingReconciliation.ts";
+import { ProviderReportReconciliation } from "./payment/providerReportReconciliation.ts";
+import { RiskScoreDecayJob } from "./payment/riskScoreDecay.jobs.ts";
+import { WebhookRetryJob } from "./webhook/webhookRetry.job.ts";
+import { PaymentExpiryCleanupJob } from "./payment/paymentExpiryCleanup.job.ts";
+import { OrphanedPaymentDetectionJob } from "./payment/orphanedPaymentDetection.job.js";
+import { IdempotencyKeyCleanupJob } from "./payment/idempotencyKeyCleanup.job.js";
+
 
 
 export function startScheduler() {
@@ -99,11 +108,10 @@ export function startScheduler() {
     }
   });
 
-    // 💳 PAYMENT JOBS
+  // 💳 PAYMENT JOBS
   cron.schedule("*/5 * * * *", async () => {
     console.log("[CRON] Running PaymentTimeoutJob");
     try {
-      //double
       await PaymentTimeoutJob.run();
     } catch (error) {
       console.error("[CRON] PaymentTimeoutJob failed:", error);
@@ -113,14 +121,60 @@ export function startScheduler() {
   cron.schedule("*/30 * * * *", async () => {
     console.log("[CRON] Running PaymentRetryJob");
     try {
-      //double
       await PaymentRetryJob.run();
     } catch (error) {
       console.error("[CRON] PaymentRetryJob failed:", error);
     }
   });
 
-    //🧾 BILLING JOBS
+  cron.schedule("*/5 * * * *", async () => {
+    console.log("[CRON] Running PaymentPollingReconciliationJob");
+    try {
+      await PaymentPollingReconciliationJob.run();
+    } catch (error) {
+      console.error("[CRON] PaymentPollingReconciliationJob failed:", error);
+    }
+  });
+
+  // 📊 RECONCILIATION & REVIEW
+ 
+  cron.schedule("0 2 * * *", async () => {
+    console.log("[CRON] Running DailyReconciliationJob");
+    try {
+      await DailyReconciliationJob.run();
+    } catch (error) {
+      console.error("[CRON] DailyReconciliationJob failed:", error);
+    }
+  });
+
+  cron.schedule("0 */2 * * *", async () => {
+    console.log("[CRON] Running AnomalyReviewJob");
+    try {
+      await AnomalyReviewJob.run();
+    } catch (error) {
+      console.error("[CRON] AnomalyReviewJob failed:", error);
+    }
+  });
+
+  cron.schedule("0 */6 * * *", async () => {
+    console.log("[CRON] Running CashDrawerReminderJob");
+    try {
+      await CashDrawerReminderJob.run();
+    } catch (error) {
+      console.error("[CRON] CashDrawerReminderJob failed:", error);
+    }
+  });
+
+  cron.schedule("0 3 * * *", async () => {
+    console.log("[CRON] Running ProviderReportReconciliationJob");
+    try {
+      await ProviderReportReconciliation.run();
+    } catch (error) {
+      console.error("[CRON] ProviderReportReconciliationJob failed:", error);
+    }
+  });
+
+  //🧾 BILLING JOBS
   cron.schedule("0 0 1 * *", async () => {
     console.log("[CRON] Running generateMonthlyInvoices");
     try {
@@ -148,6 +202,12 @@ export function startScheduler() {
     }
   });
 
+  //Webhook jobs
+
+  cron.schedule("*/15 * * * *", async () => {
+    await WebhookRetryJob.run();
+  });
+
   //📊 ANALYTICS JOBS
 
   cron.schedule("0 3 * * *", async () => {
@@ -167,7 +227,6 @@ export function startScheduler() {
       console.error("[CRON] CohortRetentionJob failed:", error);
     }
   });
-
 
   cron.schedule("45 3 * * *", async () => {
     console.log("[CRON] Running TenantCohortGrowthJob");
@@ -197,28 +256,67 @@ export function startScheduler() {
     }
   });
 
+  cron.schedule("0 4 * * *", async () => {
+    await RiskScoreDecayJob.run();
+  });
+
   //📊 ANALYTICS JOBS
-  cron.schedule("0 3 1 * *", async () => {
-    console.log("[CRON] Running monthly analytics suite");
+
+  cron.schedule("0 2 * * *", async () => {
+    console.log("[CRON] Running MonthlyRevenueJob");
     try {
-      await monthlyRevenueAnalytics();
-      //triple
-      await generateBillingSnapshots();
-      await runChurnAnalytics();
-      //triple
-      await runCohortRetention();
-      //double
-      await runTenantCohortGrowth();
-      //double
-      await runArpuLtv();
-      await invalidateSuperAdminAnalyticsCache();
-      console.log("[CRON] Monthly analytics completed successfully");
+      await MonthlyRevenueJob.run();
     } catch (error) {
-      console.error("[CRON] Monthly analytics failed:", error);
+      console.error("[CRON] MonthlyRevenueJob failed:", error);
     }
   });
 
-    // 🧹 CLEANUP JOBS
+  cron.schedule("0 3 * * *", async ()=>{
+    console.log("[CRON] Running ChurnAnalyticsJob");
+    try {
+      await ChurnAnalyticsJob.run();
+    } catch (error) {
+      console.error("[CRON] ChurnAnalyticsJob failed:", error);
+    }
+  });
+
+  cron.schedule("30 3 * * *", async () => {
+    console.log("[CRON] Running CohortRetentionJob");
+    try {
+      await CohortRetentionJob.run();
+    } catch (error) {
+      console.error("[CRON] CohortRetentionJob failed:", error);
+    }
+  });
+
+  cron.schedule("45 3 * * *", async () => {
+    console.log("[CRON] Running TenantCohortGrowthJob");
+    try {
+      await TenantCohortGrowthJob.run();
+    } catch (error) {
+      console.error("[CRON] TenantCohortGrowthJob failed:", error);
+    }
+  });
+
+  cron.schedule("15 4 * * *", async () => {
+    console.log("[CRON] Running ArpuLtvJob");
+    try {
+      await ArpuLtvJob.run();
+    } catch (error) {
+      console.error("[CRON] ArpuLtvJob failed:", error);
+    }
+  });
+
+  cron.schedule("30 4 1 * *", async () => {
+    console.log("[CRON] Running GenerateBillingSnapshotsJob");
+    try {
+      await GenerateBillingSnapshotsJob.run();
+    } catch (error) {
+      console.error("[CRON] GenerateBillingSnapshotsJob failed:", error);
+    }
+  });
+
+  // 🧹 CLEANUP JOBS
   cron.schedule("0 4 * * *", async () => {
     console.log("[CRON] Running IdempotencyService.cleanup");
     try {
@@ -229,7 +327,20 @@ export function startScheduler() {
     }
   });
 
-    // 🚀 CACHE JOBS
+  cron.schedule("*/5 * * * *", async () => {
+    await PaymentExpiryCleanupJob.run();
+  });
+
+  cron.schedule("0 5 * * *", async () => {
+    await OrphanedPaymentDetectionJob.run();
+  });
+
+  // Run daily at 3 AM
+  cron.schedule("0 3 * * *", async () => {
+    await IdempotencyKeyCleanupJob.run();
+  });
+
+  // 🚀 CACHE JOBS
   cron.schedule("*/10 * * * *", async () => {
     console.log("[CRON] Running prewarmDashboards");
     try {
@@ -249,16 +360,16 @@ export function startScheduler() {
 };
 
 export {
-    AutoCompleteOrdersJob,
-    AutoCancelOrdersJob,
-    DetectStuckOrdersJob,
-    OrderTimeoutAlertJob,
-    DailyStoreMetricsJob,
-    HourlyRevenueJob,
-    ProductPopularityJob,
-    StaleOrderMetricsJob,
-    PaymentTimeoutJob,
-    PaymentRetryJob,
+  AutoCompleteOrdersJob,
+  AutoCancelOrdersJob,
+  DetectStuckOrdersJob,
+  OrderTimeoutAlertJob,
+  DailyStoreMetricsJob,
+  HourlyRevenueJob,
+  ProductPopularityJob,
+  StaleOrderMetricsJob,
+  PaymentTimeoutJob,
+  PaymentRetryJob,
 };
 
 

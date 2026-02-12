@@ -1,29 +1,57 @@
 import type { Request, Response, NextFunction } from "express";
-import { verifyWebhookSignature } from "../services/webhookSecurity.service.ts";
+import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { WebhookVerifier } from "../infrastructure/webhooks/webhookVerifier.ts";
 
 export const webhookSignatureGuard = async (
     req: Request,
     res: Response,
     next: NextFunction
   ) => {
-    const signature = req.headers["x-signature"] as string;
-    const provider = req.headers["x-provider"] as string;
+  try {
+    const provider = req.path.split("/").pop() || "unknown";
   
-    if (!signature || !provider) {
-      return res.status(401).json({ message: "Missing webhook signature" });
-    }
-  
-    const isValid = await verifyWebhookSignature(
-      req.rawBody, // important: raw body
+    let signature: string | undefined;
+
+    // Different providers use different signature headers
+    switch (provider.toLowerCase()) {
+      case "stripe":
+        signature = req.headers["stripe-signature"] as string;
+        break;
+      case "evc_plus":
+      case "zaad":
+      case "edahab":
+        signature = req.headers["x-signature"] as string;
+        break;
+      default:
+        signature = req.headers["x-signature"] as string;
+    };
+
+    if (!signature) {
+      logWithContext("warn", "Webhook rejected - missing signature", {
+        provider,
+        path: req.path,
+      });
+      return res.status(401).json({ error: "Missing webhook signature" });
+    };
+
+    const event = await WebhookVerifier.verify({
+      provider,
       signature,
-      provider
-    );
-  
-    if (!isValid) {
-      return res.status(401).json({ message: "Invalid webhook signature" });
-    }
+      rawBody: req.rawBody,
+    });
+
+    // Attaching verified event to request for use in controller
+    (req as any).webhookEvent = event;
   
     next();
+  } catch (error: any) {
+    logWithContext("error", "Webhook signature verification failed", {
+      error: error.message,
+      path: req.path,
+    });
+
+    return res.status(401).json({ error: "Invalid webhook signature" });
+  }
 };
 
 

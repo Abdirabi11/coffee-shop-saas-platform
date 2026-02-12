@@ -8,6 +8,7 @@ import { verifyPaymentWebhook } from "../../middlewares/peymetWebhook.middleware
 import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
 import { preventReplayAttack } from "../../middlewares/replayProtection.middleware.js";
 import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.middlware.js";
+import { webhookRateLimit } from "../../middlewares/webhookRateLimit.middleware.js";
 
 
 const router = express.Router();
@@ -50,5 +51,11 @@ router.post(
     preventReplayAttack,        // uniqueness
     idempotencyMiddleware,      // safety
     PaymentWebhookController.handle
+);
+
+router.post(
+    "/webhooks/stripe",
+    webhookRateLimit,  // ✅ Add rate limiting
+    PaymentWebhookController.handleStripe
 );
 export default router;

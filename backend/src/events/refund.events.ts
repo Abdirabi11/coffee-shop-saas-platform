@@ -3,9 +3,10 @@ import { EmailService } from "../services/email.service.ts";
 import { FraudSignalService } from "../services/fraud.service.ts";
 import { MetricsService } from "../services/metrics.service.ts";
 import { WebhookDispatcher } from "../services/webhook.service.ts";
+import { RefundEventBus } from "./eventBus.ts";
 import { EventBus } from "./eventBus.ts";
 
-EventBus.on("REFUND_REQUESTED", async (payload) => {
+RefundEventBus.on("REFUND_REQUESTED", async (payload) => {
     const { orderUuid, storeUuid, amount, currency, reason, requestedBy } = payload;
   
     await EmailService.sendRefundRequested(orderUuid, amount, currency);

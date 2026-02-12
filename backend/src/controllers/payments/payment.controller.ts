@@ -1,40 +1,9 @@
 import { Request, Response } from "express";
-import { EventBus } from "../../events/eventBus.ts";
+import { PaymentEventBus } from "../../events/eventBus.js";
 import { PaymentIntentService } from "../../services/payment/payment-intent.service.ts";
-import { PaymentService } from "../../services/payment/payment.service.ts";
 
 
 export class PaymentController {
-    // 🔐 Used ONLY by trusted provider callbacks (not public UI)
-  static async confirmPayment(req: Request, res: Response){
-    try {
-      const { orderUuid, provider, providerRef, snapshot } = req.body;
-
-      if (!orderUuid || !provider || !providerRef) {
-        return res.status(400).json({
-          message: "Missing required payment confirmation fields",
-        });
-      };
-
-      await PaymentService.confirmPayment({
-        orderUuid,
-        provider,
-        providerRef,
-        snapshot,
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Payment confirmed",
-      });
-    }catch (err: any) {
-      return res.status(400).json({
-        success: false,
-        message: err.message,
-      });
-    }
-  }
-
   static async markPaymentFailed(req: Request, res: Response) {
     try {
       const { orderUuid, reason } = req.body;
@@ -47,7 +16,7 @@ export class PaymentController {
 
       await PaymentIntentService.fail(orderUuid);
 
-      EventBus.emit("PAYMENT_FAILED", {
+      PaymentEventBus.emit("PAYMENT_FAILED", {
         orderUuid,
         reason: reason ?? "UNKNOWN",
       });
@@ -74,7 +43,7 @@ export class PaymentController {
         });
       }
 
-      EventBus.emit("PAYMENT_RETRY_REQUESTED", {
+      PaymentEventBus.emit("PAYMENT_RETRY_REQUESTED", {
         paymentUuid,
       });
 

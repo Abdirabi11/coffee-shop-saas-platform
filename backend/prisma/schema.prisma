@@ -283,7 +283,17 @@ enum WebhookEventType {
   SYSTEM_ALERT
   FRAUD_DETECTED
 }
-
+enum ReplayStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+enum DLQStatus {
+  FAILED
+  RETRYING
+  RESOLVED
+  ABANDONED
+}
 enum WebhookProvider {
   STRIPE
   PAYPAL
@@ -519,14 +529,16 @@ enum OrderItemStatus {
   CANCELLED
 }
 
-enum PaymentStatus {
-  PENDING
-  AUTHORIZED
-  CAPTURED
-  COMPLETED
-  FAILED
-  REFUNDED
-  PARTIALLY_REFUNDED
+enum NormalizedProviderError {
+  INSUFFICIENT_FUNDS
+  CARD_DECLINED
+  PROVIDER_TIMEOUT
+  PROVIDER_UNAVAILABLE
+  FRAUD_SUSPECTED
+  AUTHENTICATION_REQUIRED
+  CARD_EXPIRED
+  INVALID_AMOUNT
+  NETWORK_ERROR
 }
 
 enum OptionDisplayStyle {
@@ -559,6 +571,16 @@ enum SnapshotReason {
   PAYMENT_REFUNDED
   DISPUTE_OPENED
   COMPLIANCE
+  PAYMENT_DECLARED
+  PAYMENT_VERIFIED
+  PAYMENT_DISPUTED
+  PAYMENT_VOIDED
+  PAYMENT_RECONCILED
+  PAYMENT_CORRECTED
+  MANAGER_OVERRIDE
+  SYSTEM_AUTO_VERIFY
+  REFUND_ISSUED
+  FRAUD_DETECTED
 }
 
 enum FulfillmentStatus {
@@ -816,55 +838,17 @@ enum RestrictionSeverity {
   CRITICAL
 }
 
-enum PaymentMethod {
-  CARD
-  WALLET
-  BANK_TRANSFER
-  CASH
-  APPLE_PAY
-  GOOGLE_PAY
-}
-
-enum RefundStatus {
-  REQUESTED
-  PROCESSING
-  REFUNDED
-  FAILED
-  PENDING
-  APPROVED
-  COMPLETED
-  REJECTED
-}
-
-enum PaymentSnapshotStatus {
-  PENDING
-  CAPTURED
-  VOIDED
-}
-
 enum WalletTransactionType {
   TOP_UP 
   PAYMENT 
   REFUND
 }
 
-enum PaymentIntentStatus {
-  PENDING
-  LOCKED
-  PROCESSING
-  COMPLETED
-  FAILED
-  EXPIRED
-  CANCELLED
-}
-
-enum LedgerEntryType {
-  PAYMENT
-  REFUND
-  WALLET_CREDIT
-  WALLET_DEBIT
-  ADJUSTMENT
-  FEE
+enum ReviewOutcome {
+  APPROVED         
+  DISPUTED         
+  CORRECTED         
+  FRAUD_CONFIRMED  
 }
 
 enum RiskLevel {
@@ -1183,6 +1167,187 @@ enum RuleType {
   CUSTOM             
 }
 
+enum AnomalyType {
+  LARGE_CASH_PAYMENT     
+  ROUND_AMOUNT           
+  OFF_HOURS_PAYMENT       
+  VELOCITY_SPIKE         
+  AMOUNT_MISMATCH        
+  DUPLICATE_RECEIPT      
+  MISSING_CHANGE_CALC     
+  STAFF_PATTERN           
+  TERMINAL_ANOMALY       
+  REFUND_ABUSE           
+}
+
+enum AnomalySeverity {
+  LOW              
+  MEDIUM           
+  HIGH             
+  CRITICAL          
+}
+
+enum AnomalyStatus {
+  PENDING          
+  INVESTIGATING    
+  RESOLVED       
+  DISMISSED        
+  CONFIRMED       
+}
+// ----------------------
+// |                    |
+// |      PAYMENT          |
+// ----------------------
+enum PaymentStatus {
+  PENDING
+  RETRYING        
+  PAID            
+  FAILED
+  CANCELLED       
+  REFUNDED
+  PARTIALLY_REFUNDED
+  COMPLETED       
+  VOIDED           
+}
+enum DisputeStatus {
+  OPEN
+  WON
+  LOST
+  ACCEPTED
+}
+enum PaymentProvider {
+  STRIPE
+  WALLET
+  CASH
+  CARD_TERMINAL
+}
+enum PaymentFlow {
+  CASHIER         
+  PROVIDER      
+}
+enum PaymentMethod {
+  CASH
+  CARD_TERMINAL   
+  STRIPE         
+  WALLET         
+  BANK_TRANSFER
+}
+enum PaymentProvider {
+  STRIPE
+  WALLET
+  EVC_PLUS        // Somalia EVC
+  ZAAD            // Somalia Zaad
+  EDAHAB          // Somalia eDahab
+  MPESA           // Kenya M-Pesa
+}
+enum NormalizedProviderError {
+  INSUFFICIENT_FUNDS
+  CARD_DECLINED
+  CARD_EXPIRED
+  INVALID_CVV
+  AUTHENTICATION_REQUIRED
+  PROVIDER_TIMEOUT
+  PROVIDER_UNAVAILABLE
+  FRAUD_SUSPECTED
+  AMOUNT_TOO_LARGE
+  AMOUNT_TOO_SMALL
+  CURRENCY_NOT_SUPPORTED
+  DUPLICATE_TRANSACTION
+  NETWORK_ERROR
+  WALLET_DISABLED
+  UNKNOWN_ERROR
+}
+enum DrawerStatus {
+  OPEN             
+  CLOSED           
+  RECONCILED        
+  DEPOSITED         
+}
+enum ReconciliationStatus {
+  PENDING           // Awaiting reconciliation
+  IN_PROGRESS       // Being reconciled
+  RECONCILED        // Completed, no issues
+  NEEDS_REVIEW      // Has variance
+  RESOLVED          // Variance explained
+  ESCALATED         // Sent to management
+}
+enum RefundStatus {
+  REQUESTED
+  PROCESSING
+  REFUNDED
+  FAILED
+  PENDING
+  APPROVED
+  COMPLETED
+  REJECTED
+}
+enum ReconciliationStatus {
+  PENDING
+  IN_PROGRESS
+  RECONCILED
+  HAS_DISCREPANCY
+  RESOLVED
+  FAILED
+}
+enum PaymentMethod {
+  CARD
+  WALLET
+  BANK_TRANSFER
+  CASH
+  APPLE_PAY
+  GOOGLE_PAY
+}
+enum PaymentSnapshotStatus {
+  PENDING
+  CAPTURED
+  VOIDED
+}
+enum PaymentIntentStatus {
+  PENDING
+  LOCKED
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+enum LedgerEntryType {
+  PAYMENT
+  REFUND
+  WALLET_CREDIT
+  WALLET_DEBIT
+  ADJUSTMENT
+  FEE
+}
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  NEEDS_RESPONSE
+  EVIDENCE_SUBMITTED
+  WON
+  LOST
+  ACCEPTED
+  EXPIRED
+}
+enum DisputeReason {
+  FRAUDULENT
+  DUPLICATE
+  PRODUCT_NOT_RECEIVED
+  PRODUCT_UNACCEPTABLE
+  SUBSCRIPTION_CANCELLED
+  CREDIT_NOT_PROCESSED
+  GENERAL
+}
+enum DisputeResolution {
+  WON             
+  LOST             
+  ACCEPTED        
+  WITHDRAWN       
+}
+// ----------------------
+// |                    |
+// |      USER          |
+// ----------------------
 model User {
   uuid             String      @id @default(uuid())
   phoneNumber      String      @unique
@@ -1222,8 +1387,67 @@ model User {
 
   @@index([phoneNumber])
   @@index([email])
-}   
+}  
+model RolePermission {
+  uuid              Int            @id @default(autoincrement())
+  role              Role           
+  permissionUuid    Int
+  scope             PermissionScope @default(TENANT)
+  conditions        Json?          
+  grantedBy         String?
+  grantedAt         DateTime       @default(now())
+  expiresAt         DateTime?
+  
+  permission        Permission     @relation(fields: [permissionUuid], references: [uuid])
+  
+  @@unique([role, permissionUuid])
+  @@index([role])
+} 
+model Permission {
+  uuid              Int              @id @default(autoincrement())
+  key               String           @unique  
+  name              String                   
+  description       String?
+  
+  category          PermissionCategory
+  resource          String                   
+  action            PermissionAction          
+  
+  // Hierarchy
+  parentId          Int?
+  parent            Permission?      @relation("PermissionHierarchy", fields: [parentUuid], references: [uuid])
+  children          Permission[]     @relation("PermissionHierarchy")
+  
+  // Metadata
+  isSystemLevel     Boolean          @default(false)  
+  requiresMFA       Boolean          @default(false)
 
+  rolePermissions   RolePermission[]
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@index([category, resource])
+  @@index([key])
+}
+model UserFavorite {
+  uuid               String        @id @default(uuid())
+  userUuid           String
+  productUuid        String
+  storeUuid          String
+
+  createdAt          DateTime      @default(now())
+
+  user               User          @relation(fields: [userUuid], references: [uuid])
+  product            Product       @relation(fields: [productUuid], references: [uuid])
+
+  @@unique([userUuid, productUuid])
+  @@index([storeUuid])
+}
+// ----------------------
+// |                    |
+// |      TENANT        |
+// ----------------------
 model Tenant {
   uuid               String        @id @default(uuid())
   name               String
@@ -1283,7 +1507,6 @@ model Tenant {
   @@index([status, createdAt])
   @@index([ownerUuid])
 }
-
 model TenantUser {
   uuid              String       @id @default(uuid())
   tenantUuid        String
@@ -1299,21 +1522,27 @@ model TenantUser {
   banReason         String?
 
   // Tenant-specific data
-  wallet            Wallet?
-  orders            Order[]
-  favorites         UserFavorite[]
-  storeAccess       UserStore[]
+  wallet               Wallet?
+  orders               Order[]
+  favorites            UserFavorite[]
+  storeAccess          UserStore[]
 
-  tenant            Tenant        @relation(fields: [tenantUuid], references: [uuid])
-  user              User          @relation(fields: [userUuid], references: [uuid])
+  // Payment restrictions
+  paymentLocked        Boolean   @default(false)
+  paymentLockedReason  String?
+  paymentLockedAt      DateTime?
+  paymentLockedBy      String?  
 
-  status           TenantStatus   @default(ACTIVE)
-  ownerUuid        String         @unique
-  owner            User           @relation("TenantOwner", fields: [ownerUuid], references: [uuid])
+  tenant               Tenant        @relation(fields: [tenantUuid], references: [uuid])
+  user                 User          @relation(fields: [userUuid], references: [uuid])
 
-  users            User[]         @relation("TenantUsers")
-  stores           Store[]
-  subscription     Subscription?
+  status               TenantStatus   @default(ACTIVE)
+  ownerUuid            String         @unique
+  owner                User           @relation("TenantOwner", fields: [ownerUuid], references: [uuid])
+
+  users                User[]         @relation("TenantUsers")
+  stores               Store[]
+  subscription         Subscription?
 
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -1327,57 +1556,10 @@ model TenantUser {
   @@index([tenantUuid, role])
   @@index([userUuid])
 }
-
-model Permission {
-  uuid              Int              @id @default(autoincrement())
-  
-  key               String           @unique  
-  name              String                   
-  description       String?
-  
-  category          PermissionCategory
-  resource          String                   
-  action            PermissionAction          
-  
-  // Hierarchy
-  parentId          Int?
-  parent            Permission?      @relation("PermissionHierarchy", fields: [parentUuid], references: [uuid])
-  children          Permission[]     @relation("PermissionHierarchy")
-  
-  // Metadata
-  isSystemLevel     Boolean          @default(false)  
-  requiresMFA       Boolean          @default(false)
-
-  rolePermissions   RolePermission[]
-  
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  
-  @@index([category, resource])
-  @@index([key])
-}
-
-model RolePermission {
-  uuid              Int            @id @default(autoincrement())
-  
-  role              Role           
-  permissionId      Int
-  
-  // Scope
-  scope             PermissionScope @default(TENANT)
-  conditions        Json?          
-  
-  // Grant details
-  grantedBy         String?
-  grantedAt         DateTime       @default(now())
-  expiresAt         DateTime?
-  
-  permission        Permission     @relation(fields: [permissionUuid], references: [uuid])
-  
-  @@unique([role, permissionId])
-  @@index([role])
-}
-
+// ----------------------
+// |                    |
+// |      STORE         |
+// ----------------------
 model Store {
   uuid              String        @id @default(uuid())
   tenantUuid        String
@@ -1433,7 +1615,6 @@ model Store {
   @@index([tenantUuid, active])
   @@index([createdAt])
 }
-
 model StoreOpeningHour {
   uuid              String          @id @default(uuid())
   tenantUuid        String
@@ -1476,7 +1657,6 @@ model StoreOpeningHour {
   @@index([storeUuid, specificDate])
   @@index([scheduleType, isActive])
 }
-
 model StoreCapacity {
   uuid              String          @id @default(uuid())
   tenantUuid        String
@@ -1511,7 +1691,6 @@ model StoreCapacity {
   @@index([tenantUuid, storeUuid, capacityType])
   @@index([storeUuid, isActive])
 }
-
 model StoreHourException {
   uuid              String          @id @default(uuid())
   tenantUuid        String
@@ -1563,7 +1742,6 @@ model StoreHourException {
   @@index([exceptionDate, isActive])
   @@index([storeUuid, recurring])
 }
-
 model StoreAvailabilityCache {
   uuid              String          @id @default(uuid())
   tenantUuid        String
@@ -1597,7 +1775,95 @@ model StoreAvailabilityCache {
   @@index([storeUuid])
   @@index([expiresAt])
 }
+model StoreOpsMetrics {
+  uuid                  String   @id @default(uuid())
+  storeUuid             String   @unique
+  stalePreparingOrders  Int      @default(0)
+  
+  store                 Store    @relation(fields: [storeUuid], references: [uuid])
+  
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+}
+model UserStore {
+  uuid              String        @id @default(uuid())
+  tenantUserUuid    String        
+  storeUuid         String
 
+  role              StoreRole
+  permissions       Json? 
+
+  isActive          Boolean       @default(true)
+  accessLevel       AccessLevel   @default(FULL)
+  // Audit
+  assignedBy        String?
+  assignedAt        DateTime      @default(now())
+  revokedAt         DateTime?
+  revokedBy         String?
+  
+  tenantUser        TenantUser    @relation(fields: [tenantUserUuid], references: [uuid])
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+  user              User          @relation(fields: [userUuid], references: [uuid])
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@unique([tenantUserUuid, storeUuid])
+  @@index([storeUuid, role, isActive])
+}
+model StoreDailyMetrics {
+  uuid              String       @id @default(uuid())
+  tenantUuid        String
+  storeUuid         String
+  date              DateTime
+  
+  ordersTotal       Int          @default(0)
+  ordersCompleted   Int          @default(0)
+  ordersCancelled   Int          @default(0)
+  ordersPending     Int          @default(0)
+  // Revenue metrics (in cents)
+  revenueGross      Int          @default(0)
+  revenueNet        Int          @default(0)  
+  revenueTax        Int          @default(0)
+  revenueDiscount   Int          @default(0)
+  revenueRefunded   Int          @default(0)
+  
+  paymentsSucceeded Int          @default(0)
+  paymentsFailed    Int          @default(0)
+  avgPaymentValue   Int          @default(0)
+  
+  uniqueCustomers   Int          @default(0)
+  newCustomers      Int          @default(0)
+  returningCustomers Int         @default(0)
+  
+  itemsSold         Int          @default(0)
+  avgItemsPerOrder  Float        @default(0)
+  
+  avgPrepTimeMin    Float        @default(0)
+  avgWaitTimeMin    Float        @default(0)
+  peakHourStart     String?   
+  peakHourOrders    Int?
+  
+  activeStaffCount  Int?
+  hourlyBreakdown   Json?       
+  topProducts       Json?       
+  
+  tenant            Tenant       @relation(fields: [tenantUuid], references: [uuid])
+  store             Store        @relation(fields: [storeUuid], references: [uuid])
+  
+  calculatedAt      DateTime     @default(now())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@unique([tenantUuid, storeUuid, date])
+  @@index([tenantUuid, date])
+  @@index([storeUuid, date])
+}
+// ----------------------
+// |                    |
+// |      ANALYTICS     |
+// ----------------------
 model HourlyRevenue {
   uuid       String   @id @default(uuid())
   storeUuid  String
@@ -1613,18 +1879,43 @@ model HourlyRevenue {
   @@unique([storeUuid, hour])
   @@index([storeUuid, hour])
 }
+model AnalyticsSnapshot {
+  uuid              String              @id @default(uuid())
+  tenantUuid        String?             
+  storeUuid         String?
+  
+  type              AnalyticsType
+  granularity       TimeGranularity
+  
+  periodStart       DateTime
+  periodEnd         DateTime
+  
+  metrics           Json                
+  dimensions        Json?               
+  
+  previousPeriod    Json?               
+  changePercent     Float?
+  
+  status            SnapshotStatus      @default(COMPLETED)
 
-model StoreOpsMetrics {
-  uuid                  String   @id @default(uuid())
-  storeUuid             String   @unique
-  stalePreparingOrders  Int      @default(0)
+  calculatedAt      DateTime            @default(now())
+  calculationTime   Int?                
+  recordCount       Int?                
   
-  store                 Store    @relation(fields: [storeUuid], references: [uuid])
+  version           Int                 @default(1)
   
-  updatedAt             DateTime @updatedAt
-  createdAt             DateTime @default(now())
+  metadata          Json?
+  
+  tenant            Tenant?             @relation(fields: [tenantUuid], references: [uuid])
+  store             Store?              @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  @@unique([tenantUuid, storeUuid, type, granularity, periodStart])
+  @@index([tenantUuid, type, periodStart])
+  @@index([type, granularity, periodStart])
 }
-
 model BusinessHourRule {
   uuid              String          @id @default(uuid())
   tenantUuid        String
@@ -1660,38 +1951,10 @@ model BusinessHourRule {
   
   @@index([tenantUuid, storeUuid, isActive, priority])
 }
-
-model UserStore {
-  uuid              String        @id @default(uuid())
-  
-  tenantUserUuid    String        
-  storeUuid         String
-
-  role              StoreRole
-  permissions       Json? 
-
-  // Status
-  isActive          Boolean       @default(true)
-  accessLevel       AccessLevel   @default(FULL)
-
-  // Audit
-  assignedBy        String?
-  assignedAt        DateTime      @default(now())
-  revokedAt         DateTime?
-  revokedBy         String?
-  
-  tenantUser        TenantUser    @relation(fields: [tenantUserUuid], references: [uuid])
-  store             Store         @relation(fields: [storeUuid], references: [uuid])
-  user              User          @relation(fields: [userUuid], references: [uuid])
-  store             Store         @relation(fields: [storeUuid], references: [uuid])
-  
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  
-  @@unique([tenantUserUuid, storeUuid])
-  @@index([storeUuid, role, isActive])
-}
-
+// ----------------------
+// |                    |
+// |      SECURITY      |
+// ----------------------
 model LoginAttempt {
   uuid              String          @id @default(uuid())
   
@@ -1729,7 +1992,6 @@ model LoginAttempt {
   @@index([ipAddress, createdAt])
   @@index([expiresAt, used])
 }
-
 model FraudEvent {
   uuid              String        @id @default(uuid())
   tenantUuid        String
@@ -1773,7 +2035,6 @@ model FraudEvent {
   @@index([userUuid, createdAt])
   @@index([status, createdAt])
 }
-
 model IPWhitelist {
   uuid              String        @id @default(uuid())
   tenantUuid        String
@@ -1797,7 +2058,6 @@ model IPWhitelist {
   @@index([tenantUuid, isActive])
   @@index([ipAddress])
 }
-
 model SecurityEvent {
   uuid                String        @id @default(uuid())
   tenantUuid          String?
@@ -1830,94 +2090,6 @@ model SecurityEvent {
   @@index([tenantUuid, eventType, createdAt])
   @@index([severity, resolved])
 }
-
-model RefreshToken {
-  uuid              String        @id @default(uuid())
-  token             String        @unique
-  
-  userUuid          String
-  tenantUuid        String?       
-  
-  // Token metadata
-  tokenFamily       String        
-  version           Int           @default(1)
-  
-  // Expiry
-  expiresAt         DateTime
-  
-  // Security
-  issuedFrom        String        
-  deviceFingerprint String
-
-  // Lifecycle
-  status            TokenStatus   @default(ACTIVE)
-  usedCount         Int           @default(0)
-  lastUsedAt        DateTime?
-  
-  revokedAt         DateTime?
-  revokedBy         String?       
-  revokedReason     RevokeReason?
-  
-  // Relationships
-  user              User          @relation(fields: [userUuid], references: [uuid])
-  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
-  sessions          Session[]
-
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  
-  @@index([userUuid, status])
-  @@index([tokenFamily, version])
-  @@index([expiresAt, status])
-}
-
-model Session {
-  uuid              String        @id @default(uuid())
-  userUuid          String
-  tenantUuid        String? 
-  refreshTokenUuid  String        @unique
-  storeUuid         String
-
-  // Device tracking
-  deviceId          String
-  deviceType        String        @default("UNKNOWN")
-  deviceFingerprint String
-
-  // Security
-  ipAddress         String
-  userAgent         String
-  location          String?
-
-  // Session state
-  status            SessionStatus @default(ACTIVE)
-  lastActivityAt    DateTime      @default(now())
-  expiresAt         DateTime
-
-  // Anomaly detection
-  riskScore         Int           @default(0)
-  suspiciousActivity Boolean      @default(false)
-
-  user              User          @relation(fields: [userUuid], references: [uuid])
-  store             Store         @relation(fields: [storeUuid], references: [uuid])
-  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
-  refreshToken      RefreshToken  @relation(fields: [refreshTokenUuid], references: [uuid])
-
-  revokedAt         DateTime?
-  revokedBy         String?       // User/Admin/System
-  revokedReason     String?
-
-  lastUsedAt        DateTime      @default(now())
-  revoked           Boolean       @default(false)
-
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-
-  @@index([userUuid, status])
-  @@index([tenantUuid, userUuid])
-  @@index([deviceFingerprint, userUuid])
-  @@index([expiresAt, status])
-}
-
 model Admin2FA {
   uuid              String        @id @default(uuid())
   userUuid          String        @unique
@@ -1954,7 +2126,6 @@ model Admin2FA {
   
   @@index([userUuid, enabled])
 }
-
 model AdminAlert {
   uuid              String          @id @default(uuid())
   
@@ -2043,7 +2214,6 @@ model AdminAlert {
   @@index([assignedTo, status])
   @@index([groupKey, createdAt])
 }
-
 model AlertAction {
   uuid              String          @id @default(uuid())
   
@@ -2067,7 +2237,115 @@ model AlertAction {
   
   @@index([alertUuid, performedAt])
 }
+model FraudIPAddress {
+  uuid          String   @id @default(uuid())
+  
+  ipAddress     String   @unique
+  riskScore     Int      @default(0)
+  
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+  
+  eventCount    Int      @default(1)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([riskScore])
+}
+// ----------------------
+// |                    |
+// |      AUTH          |
+// ----------------------
+model RefreshToken {
+  uuid              String        @id @default(uuid())
+  token             String        @unique
+  
+  userUuid          String
+  tenantUuid        String?       
+  
+  // Token metadata
+  tokenFamily       String        
+  version           Int           @default(1)
+  
+  // Expiry
+  expiresAt         DateTime
+  
+  // Security
+  issuedFrom        String        
+  deviceFingerprint String
 
+  // Lifecycle
+  status            TokenStatus   @default(ACTIVE)
+  usedCount         Int           @default(0)
+  lastUsedAt        DateTime?
+  
+  revokedAt         DateTime?
+  revokedBy         String?       
+  revokedReason     RevokeReason?
+  
+  // Relationships
+  user              User          @relation(fields: [userUuid], references: [uuid])
+  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
+  sessions          Session[]
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([userUuid, status])
+  @@index([tokenFamily, version])
+  @@index([expiresAt, status])
+}
+model Session {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  tenantUuid        String? 
+  refreshTokenUuid  String        @unique
+  storeUuid         String
+
+  // Device tracking
+  deviceId          String
+  deviceType        String        @default("UNKNOWN")
+  deviceFingerprint String
+
+  // Security
+  ipAddress         String
+  userAgent         String
+  location          String?
+
+  // Session state
+  status            SessionStatus @default(ACTIVE)
+  lastActivityAt    DateTime      @default(now())
+  expiresAt         DateTime
+
+  // Anomaly detection
+  riskScore         Int           @default(0)
+  suspiciousActivity Boolean      @default(false)
+
+  user              User          @relation(fields: [userUuid], references: [uuid])
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
+  refreshToken      RefreshToken  @relation(fields: [refreshTokenUuid], references: [uuid])
+
+  revokedAt         DateTime?
+  revokedBy         String?       // User/Admin/System
+  revokedReason     String?
+
+  lastUsedAt        DateTime      @default(now())
+  revoked           Boolean       @default(false)
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([userUuid, status])
+  @@index([tenantUuid, userUuid])
+  @@index([deviceFingerprint, userUuid])
+  @@index([expiresAt, status])
+}
+// ----------------------
+// |                    |
+// |      AUDIT         |
+// ----------------------
 model AuditLog {
   uuid                String        @id @default(uuid())
   tenantUuid          String
@@ -2114,7 +2392,37 @@ model AuditLog {
   @@index([storeUuid, createdAt])
   @@index([targetType, targetUuid])
 }
+model PaymentAuditSnapshot {
+  uuid               String          @id @default(uuid())
+  tenantUuid         String
+  paymentUuid        String          
+  orderUuid          String
+  storeUuid          String
+  // Snapshot reason
+  reason             SnapshotReason
+  triggeredBy        String?
+  triggeredByRole    String? 
+  // State tracking
+  beforeStatus       PaymentStatus? 
+  afterStatus        PaymentStatus   
+  // Full payment state at this moment
+  paymentState        Json           
+  orderState          Json  
+  // Metadata
+  metadata            Json?         
+  
+  createdAt           DateTime        @default(now())
 
+  payment             Payment         @relation(fields: [paymentUuid], references: [uuid])
+
+  @@index([tenantUuid, paymentUuid, createdAt])
+  @@index([orderUuid])
+  @@index([reason, createdAt])
+}
+// ----------------------
+// |                    |
+// |      SUBSCRIPT     |
+// ----------------------
 model Subscription {
   uuid                String         @id @default(uuid())
   tenantUuid          String         @unique
@@ -2206,7 +2514,6 @@ model Subscription {
   @@index([startDate])
   @@index([endDate])
 }
-
 model SubscriptionUsageRecord {
   uuid              String          @id @default(uuid())
   
@@ -2244,7 +2551,6 @@ model SubscriptionUsageRecord {
   @@index([subscriptionUuid, metricName, periodStart])
   @@index([timestamp])
 }
-
 model SubscriptionSchedule {
   uuid              String          @id @default(uuid())
   
@@ -2280,7 +2586,6 @@ model SubscriptionSchedule {
   
   @@index([subscriptionUuid, effectiveDate, status])
 }
-
 model SubscriptionHistory {
   uuid                String              @id @default(uuid())
   subscriptionUuid    String
@@ -2321,7 +2626,6 @@ model SubscriptionHistory {
   @@index([subscriptionUuid, occurredAt])
   @@index([eventType, occurredAt])
 }
-
 model SubscriptionRetention {
   id              Int      @id @default(autoincrement())
   tenantUuid      String
@@ -2333,7 +2637,10 @@ model SubscriptionRetention {
 
   @@index([tenantUuid, cohortMonth])
 }
-
+// ----------------------
+// |                    |
+// |      BILLING       |
+// ----------------------
 model BillingSnapshot {
   uuid                String     @id @default(uuid())
   tenantUuid          String
@@ -2496,7 +2803,10 @@ model EnterpriseContract {
   
   @@index([tenantUuid, status])
 }
-
+// ----------------------
+// |                    |
+// |      INVOICE       |
+// ----------------------
 model Invoice {
   uuid                 String       @id @default(uuid())
   tenantUuid           String
@@ -2606,7 +2916,6 @@ model Invoice {
   @@index([invoiceNumber])
   @@index([status, dueDate])
 }
-
 model InvoiceLineItem {
   uuid              String          @id @default(uuid())
   
@@ -2656,7 +2965,6 @@ model InvoiceLineItem {
   
   @@index([invoiceUuid, displayOrder])
 }
-
 model InvoicePayment {
   uuid              String          @id @default(uuid())
   
@@ -2695,7 +3003,6 @@ model InvoicePayment {
   @@index([invoiceUuid, status])
   @@index([providerRef])
 }
-
 model InvoiceAdjustment {
   uuid              String          @id @default(uuid())
   
@@ -2727,7 +3034,6 @@ model InvoiceAdjustment {
   
   @@index([invoiceUuid, type])
 }
-
 model InvoiceEvent {
   uuid              String          @id @default(uuid())
   
@@ -2748,68 +3054,52 @@ model InvoiceEvent {
   @@index([invoiceUuid, occurredAt])
   @@index([eventType, occurredAt])
 }
-
+// ----------------------
+// |                    |
+// |      PLAN          |
+// ----------------------
 model Plan {
   uuid              String          @id @default(uuid())
   
-  // Plan identification
-  name              String          // "Professional"
-  slug              String          @unique  // "professional"
+  name              String          
+  slug              String          @unique  
   description       String?
-  tagline           String?         // "For growing businesses"
+  tagline           String?        
   
-  // Plan tier & positioning
   tier              PlanTier        @default(STANDARD)
   displayOrder      Int             @default(0)
   
-  // Visibility
   isActive          Boolean         @default(true)
   isPublic          Boolean         @default(true)
-  isLegacy          Boolean         @default(false)  // Old plans
+  isLegacy          Boolean         @default(false) 
   
-  // Plan type
   planType          PlanType        @default(SUBSCRIPTION)
   
-  // Billing
-  supportedIntervals BillingInterval[]  // [MONTHLY, YEARLY]
+  supportedIntervals BillingInterval[] 
   defaultInterval   BillingInterval @default(MONTHLY)
   
-  // Trial
   trialEnabled      Boolean         @default(true)
   trialDays         Int             @default(14)
   trialRequiresCard Boolean         @default(false)
   
-  // Features & Limits (moved to separate model)
-  // See PlanFeature and PlanQuota models
-  
-  // Pricing (moved to PlanPrice model for flexibility)
-  // Supports multiple currencies, intervals, regions
-  
-  // Marketing
   highlightedFeatures String[]      @default([])
-  badges            String[]        @default([])  // "POPULAR", "BEST_VALUE"
-  ctaText           String?         // "Start Free Trial"
+  badges            String[]        @default([])  
+  ctaText           String?         
   
-  // Add-ons
   allowAddOns       Boolean         @default(true)
-  includedAddOns    String[]        @default([])  // AddOn UUIDs
-  
-  // Enterprise
+  includedAddOns    String[]        @default([]) 
+
   customPricingAvailable Boolean    @default(false)
   contactSales      Boolean         @default(false)
-  
   // Setup
-  setupFee          Int?            // One-time setup fee in cents
+  setupFee          Int?           
   activationFee     Int?
-  
   // Cancellation
   allowDowngrade    Boolean         @default(true)
-  downgradeCooldown Int?            // Days before can downgrade
+  downgradeCooldown Int?           
   
-  // Metadata
   metadata          Json?
   
-  // Relationships
   prices            PlanPrice[]
   features          PlanFeature[]
   quotas            PlanQuota[]
@@ -2824,38 +3114,30 @@ model Plan {
   @@index([tier, isActive, isPublic])
   @@index([isActive, displayOrder])
 }
-
 model PlanPrice {
   uuid              String          @id @default(uuid())
-  
   planUuid          String
   
-  // Pricing details
   currency          String          @default("USD")
   interval          BillingInterval
-  intervalCount     Int             @default(1)  // Bill every X months
+  intervalCount     Int             @default(1)
   
-  // Amount
-  amount            Int             // In cents
-  
-  // Regional pricing
-  region            String?         // "US", "EU", "UK", etc.
+  amount            Int           
+  region            String?         
   
   // Promotional pricing
   isPromo           Boolean         @default(false)
-  promoLabel        String?         // "Black Friday", "Early Bird"
+  promoLabel        String?         
   validFrom         DateTime?
   validUntil        DateTime?
   
-  // Discount on longer intervals
-  compareToPrice    Int?            // Show "was $X, now $Y"
-  savingsPercent    Int?            // Auto-calculated: 20% off
+  compareToPrice    Int?            
+  savingsPercent    Int?          
   
   // Metered/usage pricing
-  usageType         UsageType?      // METERED, LICENSED
-  tierMode          TierMode?       // GRADUATED, VOLUME
+  usageType         UsageType?      
+  tierMode          TierMode?     
   
-  // Status
   isActive          Boolean         @default(true)
   isDefault         Boolean         @default(false)
   
@@ -2865,7 +3147,7 @@ model PlanPrice {
   
   plan              Plan            @relation(fields: [planUuid], references: [uuid])
   
-  priceTiers        PriceTier[]     // For graduated/volume pricing
+  priceTiers        PriceTier[]  
   
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
@@ -2873,49 +3155,39 @@ model PlanPrice {
   @@unique([planUuid, currency, interval, region])
   @@index([planUuid, isActive, isDefault])
 }
-
 model PriceTier {
   uuid              String          @id @default(uuid())
   
   planPriceUuid     String
-  
   // Tier details
   upTo              Int?            
   unitPrice         Int             
   flatFee           Int?            
-  
   // Display
   displayOrder      Int             @default(0)
-  
+
   planPrice         PlanPrice       @relation(fields: [planPriceUuid], references: [uuid])
   
   @@index([planPriceUuid, displayOrder])
 }
-
 model PlanFeature {
   uuid              String          @id @default(uuid())
-  
   planUuid          String
   
-  // Feature details
-  featureKey        String          // "advanced_analytics"
-  featureName       String          // "Advanced Analytics"
+  featureKey        String          
+  featureName       String          
   description       String?
   
-  // Feature type
   type              FeatureType     @default(BOOLEAN)
+
+  enabled           Boolean?        
+  quantity          Int?            
+  textValue         String?       
   
-  // Value (depends on type)
-  enabled           Boolean?        // For BOOLEAN
-  quantity          Int?            // For QUANTITY
-  textValue         String?         // For TEXT
-  
-  // Display
-  category          String?         // Group features: "Analytics", "Support"
+  category          String?      
   displayOrder      Int             @default(0)
   highlight         Boolean         @default(false)
   
-  // Metadata
   metadata          Json?
   
   plan              Plan            @relation(fields: [planUuid], references: [uuid])
@@ -2925,7 +3197,6 @@ model PlanFeature {
   @@unique([planUuid, featureKey])
   @@index([planUuid, category, displayOrder])
 }
-
 model PlanVersion {
   uuid              String           @id @default(uuid())
   planUuid          String
@@ -2956,10 +3227,8 @@ model PlanVersion {
   @@unique([planUuid, version])
   @@index([planUuid, isActive])
 }
-
 model PlanQuota {
   uuid              String          @id @default(uuid())
-  
   planUuid          String
   
   // Quota details
@@ -2970,17 +3239,13 @@ model PlanQuota {
   limitType         LimitType       @default(HARD)
   limit             Int             
   
-  // Soft limit warnings
   softLimit         Int?            
   
-  // Overage handling
   allowOverage      Boolean         @default(false)
   overageFee        Int?            
   
-  // Reset period
   resetInterval     ResetInterval?  
   
-  // Status
   enforced          Boolean         @default(true)
   
   plan              Plan            @relation(fields: [planUuid], references: [uuid])
@@ -2991,7 +3256,10 @@ model PlanQuota {
   @@unique([planUuid, quotaKey])
   @@index([planUuid, enforced])
 }
-
+// ----------------------
+// |                    |
+// |      ADD ON        |
+// ----------------------
 model AddOn {
   uuid              String          @id @default(uuid())
   
@@ -3036,7 +3304,6 @@ model AddOn {
   @@index([slug])
   @@index([isActive, isPublic])
 }
-
 model AddOnPrice {
   uuid              String          @id @default(uuid())
   
@@ -3069,7 +3336,6 @@ model AddOnPrice {
   @@unique([addOnUuid, currency, interval])
   @@index([addOnUuid, isActive])
 }
-
 model AddOnPriceTier {
   uuid              String          @id @default(uuid())
   
@@ -3085,7 +3351,6 @@ model AddOnPriceTier {
   
   @@index([addOnPriceUuid, displayOrder])
 }
-
 model AddOnUsageRecord {
   uuid              String          @id @default(uuid())
   
@@ -3115,7 +3380,6 @@ model AddOnUsageRecord {
   @@index([tenantAddOnUuid, periodStart, periodEnd])
   @@index([timestamp])
 }
-
 model TenantAddOn {
   uuid              String          @id @default(uuid())
   
@@ -3172,7 +3436,10 @@ model TenantAddOn {
   @@index([tenantUuid, status])
   @@index([subscriptionUuid, status])
 }
-
+// ----------------------
+// |                    |
+// |      PRODUCT       |
+// ----------------------
 model Product {
   uuid                String          @id @default(uuid())
   storeUuid           String 
@@ -3261,7 +3528,6 @@ model Product {
   @@index([isActive, isDeleted, visibleOnMenu])
   @@index([tags]) 
 }
-
 model ProductOptionGroup {
   uuid              String           @id @default(uuid())
   tenantUuid        String
@@ -3295,7 +3561,6 @@ model ProductOptionGroup {
   @@index([tenantUuid, productUuid])
   @@index([productUuid, displayOrder])           
 }
-
 model ProductOption {
   uuid              String             @id @default(uuid())
   tenantUuid        String
@@ -3341,7 +3606,6 @@ model ProductOption {
   @@index([tenantUuid, optionGroupUuid])
   @@index([optionGroupUuid, displayOrder])
 }
-
 model ProductAvailability {
   uuid              String          @id @default(uuid())
   
@@ -3375,14 +3639,12 @@ model ProductAvailability {
   @@index([productUuid, specificDate])
   @@index([scheduleType, isActive])
 }
-
 model ProductSales {
   productUuid String
   date        DateTime
   quantity    Int
   @@id([productUuid, date])
 }
-
 model ProductReview {
   uuid              String       @id @default(uuid())
   tenantUuid        String
@@ -3422,12 +3684,54 @@ model ProductReview {
   @@index([tenantUuid, productUuid, status])
   @@index([rating, createdAt])
 }
-
+model ProductDailyMetrics {
+  uuid              String       @id @default(uuid())
+  tenantUuid        String
+  storeUuid         String
+  productUuid       String
+  date              DateTime
+  
+  // Sales
+  quantitySold      Int          @default(0)
+  ordersCount       Int          @default(0)  // How many orders included this
+  
+  // Revenue
+  revenueGross      Int          @default(0)
+  revenueNet        Int          @default(0)
+  avgSellingPrice   Int          @default(0)
+  
+  // Engagement
+  viewCount         Int          @default(0)
+  addToCartCount    Int          @default(0)
+  conversionRate    Float        @default(0)  // (sold / views) * 100
+  
+  // Inventory impact
+  stockAtStart      Int?
+  stockAtEnd        Int?
+  wasteCount        Int          @default(0)
+  
+  // Relationships
+  tenant            Tenant       @relation(fields: [tenantUuid], references: [uuid])
+  store             Store        @relation(fields: [storeUuid], references: [uuid])
+  product           Product      @relation(fields: [productUuid], references: [uuid])
+  
+  calculatedAt      DateTime     @default(now())
+  createdAt         DateTime     @default(now())
+  
+  @@unique([tenantUuid, productUuid, storeUuid, date])
+  @@index([tenantUuid, storeUuid, date])
+  @@index([productUuid, date])
+  @@index([date, quantitySold])  
+}
+// ----------------------
+// |                    |
+// |      INVENTORY     |
+// ----------------------
 model InventoryItem {
   uuid              String      @id @default(uuid())
   tenantUuid        String
   storeUuid         String
-  productUuid       String
+  productUuid       String @unique
   
   // Stock levels
   currentStock      Int         @default(0)
@@ -3474,7 +3778,6 @@ model InventoryItem {
   @@index([tenantUuid, storeUuid, status])
   @@index([status, currentStock])
 }
-
 model InventoryMovement {
   uuid              String          @id @default(uuid())
   
@@ -3506,168 +3809,10 @@ model InventoryMovement {
   @@index([tenantUuid, inventoryItemUuid, createdAt])
   @@index([referenceType, referenceUuid])
 }
-
-model StoreDailyMetrics {
-  uuid              String       @id @default(uuid())
-  tenantUuid        String
-  storeUuid         String
-  date              DateTime
-  
-  // Order metrics
-  ordersTotal       Int          @default(0)
-  ordersCompleted   Int          @default(0)
-  ordersCancelled   Int          @default(0)
-  ordersPending     Int          @default(0)
-  
-  // Revenue metrics (in cents)
-  revenueGross      Int          @default(0)
-  revenueNet        Int          @default(0)  
-  revenueTax        Int          @default(0)
-  revenueDiscount   Int          @default(0)
-  revenueRefunded   Int          @default(0)
-  
-  // Payment metrics
-  paymentsSucceeded Int          @default(0)
-  paymentsFailed    Int          @default(0)
-  avgPaymentValue   Int          @default(0)
-  
-  // Customer metrics
-  uniqueCustomers   Int          @default(0)
-  newCustomers      Int          @default(0)
-  returningCustomers Int         @default(0)
-  
-  // Product metrics
-  itemsSold         Int          @default(0)
-  avgItemsPerOrder  Float        @default(0)
-  
-  // Operational metrics
-  avgPrepTimeMin    Float        @default(0)
-  avgWaitTimeMin    Float        @default(0)
-  peakHourStart     String?      // "18:00"
-  peakHourOrders    Int?
-  
-  // Staff metrics
-  activeStaffCount  Int?
-  
-  // Hourly breakdown
-  hourlyBreakdown   Json?        // [{hour: 14, orders: 23, revenue: 1230}]
-  
-  // Top products
-  topProducts       Json?        // [{productUuid, name, qty, revenue}]
-  
-  // Relationships
-  tenant            Tenant       @relation(fields: [tenantUuid], references: [uuid])
-  store             Store        @relation(fields: [storeUuid], references: [uuid])
-  
-  calculatedAt      DateTime     @default(now())
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  
-  @@unique([tenantUuid, storeUuid, date])
-  @@index([tenantUuid, date])
-  @@index([storeUuid, date])
-}
-
-model OrderMetricsDaily {
-  uuid              String          @id @default(uuid())
-  tenantUuid        String
-  storeUuid         String
-  date              DateTime       
-  
-  ordersTotal       Int             @default(0)
-  ordersCompleted   Int             @default(0)
-  ordersCancelled   Int             @default(0)
-  ordersPending     Int             @default(0)
-  ordersRefunded    Int             @default(0)
-  
-  revenueGross      Int             @default(0)
-  revenueNet        Int             @default(0)
-  revenueTax        Int             @default(0)
-  revenueDiscount   Int             @default(0)
-  revenueRefunded   Int             @default(0)
-  
-  // Average metrics
-  avgOrderValue     Int             @default(0)
-  avgItemsPerOrder  Decimal         @default(0) @db.Decimal(10, 2)
-  avgPrepTimeMin    Decimal?        @db.Decimal(10, 2)
-  
-  // Customer metrics
-  uniqueCustomers   Int             @default(0)
-  newCustomers      Int             @default(0)
-  returningCustomers Int            @default(0)
-  
-  // Payment metrics
-  paymentsSucceeded Int             @default(0)
-  paymentsFailed    Int             @default(0)
-  
-  // Peak hour
-  peakHour          Int?           
-  peakHourOrders    Int?
-  
-  // Hourly breakdown
-  hourlyBreakdown   Json?           
-  
-  // Comparison
-  prevDayRevenue    Int?
-  changePercent     Decimal?        @db.Decimal(10, 2)
-  
-  // Calculation status
-  isCalculated      Boolean         @default(false)
-  calculatedAt      DateTime?
-  
-  // Relationships
-  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
-  store             Store           @relation(fields: [storeUuid], references: [uuid])
-  
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  
-  @@unique([tenantUuid, storeUuid, date])  
-  @@index([tenantUuid, date])
-  @@index([storeUuid, date])
-  @@index([date])
-}
-
-model ProductDailyMetrics {
-  uuid              String       @id @default(uuid())
-  tenantUuid        String
-  storeUuid         String
-  productUuid       String
-  date              DateTime
-  
-  // Sales
-  quantitySold      Int          @default(0)
-  ordersCount       Int          @default(0)  // How many orders included this
-  
-  // Revenue
-  revenueGross      Int          @default(0)
-  revenueNet        Int          @default(0)
-  avgSellingPrice   Int          @default(0)
-  
-  // Engagement
-  viewCount         Int          @default(0)
-  addToCartCount    Int          @default(0)
-  conversionRate    Float        @default(0)  // (sold / views) * 100
-  
-  // Inventory impact
-  stockAtStart      Int?
-  stockAtEnd        Int?
-  wasteCount        Int          @default(0)
-  
-  // Relationships
-  tenant            Tenant       @relation(fields: [tenantUuid], references: [uuid])
-  store             Store        @relation(fields: [storeUuid], references: [uuid])
-  product           Product      @relation(fields: [productUuid], references: [uuid])
-  
-  calculatedAt      DateTime     @default(now())
-  createdAt         DateTime     @default(now())
-  
-  @@unique([tenantUuid, productUuid, storeUuid, date])
-  @@index([tenantUuid, storeUuid, date])
-  @@index([productUuid, date])
-  @@index([date, quantitySold])  // For trending
-}
-
+// ----------------------
+// |                    |
+// |      CATEGORY      |
+// ----------------------
 model CategoryDailyMetrics {
   uuid              String       @id @default(uuid())
   tenantUuid        String
@@ -3690,7 +3835,6 @@ model CategoryDailyMetrics {
   @@unique([tenantUuid, categoryUuid, storeUuid, date])
   @@index([tenantUuid, storeUuid, date])
 }
-
 model Category {
   uuid                 String       @id @default(uuid())
   tenantUuid           String
@@ -3741,7 +3885,6 @@ model Category {
   @@index([storeUuid, parentUuid, displayOrder])
   @@index([isActive, isVisible])
 }
-
 model CategoryAvailability {
   uuid                 String        @id @default(uuid())
   categoryUuid         String
@@ -3758,7 +3901,10 @@ model CategoryAvailability {
 
   @@index([categoryUuid, dayOfWeek])
 }
-
+// ----------------------
+// |                    |
+// |      MENU          |
+// ----------------------
 model MenuAnalyticEvents {
   uuid              String        @id @default(uuid())
   tenantUuid        String
@@ -3812,7 +3958,6 @@ model MenuAnalyticEvents {
   @@index([entityType, entityUuid, occurredAt])
   @@index([sessionId, occurredAt])
 }
-
 model MenuSnapshot {
   uuid                String   @id @default(uuid())
   tenantUuid          String
@@ -3872,7 +4017,6 @@ model MenuSnapshot {
   @@index([storeUuid, isActive])
   @@index([contentHash]) 
 }
-
 model MenuDiff {
   uuid                 String   @id @default(uuid())
   tenantUuid           String
@@ -3921,39 +4065,24 @@ model MenuDiff {
   @@unique([fromSnapshotUuid, toSnapshotUuid])
   @@index([tenantUuid, storeUuid, createdAt])
 }
-
-model UserFavorite {
-  uuid               String        @id @default(uuid())
-  userUuid           String
-  productUuid        String
-  storeUuid          String
-
-  createdAt          DateTime      @default(now())
-
-  user               User          @relation(fields: [userUuid], references: [uuid])
-  product            Product       @relation(fields: [productUuid], references: [uuid])
-
-  @@unique([userUuid, productUuid])
-  @@index([storeUuid])
-}
-
+// ----------------------
+// |                    |
+// |      ORDER         |
+// ----------------------
 model Order {
   uuid              String          @id @default(uuid())
   tenantUuid        String
   storeUuid         String
   tenantUserUuid    String  
 
-  // Order identification
   orderNumber       String          
   customerName      String?         
   customerPhone     String?
 
-  // Order type
   orderType         OrderType       @default(DINE_IN)
   tableNumber       String?         
   deliveryAddress   Json?           
 
-  // Financial breakdown
   currency          String          @default("USD")
   subtotal          Int             
   taxAmount         Int             @default(0)
@@ -3962,11 +4091,9 @@ model Order {
   deliveryFee       Int             @default(0)
   totalAmount       Int             
 
-  // Applied promotions/discounts
   appliedPromos      Json?           
   taxBreakdown       Json?           
   
-  // Status & lifecycle
   status             OrderStatus       @default(PENDING)
   paymentStatus      PaymentStatus     @default(PENDING)
   fulfillmentStatus  FulfillmentStatus @default(PENDING)
@@ -3985,26 +4112,23 @@ model Order {
   menuVersion        Int             
   pricingSnapshot    Json            
   
-  // Notes & special requests
   customerNotes      String?
   kitchenNotes       String?
   internalNotes      String?
 
-  // Staff handling
   preparedBy         String?         
   servedBy           String?         
   
-  // Cancellation
   cancelledAt        DateTime?
   cancelledBy        String?         
   cancellationReason String?
   
-  // Relationships
   tenant             Tenant          @relation(fields: [tenantUuid], references: [uuid])
   store              Store           @relation(fields: [storeUuid], references: [uuid])
   tenantUser         TenantUser      @relation(fields: [tenantUserUuid], references: [uuid])
   menuSnapshot       MenuSnapshot?   @relation(fields: [menuSnapshotUuid], references: [uuid])
   
+  payments Payment[]
   items              OrderItem[]
   payment            Payment?
   refunds            Refund[]
@@ -4020,7 +4144,6 @@ model Order {
   @@index([status, createdAt])
   @@index([paymentStatus])
 }
-
 model OrderItem {
   uuid              String          @id @default(uuid())
   tenantUuid        String
@@ -4076,7 +4199,6 @@ model OrderItem {
   @@index([productUuid])
   @@index([status])
 }
-
 model OrderStatusHistory {
   uuid              String       @id @default(uuid())
   tenantUuid        String
@@ -4100,69 +4222,185 @@ model OrderStatusHistory {
   @@index([tenantUuid, orderUuid, createdAt])
   @@index([toStatus, createdAt])
 }
-
+// ----------------------
+// |                    |
+// |    DAILY METRICS   |
+// ----------------------
+model OrderMetricsDaily {
+  uuid              String          @id @default(uuid())
+  tenantUuid        String
+  storeUuid         String
+  date              DateTime       
+  
+  ordersTotal       Int             @default(0)
+  ordersCompleted   Int             @default(0)
+  ordersCancelled   Int             @default(0)
+  ordersPending     Int             @default(0)
+  ordersRefunded    Int             @default(0)
+  
+  revenueGross      Int             @default(0)
+  revenueNet        Int             @default(0)
+  revenueTax        Int             @default(0)
+  revenueDiscount   Int             @default(0)
+  revenueRefunded   Int             @default(0)
+  
+  avgOrderValue     Int             @default(0)
+  avgItemsPerOrder  Decimal         @default(0) @db.Decimal(10, 2)
+  avgPrepTimeMin    Decimal?        @db.Decimal(10, 2)
+  
+  uniqueCustomers   Int             @default(0)
+  newCustomers      Int             @default(0)
+  returningCustomers Int            @default(0)
+  
+  paymentsSucceeded Int             @default(0)
+  paymentsFailed    Int             @default(0)
+  
+  peakHour          Int?           
+  peakHourOrders    Int?
+  
+  hourlyBreakdown   Json?           
+  prevDayRevenue    Int?
+  changePercent     Decimal?        @db.Decimal(10, 2)
+  
+  isCalculated      Boolean         @default(false)
+  calculatedAt      DateTime?
+  
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([tenantUuid, storeUuid, date])  
+  @@index([tenantUuid, date])
+  @@index([storeUuid, date])
+  @@index([date])
+}
+// ----------------------
+// |                    |
+// |      PAYMENT       |
+// ----------------------
 model Payment {
   uuid              String          @id @default(uuid())
   orderUuid         String          @unique
   storeUuid         String
   tenantUuid        String
-
-  // Financial data
+  // Financial breakdown
   amount            Int
   currency          String
   subtotal          Int
   tax               Int
   discount          Int             @default(0)
+  // Payment method & flow & status
+  paymentFlow          PaymentFlow    
+  paymentMethod        PaymentMethod 
+  status               PaymentStatus
 
-  status            PaymentStatus
-  provider          String         
-  providerRef       String?
+  // CASHIER PAYMENT FIELDS (for manual declarations)
 
-  // Snapshot of order at payment time
-  snapshot          Json  
-  orderSnapshot     Json            
-  pricingRules      Json   
+  // Who & When
+  processedBy          String?         
+  processedAt          DateTime?       
+  deviceId             String?        
+  terminalId           String?        
+  ipAddress            String?    
+  // Change given (for cash)
+  amountTendered       Int?        
+  changeGiven          Int?           
+  // Receipt
+  receiptNumber        String?        
+  receiptPrinted       Boolean         @default(false)
+  receiptPrintedAt     DateTime?   
+  // Reconciliation
+  reconciledInReport   String?       
+  reconciledAt         DateTime?
+  reconciliationNotes  String? 
+  // Anomaly detection
+  flaggedForReview     Boolean         @default(false)
+  flagReason           String?         
+  flaggedAt            DateTime?
+  reviewedBy           String?         
+  reviewedAt           DateTime?
+  reviewNotes          String?
+  reviewOutcome        ReviewOutcome? 
+  // Corrections (if payment was wrong)
+  correctedBy          String?
+  correctedAt          DateTime?
+  correctionReason     String?
+  originalAmount       Int?       
+  // Disputes & corrections
+  disputedBy           String?         
+  disputedAt           DateTime?       
+  disputeReason        String?        
+  disputeResolution    String?         
+  // Voids
+  voidedBy             String?        
+  voidedAt             DateTime?      
+  voidReason           String?  
 
-  // Locking & retry
-  lockedAt          DateTime?
-  lockExpiresAt     DateTime?
-  expiresAt         DateTime?
-  retries           Int             @default(0)
-  maxRetries        Int             @default(3)  
+  // PROVIDER PAYMENT FIELDS
+  provider             PaymentProvider?
+  providerRef          String?         
+  clientSecret         String?         
+  // Provider timing
+  authorizedAt         DateTime?
+  capturedAt           DateTime?
+  paidAt               DateTime?
+  failedAt             DateTime?
+  // Retry logic
+  lockedAt             DateTime?
+  lockedBy             String?         
+  lockExpiresAt        DateTime?
+  retries              Int             @default(0)
+  maxRetries           Int             @default(3)
+  lastRetryAt          DateTime?
+  nextRetryAt          DateTime?
+  // Failure tracking
+  lastError            String?
+  failureCode          NormalizedProviderError?
+  failureReason        String?
+
+  isPartial Boolean @default(false)
+  
+  expiresAt            DateTime?
+
+  // Admin override fields
+  adminOverride       Boolean   @default(false)
+  adminOverrideReason String?
+  adminOverrideBy     String?  
+  adminOverrideAt     DateTime?
+
+  // Cancellation fields
+  cancelledAt     DateTime?
+  cancelReason    String?
+  cancelledBy     String?     // "SYSTEM", "USER", "ADMIN"
+  cancelledByUuid String?
+
+  // COMMON FIELDS
+
+  snapshot             Json  
+  orderSnapshot        Json            
+  pricingRules         Json 
+  // Risk & fraud
+  riskScore            Int             @default(0)
+  fraudFlags           String[]        @default([])
+  // Relationships
+  order                Order           @relation(fields: [orderUuid], references: [uuid])
+  store                Store           @relation(fields: [storeUuid], references: [uuid])
+  tenant               Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  refunds              Refund[]
+  auditSnapshots       PaymentAuditSnapshot[]
+  reconciliationReport DailyReconciliation? @relation(fields: [reconciliationReportUuid], references: [uuid])
 
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  order             Order           @relation(fields: [orderUuid], references: [uuid])
-  Refund            Refund[]
-
   @@index([tenantUuid, storeUuid, status])
-  @@index([tenantUuid, orderUuid])
-  @@index([status, lockExpiresAt])
+  @@index([paymentFlow, status])
+  @@index([processedBy, processedAt])
+  @@index([flaggedForReview, reviewedAt])
+  @@index([reconciledAt])
 }
-
-model PaymentAuditSnapshot {
-  uuid              String          @id @default(uuid())
-  
-  tenantUuid        String
-  paymentUuid       String          
-  orderUuid         String
-  storeUuid         String
-  
-  // Snapshot reason
-  reason            SnapshotReason
-  triggeredBy       String?
-  
-  // Full payment state at this moment
-  paymentState      Json           
-  orderState        Json           
-  
-  createdAt         DateTime        @default(now())
-  
-  @@index([tenantUuid, paymentUuid, createdAt])
-  @@index([orderUuid])
-}
-
 model PaymentRisk {
   uuid                 String    @id @default(uuid())
   tenantUuid           String   
@@ -4185,7 +4423,6 @@ model PaymentRisk {
   
   @@unique([tenantUuid, userUuid])
 }
-
 model PaymentRestriction {
   uuid              String              @id @default(uuid())
   tenantUuid        String
@@ -4237,7 +4474,157 @@ model PaymentRestriction {
   @@index([tenantUuid, userUuid, active])
   @@index([type, active])
 }
+model PaymentAnomaly {
+  uuid              String          @id @default(uuid())
+  tenantUuid        String
+  storeUuid         String
+  paymentUuid       String
+  orderUuid         String
+  
+  // Anomaly classification
+  anomalyType       AnomalyType
+  severity          AnomalySeverity @default(MEDIUM)
+  
+  // Detection
+  detectedAt        DateTime        @default(now())
+  detectedBy        String          @default("SYSTEM") 
+  detectionMethod   String          
+  
+  // Details
+  description       String
+  evidence          Json           
+  expectedValue     Json?         
+  actualValue       Json?          
+  variance          Decimal?        @db.Decimal(10, 2)
+  
+  // Status
+  status            AnomalyStatus   @default(PENDING)
+  autoResolved      Boolean         @default(false)
+  
+  // Review
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  reviewNotes       String?
+  resolution        String?        
 
+  // Relationships
+  payment           Payment         @relation(fields: [paymentUuid], references: [uuid])
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([tenantUuid, storeUuid, status])
+  @@index([anomalyType, severity, status])
+  @@index([detectedAt])
+}
+model PaymentDispute {
+  uuid                String          @id @default(uuid())
+  tenantUuid          String
+  paymentUuid         String
+  orderUuid           String
+  
+  provider            String
+  providerDisputeUuid   String
+  
+  amount              Int
+  currency            String          @default("USD")
+  reason              DisputeReason
+  reasonCode          String?
+
+  status              DisputeStatus
+  
+  evidenceRequired    Json?          
+  evidenceSubmitted   Json?          
+  evidenceDueBy       DateTime?
+
+  // Resolution
+  resolvedAt          DateTime?
+  resolution          DisputeResolution?
+  resolutionNotes     String?
+  
+  // Financial impact
+  chargedBackAmount   Int?
+  chargedBackAt       DateTime?
+  
+  // Notifications
+  notifiedAt          DateTime?
+  
+  // Raw data
+  snapshot            Json
+
+  // Relationships
+  tenant              Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  payment             Payment         @relation(fields: [paymentUuid], references: [uuid])
+  order               Order           @relation(fields: [orderUuid], references: [uuid])
+  store               Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  @@index([tenantUuid, status])
+  @@index([paymentUuid])
+  @@index([status, evidenceDueBy])
+}
+model CashDrawer {
+  uuid              String          @id @default(uuid())
+  tenantUuid        String
+  storeUuid         String
+  terminalId        String         
+  
+  // Session
+  sessionStart      DateTime
+  sessionEnd        DateTime?
+  status            DrawerStatus    @default(OPEN)
+  
+  // Opening balance
+  openingBalance    Int
+  openedBy          String         
+  openedAt          DateTime        @default(now())
+  
+  // Expected (from system)
+  expectedCash      Int             @default(0)  
+  expectedCard      Int             @default(0)  
+  
+  // Actual (counted)
+  actualCash        Int?
+  actualCard        Int?
+  countedBy         String?
+  countedAt         DateTime?
+  
+  // Variance
+  cashVariance      Int             @default(0) 
+  cardVariance      Int             @default(0)
+  
+  // Transactions during session
+  cashSalesCount    Int             @default(0)
+  cardSalesCount    Int             @default(0)
+  totalSales        Int             @default(0)
+  
+  // Closing
+  closedBy          String?
+  closedAt          DateTime?
+  closingNotes      String?
+  
+  // Deposit
+  depositAmount     Int?
+  depositedBy       String?
+  depositedAt       DateTime?
+  depositReference  String?      
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  payments          Payment[]       @relation("DrawerPayments")
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([tenantUuid, storeUuid, sessionStart])
+  @@index([terminalId, sessionStart])
+  @@index([status, sessionStart])
+}
 // model PaymentIntent {
 //   uuid              String              @id @default(uuid())
 //   tenantUuid        String
@@ -4260,7 +4647,74 @@ model PaymentRestriction {
 //   @@index([tenantUuid, orderUuid])
 //   @@index([status, lockExpiresAt])
 // }
+model PaymentReconciliation {
+  uuid                String              @id @default(uuid())
+  tenantUuid          String
+  storeUuid           String?
+  // Reconciliation period
+  periodStart         DateTime
+  periodEnd           DateTime
+  // Provider
+  provider            PaymentProvider
+  // Our records
+  ourPaymentCount     Int
+  ourPaymentTotal     Int
+  ourRefundCount      Int
+  ourRefundTotal      Int
+  ourNetTotal         Int
+  // Provider records
+  providerPaymentCount Int
+  providerPaymentTotal Int
+  providerRefundCount  Int
+  providerRefundTotal  Int
+  providerNetTotal     Int
+  // Variances
+  paymentCountVariance  Int                @default(0)
+  paymentAmountVariance Int                @default(0)
+  refundCountVariance   Int                @default(0)
+  refundAmountVariance  Int                @default(0)
+  netVariance           Int                @default(0)
+  // Discrepancies
+  hasDiscrepancy      Boolean             @default(false)
+  discrepancyDetails  Json?
+  // Missing transactions
+  missingInOurSystem  String[]            @default([]) 
+  missingInProvider   String[]            @default([]) 
+  // Status
+  status              ReconciliationStatus @default(PENDING)
+  // Resolution
+  resolvedBy          String?
+  resolvedAt          DateTime?
+  resolutionNotes     String?
+  // Metadata
+  providerReport      Json?               
 
+  tenant              Tenant              @relation(fields: [tenantUuid], references: [uuid])
+  store               Store?              @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  
+  @@unique([tenantUuid, provider, periodStart])
+  @@index([provider, periodStart])
+  @@index([status])
+}
+model IdempotencyKey {
+  uuid              String     @id @default(uuid())
+  tenantUuid        String 
+
+  key               String
+  route             String
+  requestHash       String? 
+  response          Json
+  statusCode        Int
+
+  expiresAt         DateTime 
+  createdAt         DateTime   @default(now())
+
+  @@unique([tenantUuid, key, route])
+  @@index([expiresAt])
+}
 model LedgerEntry {
   uuid            String   @id @default(uuid())
   tenantUuid      String   
@@ -4285,7 +4739,6 @@ model LedgerEntry {
   @@index([tenantUuid, storeUuid, createdAt])
   @@index([refType, refUuid])
 }
-
 model Refund {
   uuid              String        @id @default(uuid())
   tenantUuid        String 
@@ -4324,7 +4777,57 @@ model Refund {
   @@index([orderUuid])
   @@index([paymentUuid])
 }
-
+model DailyReconciliation {
+  uuid              String   @id @default(uuid())
+  tenantUuid        String
+  storeUuid         String
+  date              DateTime 
+  // Status
+  status            ReconciliationStatus @default(PENDING)
+  // Order totals
+  ordersCount       Int
+  ordersTotal       Int      
+  // Payment method breakdown (declared amounts)
+  cashDeclared      Int      @default(0)
+  cardDeclared      Int      @default(0)
+  walletDeclared    Int      @default(0)
+  totalDeclared     Int      @default(0)
+  // Physical count (actual cash counted)
+  cashCounted       Int?
+  cardReceipts      Int?    
+  // Provider totals (from Stripe/EVC APIs)
+  providerTotal     Int      @default(0)
+  // Discrepancies
+  cashVariance      Int      @default(0)  
+  cardVariance      Int      @default(0) 
+  totalVariance     Int      @default(0)  
+  
+  variancePercent   Decimal  @db.Decimal(5, 2)
+  // Flags
+  hasVariance       Boolean  @default(false)
+  requiresReview    Boolean  @default(false)
+  // Missing/extra payments
+  missingPayments   String[] @default([]) 
+  extraPayments     String[] @default([]) 
+  disputedPayments  String[] @default([]) 
+  // Resolution
+  resolvedBy        String?
+  resolvedAt        DateTime?
+  resolutionNotes   String?
+  // Who performed reconciliation
+  reconciledBy      String 
+  // Relationships
+  tenant            Tenant   @relation(fields: [tenantUuid], references: [uuid])
+  store             Store    @relation(fields: [storeUuid], references: [uuid])
+  payments          Payment[]
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@unique([storeUuid, date])
+  @@index([tenantUuid, storeUuid, date])
+  @@index([status, date])
+}
 model Wallet {
   uuid              String          @id @default(uuid())
   tenantUuid        String          
@@ -4349,7 +4852,6 @@ model Wallet {
   @@unique([tenantUuid, userUuid])
   @@index([tenantUuid, status])
 }
-
 model WalletTransaction {
   uuid              String              @id @default(uuid())
   tenantUuid        String
@@ -4379,54 +4881,10 @@ model WalletTransaction {
   @@index([tenantUuid, walletUuid, createdAt])
   @@index([refType, refUuid])
 }
-
-model AnalyticsSnapshot {
-  uuid              String              @id @default(uuid())
-  tenantUuid        String?             
-  storeUuid         String?
-  
-  // Snapshot details
-  type              AnalyticsType
-  granularity       TimeGranularity
-  
-  // Time period
-  periodStart       DateTime
-  periodEnd         DateTime
-  
-  // Aggregated data
-  metrics           Json                
-  dimensions        Json?               
-  
-  // Comparison data
-  previousPeriod    Json?               
-  changePercent     Float?
-  
-  // Status
-  status            SnapshotStatus      @default(COMPLETED)
-  
-  // Processing
-  calculatedAt      DateTime            @default(now())
-  calculationTime   Int?                
-  recordCount       Int?                
-  
-  // Versioning (for schema changes)
-  version           Int                 @default(1)
-  
-  // Metadata
-  metadata          Json?
-  
-  // Relationships
-  tenant            Tenant?             @relation(fields: [tenantUuid], references: [uuid])
-  store             Store?              @relation(fields: [storeUuid], references: [uuid])
-  
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  
-  @@unique([tenantUuid, storeUuid, type, granularity, periodStart])
-  @@index([tenantUuid, type, periodStart])
-  @@index([type, granularity, periodStart])
-}
-
+// ----------------------
+// |                    |
+// |      PLATFORM      |
+// ----------------------
 model PlatformSetting {
   uuid              String          @id @default(uuid())
   
@@ -4480,7 +4938,6 @@ model PlatformSetting {
   @@index([scope, category])
   @@index([tenantUuid, key])
 }
-
 model SystemHealth {
   uuid              String          @id @default(uuid())
   
@@ -4512,352 +4969,6 @@ model SystemHealth {
   @@index([component, status])
   @@index([checkedAt])
 }
-
-model RateLimitBucket {
-  uuid              String          @id @default(uuid())
-  
-  // Identifier
-  key               String          
-  
-  // Limit configuration
-  maxRequests       Int
-  windowSeconds     Int
-  
-  // Current state
-  requestCount      Int             @default(0)
-  windowStart       DateTime        @default(now())
-  windowEnd         DateTime
-  
-  // Blocking
-  isBlocked         Boolean         @default(false)
-  blockedUntil      DateTime?
-  
-  // Tracking
-  lastRequestAt     DateTime?
-  totalRequests     Int             @default(0)
-  
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  
-  @@unique([key])
-  @@index([windowEnd, isBlocked])
-}
-
-model EmailTemplate {
-  uuid              String          @id @default(uuid())
-  
-  // Multi-tenant support
-  tenantUuid        String?         // Null = system default template
-  storeUuid         String?         // Store-specific override
-  
-  // Template identification
-  key               String          // e.g., "order_confirmation", "password_reset"
-  name              String          // Human-readable name
-  description       String?
-  category          EmailCategory   @default(TRANSACTIONAL)
-  
-  // Content
-  subject           String          // Supports variables: {{orderNumber}}
-  bodyHtml          String          // HTML version
-  bodyText          String?         // Plain text fallback
-  preheader         String?         // Email preview text
-  
-  // Variables/placeholders
-  availableVars     Json            // [{var: "customerName", type: "string", required: true}]
-  sampleData        Json?           // For preview rendering
-  
-  // Localization
-  locale            String          @default("en")
-  localized         Json?           // {es: {subject: "...", body: "..."}}
-  
-  // Design
-  layout            String?         // Layout template to use
-  cssInline         Boolean         @default(true)
-  customCss         String?
-  headerImageUrl    String?
-  footerContent     String?
-  
-  // Branding
-  brandingEnabled   Boolean         @default(true)
-  primaryColor      String?
-  fontFamily        String?
-  
-  // Status
-  status            TemplateStatus  @default(DRAFT)
-  isActive          Boolean         @default(true)
-  isDefault         Boolean         @default(false)
-  
-  // Versioning
-  version           Int             @default(1)
-  parentUuid        String?         // Previous version
-  
-  // Testing
-  testRecipients    String[]        @default([])
-  lastTestedAt      DateTime?
-  
-  // Analytics
-  openRate          Float?          // Percentage
-  clickRate         Float?          // Percentage
-  sentCount         Int             @default(0)
-  
-  // Compliance
-  requiresConsent   Boolean         @default(false)
-  unsubscribeEnabled Boolean        @default(true)
-  
-  // Relationships
-  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
-  store             Store?          @relation(fields: [storeUuid], references: [uuid])
-  parent            EmailTemplate?  @relation("TemplateVersions", fields: [parentUuid], references: [uuid])
-  versions          EmailTemplate[] @relation("TemplateVersions")
-  
-  createdBy         String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  lastModifiedBy    String?
-  
-  @@unique([tenantUuid, storeUuid, key, locale])
-  @@index([tenantUuid, key, isActive])
-  @@index([category, isActive])
-  @@index([key])
-}
-
-model EmailOutbox {
-  uuid              String          @id @default(uuid())
-  
-  // Context
-  tenantUuid        String?
-  storeUuid         String?
-  
-  // Recipients
-  to                String[]        // Support multiple recipients
-  cc                String[]        @default([])
-  bcc               String[]        @default([])
-  replyTo           String?
-  
-  // Content
-  subject           String
-  bodyHtml          String?
-  bodyText          String?
-  preheader         String?
-  
-  // Template
-  templateKey       String?
-  templateUuid      String?
-  templateData      Json?           // Variables for template rendering
-  
-  // Attachments
-  attachments       Json?           // [{filename, url, contentType, size}]
-  
-  // Scheduling
-  scheduledAt       DateTime?
-  sendAfter         DateTime?       // Don't send before this time
-  expiresAt         DateTime?       // Cancel if not sent by this time
-  
-  // Priority
-  priority          EmailPriority   @default(NORMAL)
-  
-  // Status
-  status            EmailStatus     @default(PENDING)
-  
-  // Delivery tracking
-  attempts          Int             @default(0)
-  maxAttempts       Int             @default(3)
-  lastAttemptAt     DateTime?
-  nextRetryAt       DateTime?
-  
-  // Provider details
-  provider          EmailProvider?  // Which service sent it
-  providerMessageId String?         // Provider's message ID
-  providerResponse  Json?
-  
-  // Error tracking
-  lastError         String?
-  errorType         String?         // BOUNCE, COMPLAINT, DELIVERY_DELAY
-  errorCode         String?
-  
-  // Result tracking
-  sentAt            DateTime?
-  deliveredAt       DateTime?
-  openedAt          DateTime?
-  clickedAt         DateTime?
-  bouncedAt         DateTime?
-  complainedAt      DateTime?
-  unsubscribedAt    DateTime?
-  
-  // Metadata
-  tags              String[]        @default([])
-  metadata          Json?
-  
-  // Tracking
-  openCount         Int             @default(0)
-  clickCount        Int             @default(0)
-  trackingEnabled   Boolean         @default(true)
-  
-  // Relationships
-  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
-  store             Store?          @relation(fields: [storeUuid], references: [uuid])
-  template          EmailTemplate?  @relation(fields: [templateUuid], references: [uuid])
-  
-  events            EmailEvent[]
-  
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  
-  @@index([tenantUuid, status, scheduledAt])
-  @@index([status, nextRetryAt])
-  @@index([to])
-  @@index([providerMessageId])
-}
-
-model EmailEvent {
-  uuid              String          @id @default(uuid())
-  emailUuid         String
-  
-  // Event details
-  eventType         EmailEventType
-  eventData         Json?
-  
-  // Provider event
-  providerEventId   String?
-  provider          EmailProvider?
-  
-  // Tracking details
-  ipAddress         String?
-  userAgent         String?
-  location          String?
-  deviceType        String?
-  
-  // Link tracking (for clicks)
-  linkUrl           String?
-  linkPosition      Int?
-  
-  email             EmailOutbox     @relation(fields: [emailUuid], references: [uuid])
-  
-  occurredAt        DateTime        @default(now())
-  createdAt         DateTime        @default(now())
-  
-  @@index([emailUuid, eventType, occurredAt])
-  @@index([eventType, occurredAt])
-}
-
-model FeatureFlag {
-  uuid              String          @id @default(uuid())
-  
-  // Flag identification
-  key               String         
-  name              String          
-  description       String?
-  category          String?         
-  
-  // Scope
-  scope             FlagScope       @default(GLOBAL)
-  tenantUuid        String?      
-  
-  // Status
-  enabled           Boolean         @default(false)
-  
-  // Rollout strategy
-  rolloutType       RolloutType     @default(BOOLEAN)
-  rolloutPercentage Int?            
-  
-  // Targeting
-  targetingRules    Json?           
-  whitelist         String[]        @default([])  
-  blacklist         String[]        @default([])  
-  
-  // Variants (for A/B testing)
-  variants          Json?          
-  
-  // Scheduling
-  enabledFrom       DateTime?
-  enabledUntil      DateTime?
-  
-  // Dependencies
-  requiresFlags     String[]        @default([])  
-  conflictsWith     String[]        @default([])  
-  
-  // Metadata
-  tags              String[]        @default([])
-  metadata          Json?
-  
-  // Tracking
-  usageCount        Int             @default(0)
-  lastUsedAt        DateTime?
-  
-  // Management
-  isDeprecated      Boolean         @default(false)
-  deprecationDate   DateTime?
-  
-  // Relationships
-  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
-  evaluations       FeatureFlagEvaluation[]
-  overrides         FeatureFlagOverride[]
-  
-  createdBy         String?
-  createdAt         DateTime        @default(now())
-  updatedBy         String?
-  updatedAt         DateTime        @updatedAt
-  
-  @@unique([scope, tenantUuid, key])
-  @@index([scope, enabled])
-  @@index([tenantUuid, enabled])
-  @@index([key, enabled])
-}
-
-model FeatureFlagEvaluation {
-  uuid              String          @id @default(uuid())
-  
-  flagUuid          String
-  
-  // Context
-  tenantUuid        String?
-  userUuid          String?
-  sessionId         String?
-  
-  // Result
-  enabled           Boolean
-  variant           String?
-  
-  // Metadata
-  evaluationTime    Int             
-  metadata          Json?
-  
-  flag              FeatureFlag     @relation(fields: [flagUuid], references: [uuid])
-  
-  evaluatedAt       DateTime        @default(now())
-  
-  @@index([flagUuid, evaluatedAt])
-  @@index([tenantUuid, evaluatedAt])
-}
-
-model FeatureFlagOverride {
-  uuid              String          @id @default(uuid())
-  flagUuid          String
-  
-  // Override target
-  targetType        OverrideTarget
-  targetUuid        String          
-  
-  // Override value
-  enabled           Boolean
-  variant           String?         
-  
-  // Reason
-  reason            String?
-  setBy             String?
-  
-  // Expiry
-  expiresAt         DateTime?
-  
-  flag              FeatureFlag     @relation(fields: [flagUuid], references: [uuid])
-  
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  
-  @@unique([flagUuid, targetType, targetUuid])
-  @@index([targetType, targetUuid])
-}
-
 model BrandingSetting {
   uuid              String          @id @default(uuid())
   
@@ -4945,7 +5056,6 @@ model BrandingSetting {
   @@index([scope, isActive])
   @@index([tenantUuid, isActive])
 }
-
 model SettingHistory {
   uuid              String          @id @default(uuid())
   settingUuid       String
@@ -4967,6 +5077,342 @@ model SettingHistory {
   changedAt         DateTime        @default(now())
   
   @@index([settingUuid, changedAt])
+}
+
+model RateLimitBucket {
+  uuid              String          @id @default(uuid())
+  
+  // Identifier
+  key               String          
+  
+  // Limit configuration
+  maxRequests       Int
+  windowSeconds     Int
+  
+  // Current state
+  requestCount      Int             @default(0)
+  windowStart       DateTime        @default(now())
+  windowEnd         DateTime
+  
+  // Blocking
+  isBlocked         Boolean         @default(false)
+  blockedUntil      DateTime?
+  
+  // Tracking
+  lastRequestAt     DateTime?
+  totalRequests     Int             @default(0)
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([key])
+  @@index([windowEnd, isBlocked])
+}
+// ----------------------
+// |                    |
+// |      EMAIL         |
+// ----------------------
+model EmailTemplate {
+  uuid              String          @id @default(uuid())
+  
+  // Multi-tenant support
+  tenantUuid        String?         // Null = system default template
+  storeUuid         String?         // Store-specific override
+  
+  // Template identification
+  key               String          // e.g., "order_confirmation", "password_reset"
+  name              String          // Human-readable name
+  description       String?
+  category          EmailCategory   @default(TRANSACTIONAL)
+  
+  // Content
+  subject           String          // Supports variables: {{orderNumber}}
+  bodyHtml          String          // HTML version
+  bodyText          String?         // Plain text fallback
+  preheader         String?         // Email preview text
+  
+  // Variables/placeholders
+  availableVars     Json            // [{var: "customerName", type: "string", required: true}]
+  sampleData        Json?           // For preview rendering
+  
+  // Localization
+  locale            String          @default("en")
+  localized         Json?           // {es: {subject: "...", body: "..."}}
+  
+  // Design
+  layout            String?         // Layout template to use
+  cssInline         Boolean         @default(true)
+  customCss         String?
+  headerImageUrl    String?
+  footerContent     String?
+  
+  // Branding
+  brandingEnabled   Boolean         @default(true)
+  primaryColor      String?
+  fontFamily        String?
+  
+  // Status
+  status            TemplateStatus  @default(DRAFT)
+  isActive          Boolean         @default(true)
+  isDefault         Boolean         @default(false)
+  
+  // Versioning
+  version           Int             @default(1)
+  parentUuid        String?         // Previous version
+  
+  // Testing
+  testRecipients    String[]        @default([])
+  lastTestedAt      DateTime?
+  
+  // Analytics
+  openRate          Float?          // Percentage
+  clickRate         Float?          // Percentage
+  sentCount         Int             @default(0)
+  
+  // Compliance
+  requiresConsent   Boolean         @default(false)
+  unsubscribeEnabled Boolean        @default(true)
+  
+  // Relationships
+  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
+  store             Store?          @relation(fields: [storeUuid], references: [uuid])
+  parent            EmailTemplate?  @relation("TemplateVersions", fields: [parentUuid], references: [uuid])
+  versions          EmailTemplate[] @relation("TemplateVersions")
+  
+  createdBy         String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  lastModifiedBy    String?
+  
+  @@unique([tenantUuid, storeUuid, key, locale])
+  @@index([tenantUuid, key, isActive])
+  @@index([category, isActive])
+  @@index([key])
+}
+model EmailOutbox {
+  uuid              String          @id @default(uuid())
+  
+  // Context
+  tenantUuid        String?
+  storeUuid         String?
+  
+  // Recipients
+  to                String[]        // Support multiple recipients
+  cc                String[]        @default([])
+  bcc               String[]        @default([])
+  replyTo           String?
+  
+  // Content
+  subject           String
+  bodyHtml          String?
+  bodyText          String?
+  preheader         String?
+  
+  // Template
+  templateKey       String?
+  templateUuid      String?
+  templateData      Json?           // Variables for template rendering
+  
+  // Attachments
+  attachments       Json?           // [{filename, url, contentType, size}]
+  
+  // Scheduling
+  scheduledAt       DateTime?
+  sendAfter         DateTime?       // Don't send before this time
+  expiresAt         DateTime?       // Cancel if not sent by this time
+  
+  // Priority
+  priority          EmailPriority   @default(NORMAL)
+  
+  // Status
+  status            EmailStatus     @default(PENDING)
+  
+  // Delivery tracking
+  attempts          Int             @default(0)
+  maxAttempts       Int             @default(3)
+  lastAttemptAt     DateTime?
+  nextRetryAt       DateTime?
+  
+  // Provider details
+  provider          EmailProvider?  // Which service sent it
+  providerMessageId String?         // Provider's message ID
+  providerResponse  Json?
+  
+  // Error tracking
+  lastError         String?
+  errorType         String?         // BOUNCE, COMPLAINT, DELIVERY_DELAY
+  errorCode         String?
+  
+  // Result tracking
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  openedAt          DateTime?
+  clickedAt         DateTime?
+  bouncedAt         DateTime?
+  complainedAt      DateTime?
+  unsubscribedAt    DateTime?
+  
+  // Metadata
+  tags              String[]        @default([])
+  metadata          Json?
+  
+  // Tracking
+  openCount         Int             @default(0)
+  clickCount        Int             @default(0)
+  trackingEnabled   Boolean         @default(true)
+  
+  // Relationships
+  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
+  store             Store?          @relation(fields: [storeUuid], references: [uuid])
+  template          EmailTemplate?  @relation(fields: [templateUuid], references: [uuid])
+  
+  events            EmailEvent[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([tenantUuid, status, scheduledAt])
+  @@index([status, nextRetryAt])
+  @@index([to])
+  @@index([providerMessageId])
+}
+model EmailEvent {
+  uuid              String          @id @default(uuid())
+  emailUuid         String
+  
+  // Event details
+  eventType         EmailEventType
+  eventData         Json?
+  
+  // Provider event
+  providerEventId   String?
+  provider          EmailProvider?
+  
+  // Tracking details
+  ipAddress         String?
+  userAgent         String?
+  location          String?
+  deviceType        String?
+  
+  // Link tracking (for clicks)
+  linkUrl           String?
+  linkPosition      Int?
+  
+  email             EmailOutbox     @relation(fields: [emailUuid], references: [uuid])
+  
+  occurredAt        DateTime        @default(now())
+  createdAt         DateTime        @default(now())
+  
+  @@index([emailUuid, eventType, occurredAt])
+  @@index([eventType, occurredAt])
+}
+// ----------------------
+// |                    |
+// |      FEATURE FLAG  |
+// ----------------------
+model FeatureFlag {
+  uuid              String          @id @default(uuid())
+  
+  key               String         
+  name              String          
+  description       String?
+  category          String?         
+  
+  scope             FlagScope       @default(GLOBAL)
+  tenantUuid        String?      
+  
+  enabled           Boolean         @default(false)
+  
+  rolloutType       RolloutType     @default(BOOLEAN)
+  rolloutPercentage Int?            
+  
+  targetingRules    Json?           
+  whitelist         String[]        @default([])  
+  blacklist         String[]        @default([])  
+  
+  // Variants (for A/B testing)
+  variants          Json?          
+  
+  // Scheduling
+  enabledFrom       DateTime?
+  enabledUntil      DateTime?
+  
+  // Dependencies
+  requiresFlags     String[]        @default([])  
+  conflictsWith     String[]        @default([])  
+  
+  // Metadata
+  tags              String[]        @default([])
+  metadata          Json?
+  
+  // Tracking
+  usageCount        Int             @default(0)
+  lastUsedAt        DateTime?
+  
+  // Management
+  isDeprecated      Boolean         @default(false)
+  deprecationDate   DateTime?
+  
+  // Relationships
+  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
+  evaluations       FeatureFlagEvaluation[]
+  overrides         FeatureFlagOverride[]
+  
+  createdBy         String?
+  createdAt         DateTime        @default(now())
+  updatedBy         String?
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([scope, tenantUuid, key])
+  @@index([scope, enabled])
+  @@index([tenantUuid, enabled])
+  @@index([key, enabled])
+}
+model FeatureFlagEvaluation {
+  uuid              String          @id @default(uuid())
+  flagUuid          String
+
+  tenantUuid        String?
+  userUuid          String?
+  sessionId         String?
+  
+  // Result
+  enabled           Boolean
+  variant           String?
+  
+  // Metadata
+  evaluationTime    Int             
+  metadata          Json?
+  
+  flag              FeatureFlag     @relation(fields: [flagUuid], references: [uuid])
+  
+  evaluatedAt       DateTime        @default(now())
+  
+  @@index([flagUuid, evaluatedAt])
+  @@index([tenantUuid, evaluatedAt])
+}
+model FeatureFlagOverride {
+  uuid              String          @id @default(uuid())
+  flagUuid          String
+  
+  targetType        OverrideTarget
+  targetUuid        String          
+  
+  enabled           Boolean
+  variant           String?         
+  
+  reason            String?
+  setBy             String?
+  
+  expiresAt         DateTime?
+  
+  flag              FeatureFlag     @relation(fields: [flagUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([flagUuid, targetType, targetUuid])
+  @@index([targetType, targetUuid])
 }
 
 model DeadLetterJob {
@@ -5055,7 +5501,10 @@ model DLQRetry {
   
   @@index([dlqJobUuid, attemptNumber])
 }
-
+// ----------------------
+// |                    |
+// |      WEBHOOK       |
+// ----------------------
 model Webhook {
   uuid              String          @id @default(uuid())
   
@@ -5137,7 +5586,6 @@ model Webhook {
   @@index([status, isActive])
   @@index([circuitBreakerStatus])
 }
-
 model WebhookDelivery {
   uuid              String          @id @default(uuid())
   
@@ -5207,7 +5655,6 @@ model WebhookDelivery {
   @@index([eventType, status])
   @@index([status, scheduledAt])
 }
-
 model WebhookAttempt {
   uuid              String          @id @default(uuid())
   
@@ -5243,22 +5690,18 @@ model WebhookAttempt {
   @@index([deliveryUuid, attemptNumber])
   @@index([requestedAt])
 }
-
 model WebhookEvent {
   uuid              String          @id @default(uuid())
-  
   // Provider context
   provider          WebhookProvider
-  providerEventId   String          
-  
+  providerEventUuid   String          
   // Tenant context (if determinable from payload)
   tenantUuid        String?
   storeUuid         String?
-  
   // Event details
-  eventType         String          
+  eventUuid         String   
+  eventType         String         
   eventVersion      String?         
-  
   // Request metadata
   receivedAt        DateTime        @default(now())
   sourceIp          String
@@ -5287,10 +5730,11 @@ model WebhookEvent {
   // Retry tracking
   retryCount        Int             @default(0)
   lastRetryAt       DateTime?
-  
   // Result
-  resultActions     Json?           // What actions were taken
-  affectedEntities  Json?           // [{type: "payment", uuid: "..."}]
+  resultActions     Json?          
+  affectedEntities  Json?          
+
+  replays           WebhookReplay[]
   
   // Relationships
   tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
@@ -5304,7 +5748,27 @@ model WebhookEvent {
   @@index([provider, eventType, receivedAt])
   @@index([status, receivedAt])
 }
+model WebhookDeadLetter {
+  uuid          String          @id @default(uuid())
 
+  provider      String
+  eventId       String
+  eventType     String
+  
+  payload       Json
+  errorMessage  String
+  
+  attemptCount  Int             @default(1)
+  status        DLQStatus       @default(FAILED)
+  
+  resolvedAt    DateTime?
+  
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  
+  @@index([provider, status])
+  @@index([createdAt])
+}
 model WebhookSecret {
   uuid              String          @id @default(uuid())
   
@@ -5350,56 +5814,68 @@ model WebhookSecret {
   @@index([provider, isActive])
   @@index([status, expiresAt])
 }
-
+model WebhookReplay {
+  uuid              String          @id @default(uuid())
+  webhookEventUuid  String
+  provider          String
+  eventUuid         String
+  eventType         String
+  
+  payload           Json
+  status            ReplayStatus    @default(PENDING)
+  
+  errorMessage      String?
+  completedAt       DateTime?
+  
+  webhookEvent      WebhookEvent    @relation(fields: [webhookEventUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([provider, status])
+  @@index([createdAt])
+}
+// ----------------------
+// |                    |
+// |      JOB           |
+// ----------------------
 model JobHeartbeat {
   uuid              String          @id @default(uuid())
   
-  // Job identification
   jobName           String
   jobType           JobType         @default(CRON)
   
-  // Execution tracking
   lastRunAt         DateTime
   lastSuccessAt     DateTime?
   lastFailureAt     DateTime?
   
-  // Status
   status            JobStatus
   health            JobHealth       @default(HEALTHY)
   
-  // Performance
   avgDuration       Int?            
   lastDuration      Int?            
   
-  // Execution count
   totalRuns         Int             @default(0)
   successCount      Int             @default(0)
   failureCount      Int             @default(0)
   consecutiveFailures Int           @default(0)
   
-  // Error tracking
   lastError         String?
   errorRate         Float?          
   
-  // Scheduling
   schedule          String?         
   nextRunAt         DateTime?
   
-  // Instance tracking (for distributed systems)
   lastRunBy         String?        
   currentlyRunningOn String?        
   
-  // Alerting
   alertOnFailure    Boolean         @default(true)
   alertThreshold    Int             @default(3)  
   lastAlertSentAt   DateTime?
   
-  // Locking (prevent concurrent execution)
   lockedAt          DateTime?
   lockedBy          String?
   lockExpiresAt     DateTime?
   
-  // Metadata
   metadata          Json?
   
   executions        JobExecution[]
@@ -5412,7 +5888,6 @@ model JobHeartbeat {
   @@index([nextRunAt])
   @@index([lockedAt, lockExpiresAt])
 }
-
 model JobExecution {
   uuid              String          @id @default(uuid())
   
@@ -5450,21 +5925,4 @@ model JobExecution {
   
   @@index([jobHeartbeatUuid, startedAt])
   @@index([status, startedAt])
-}
-
-model IdempotencyKey {
-  uuid              String     @id @default(uuid())
-  tenantUuid        String 
-
-  key               String
-  route             String
-  requestHash       String? 
-  response          Json
-  statusCode        Int
-
-  expiresAt         DateTime 
-  createdAt         DateTime   @default(now())
-
-  @@unique([tenantUuid, key, route])
-  @@index([expiresAt])
 }
