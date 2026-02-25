@@ -6,7 +6,7 @@ export const logger = pino({
       service: "payment-service",
     },
     timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
-});
+}); 
 
 export function logWithContext(
     level: "info" | "warn" | "error",

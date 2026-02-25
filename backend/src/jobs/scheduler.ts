@@ -27,15 +27,188 @@ import { ProviderReportReconciliation } from "./payment/providerReportReconcilia
 import { RiskScoreDecayJob } from "./payment/riskScoreDecay.jobs.ts";
 import { WebhookRetryJob } from "./webhook/webhookRetry.job.ts";
 import { PaymentExpiryCleanupJob } from "./payment/paymentExpiryCleanup.job.ts";
-import { OrphanedPaymentDetectionJob } from "./payment/orphanedPaymentDetection.job.js";
-import { IdempotencyKeyCleanupJob } from "./payment/idempotencyKeyCleanup.job.js";
+import { OrphanedPaymentDetectionJob } from "./payment/orphanedPaymentDetection.job.ts";
+import { IdempotencyKeyCleanupJob } from "./payment/idempotencyKeyCleanup.job.ts";
+import { MenuCacheWarmupJob } from "./Product/menuCacheWarmup.job.ts";
+import { LowStockAlertJob } from "./Product/lowStockAlert.job.ts";
+import { ProductMetricsCalculationJob } from "./Product/productMetricsCalculation.job.ts";
+import { OrderExpiryCleanupJobs } from "./Order/orderExpiryCleanup.jobs.ts";
+import { OrderMetricsCalculationJob } from "./Order/orderMetricsCalculation.job.ts";
 
 
 
 export function startScheduler() {
   console.log("🕒 Scheduler started");
 
+  // 🔴 CRITICAL JOBS (High Frequency)
+
+  // Every 5 minutes - Timeout expired payments
+  cron.schedule("*/5 * * * *", async () => {
+    console.log("[CRON] Running PaymentTimeoutJob");
+    try {
+      await PaymentTimeoutJob.run();
+    } catch (error: any) {
+      console.error("[CRON] PaymentTimeoutJob failed:", error.message);
+    }
+  });
+
+  // Every 5 minutes - Clean up expired payments
+  cron.schedule("*/5 * * * *", async () => {
+    console.log("[CRON] Running PaymentExpiryCleanupJob");
+    try {
+      await PaymentExpiryCleanupJob.run();
+    } catch (error: any) {
+      console.error("[CRON] PaymentExpiryCleanupJob failed:", error.message);
+    }
+  });
+
+  // Every 5 minutes - Poll stuck payments
+  cron.schedule("*/5 * * * *", async () => {
+    console.log("[CRON] Running PaymentPollingReconciliationJob");
+    try {
+      await PaymentPollingReconciliationJob.run();
+    } catch (error: any) {
+      console.error("[CRON] PaymentPollingReconciliationJob failed:", error.message);
+    }
+  });
+
+  // Every 15 minutes - Retry failed webhooks
+  cron.schedule("*/15 * * * *", async () => {
+    console.log("[CRON] Running WebhookRetryJob");
+    try {
+      await WebhookRetryJob.run();
+    } catch (error: any) {
+      console.error("[CRON] WebhookRetryJob failed:", error.message);
+    }
+  });
+
+  // Every 30 minutes - Retry failed payments
+  cron.schedule("*/30 * * * *", async () => {
+    console.log("[CRON] Running PaymentRetryJob");
+    try {
+      await PaymentRetryJob.run();
+    } catch (error: any) {
+      console.error("[CRON] PaymentRetryJob failed:", error.message);
+    }
+  });
+
+  // 🟡 PERIODIC JOBS (Every Few Hours)
+
+  // Every 2 hours - Anomaly review alerts
+  cron.schedule("0 */2 * * *", async () => {
+    console.log("[CRON] Running AnomalyReviewJob");
+    try {
+      await AnomalyReviewJob.run();
+    } catch (error: any) {
+      console.error("[CRON] AnomalyReviewJob failed:", error.message);
+    }
+  });
+
+  // Every 6 hours - Cash drawer reminders
+  cron.schedule("0 */6 * * *", async () => {
+    console.log("[CRON] Running CashDrawerReminderJob");
+    try {
+      await CashDrawerReminderJob.run();
+    } catch (error: any) {
+      console.error("[CRON] CashDrawerReminderJob failed:", error.message);
+    }
+  });
+
+  // 🟢 DAILY JOBS (Once Per Day)
+
+  // Daily at 2:00 AM - Cash drawer reconciliation
+  cron.schedule("0 2 * * *", async () => {
+    console.log("[CRON] Running DailyReconciliationJob");
+    try {
+      await DailyReconciliationJob.run();
+    } catch (error: any) {
+      console.error("[CRON] DailyReconciliationJob failed:", error.message);
+    }
+  });
+
+  // Daily at 3:00 AM - Provider report reconciliation
+  cron.schedule("0 3 * * *", async () => {
+    console.log("[CRON] Running ProviderReportReconciliationJob");
+    try {
+      await ProviderReportReconciliationJob.run();
+    } catch (error: any) {
+      console.error("[CRON] ProviderReportReconciliationJob failed:", error.message);
+    }
+  });
+
+  // Daily at 3:30 AM - Idempotency key cleanup
+  cron.schedule("30 3 * * *", async () => {
+    console.log("[CRON] Running IdempotencyKeyCleanupJob");
+    try {
+      await IdempotencyKeyCleanupJob.run();
+    } catch (error: any) {
+      console.error("[CRON] IdempotencyKeyCleanupJob failed:", error.message);
+    }
+  });
+
+  // Daily at 4:00 AM - Risk score decay
+  cron.schedule("0 4 * * *", async () => {
+    console.log("[CRON] Running RiskScoreDecayJob");
+    try {
+      await RiskScoreDecayJob.run();
+    } catch (error: any) {
+      console.error("[CRON] RiskScoreDecayJob failed:", error.message);
+    }
+  });
+
+  // Daily at 5:00 AM - Orphaned payment detection
+  cron.schedule("0 5 * * *", async () => {
+    console.log("[CRON] Running OrphanedPaymentDetectionJob");
+    try {
+      await OrphanedPaymentDetectionJob.run();
+    } catch (error: any) {
+      console.error("[CRON] OrphanedPaymentDetectionJob failed:", error.message);
+    }
+  });
+
+  console.log("✅ All payment cron jobs scheduled successfully");
+  console.log("📊 Scheduler summary:");
+  console.log("  - Every 5 min: PaymentTimeout, PaymentExpiryCleanup, PollingReconciliation");
+  console.log("  - Every 15 min: WebhookRetry");
+  console.log("  - Every 30 min: PaymentRetry");
+  console.log("  - Every 2 hours: AnomalyReview");
+  console.log("  - Every 6 hours: CashDrawerReminder");
+  console.log("  - Daily 2 AM: DailyReconciliation");
+  console.log("  - Daily 3 AM: ProviderReconciliation");
+  console.log("  - Daily 3:30 AM: IdempotencyCleanup");
+  console.log("  - Daily 4 AM: RiskScoreDecay");
+  console.log("  - Daily 5 AM: OrphanedPaymentDetection");
+
   //📦 ORDER JOBS
+
+  // Every 5 minutes - Cancel expired orders
+  cron.schedule("*/5 * * * *", async () => {
+    console.log("[CRON] Running OrderExpiryCleanupJob");
+    try {
+      await OrderExpiryCleanupJobs.run();
+    } catch (error) {
+      console.error("[CRON] OrderExpiryCleanupJob failed:", error);
+    }
+  });
+
+  cron.schedule("0 4 * * *", async () => {
+    console.log("[CRON] Running IdempotencyKeyCleanupJob");
+    try {
+      await IdempotencyKeyCleanupJob.run();
+    } catch (error) {
+      console.error("[CRON] IdempotencyKeyCleanupJob failed:", error);
+    }
+  });
+
+  cron.schedule("0 3 * * *", async () => {
+    console.log("[CRON] Running OrderMetricsCalculationJob");
+    try {
+      await OrderMetricsCalculationJob.run();
+    } catch (error) {
+      console.error("[CRON] OrderMetricsCalculationJob failed:", error);
+    }
+  });
+
   cron.schedule("*/5 * * * *", async () => {
     console.log("[CRON] Running AutoCompleteOrdersJob");
     try {
@@ -108,16 +281,7 @@ export function startScheduler() {
     }
   });
 
-  // 💳 PAYMENT JOBS
-  cron.schedule("*/5 * * * *", async () => {
-    console.log("[CRON] Running PaymentTimeoutJob");
-    try {
-      await PaymentTimeoutJob.run();
-    } catch (error) {
-      console.error("[CRON] PaymentTimeoutJob failed:", error);
-    }
-  });
-    
+  // 💳 PAYMENT JOBS    
   cron.schedule("*/30 * * * *", async () => {
     console.log("[CRON] Running PaymentRetryJob");
     try {
@@ -171,6 +335,37 @@ export function startScheduler() {
       await ProviderReportReconciliation.run();
     } catch (error) {
       console.error("[CRON] ProviderReportReconciliationJob failed:", error);
+    }
+  });
+
+  //Product Jobs
+
+  cron.schedule("0 2 * * *", async () => {
+    console.log("[CRON] Running ProductMetricsCalculationJob");
+    try {
+      await ProductMetricsCalculationJob.run();
+    } catch (error) {
+      console.error("[CRON] ProductMetricsCalculationJob failed:", error);
+    }
+  });
+  
+  // Every 6 hours - Warm up menu cache
+  cron.schedule("0 */6 * * *", async () => {
+    console.log("[CRON] Running MenuCacheWarmupJob");
+    try {
+      await MenuCacheWarmupJob.run();
+    } catch (error) {
+      console.error("[CRON] MenuCacheWarmupJob failed:", error);
+    }
+  });
+  
+  // Every hour - Check low stock
+  cron.schedule("0 * * * *", async () => {
+    console.log("[CRON] Running LowStockAlertJob");
+    try {
+      await LowStockAlertJob.run();
+    } catch (error) {
+      console.error("[CRON] LowStockAlertJob failed:", error);
     }
   });
 
@@ -325,10 +520,6 @@ export function startScheduler() {
     } catch (error) {
       console.error("[CRON] IdempotencyService.cleanup failed:", error);
     }
-  });
-
-  cron.schedule("*/5 * * * *", async () => {
-    await PaymentExpiryCleanupJob.run();
   });
 
   cron.schedule("0 5 * * *", async () => {

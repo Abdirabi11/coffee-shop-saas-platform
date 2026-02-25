@@ -13,12 +13,6 @@ type OrderEvent =
   | "ORDER_CANCELLED"
   | "PAYMENT_FAILED";
 
-type OrderEvent =
-  | "ORDER_CREATED"
-  | "ORDER_PAID"
-  | "ORDER_CANCELLED"
-  | "ORDER_COMPLETED";
-
 OrderEventBus.on("ORDER_CREATED", async ({ orderUuid, tenantUuid, storeUuid, totalAmount }) => {
   console.log(`[EVENT] ORDER_CREATED: ${orderUuid}`);
 

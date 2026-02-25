@@ -24,4 +24,10 @@ router.post(
   prewarmMenu
 );
 
+router.use(rateLimitByIP({ points: 60, duration: 60 })); // 60 req/min per IP
+
+router.get("/menu/:storeUuid", MenuController.getMenu);
+router.get("/products/:productUuid", MenuController.getProduct);
+router.post("/products/validate", MenuController.validateOrder);
+
 export default router;

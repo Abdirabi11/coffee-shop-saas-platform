@@ -1344,6 +1344,12 @@ enum DisputeResolution {
   ACCEPTED        
   WITHDRAWN       
 }
+enum ReservationStatus {
+  ACTIVE
+  COMMITTED
+  RELEASED
+  EXPIRED
+}
 // ----------------------
 // |                    |
 // |      USER          |
@@ -1777,13 +1783,19 @@ model StoreAvailabilityCache {
 }
 model StoreOpsMetrics {
   uuid                  String   @id @default(uuid())
-  storeUuid             String   @unique
+  
+  tenantUuid            String
+  storeUuid             String
+  
   stalePreparingOrders  Int      @default(0)
   
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  tenant                Tenant   @relation(fields: [tenantUuid], references: [uuid])
   store                 Store    @relation(fields: [storeUuid], references: [uuid])
   
-  updatedAt             DateTime @updatedAt
-  createdAt             DateTime @default(now())
+  @@unique([tenantUuid, storeUuid])
 }
 model UserStore {
   uuid              String        @id @default(uuid())
@@ -1865,19 +1877,21 @@ model StoreDailyMetrics {
 // |      ANALYTICS     |
 // ----------------------
 model HourlyRevenue {
-  uuid       String   @id @default(uuid())
-  storeUuid  String
-  hour       DateTime
-  revenue    Int
-  ordersCount Int
+  uuid          String   @id @default(uuid())
+  tenantUuid    String
+  storeUuid     String
+  hour          DateTime
+  revenue       Int
+  ordersCount   Int
   
-  store      Store    @relation(fields: [storeUuid], references: [uuid])
+  store         Store    @relation(fields: [storeUuid], references: [uuid])
+  tenant      Tenant     @relation(fields: [tenantUuid], references: [uuid])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
   
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  
-  @@unique([storeUuid, hour])
-  @@index([storeUuid, hour])
+  @@unique([tenantUuid, storeUuid, hour])
+  @@index([tenantUuid, storeUuid, hour])
 }
 model AnalyticsSnapshot {
   uuid              String              @id @default(uuid())
@@ -2354,7 +2368,11 @@ model AuditLog {
   
   // Action details 
   action              String
+  entityType          String   
+  entityUuid          String? 
   category            AuditCategory
+
+  performedBy         String   
 
   targetType          String
   targetUuid          String?
@@ -2701,7 +2719,6 @@ model BillingSnapshot {
   @@index([subscriptionUuid, periodStart])
   @@index([paymentStatus, periodEnd])
 }
-
 model Coupon {
   uuid              String          @id @default(uuid())
   
@@ -2747,7 +2764,6 @@ model Coupon {
   
   @@index([code, isActive])
 }
-
 model EnterpriseContract {
   uuid              String          @id @default(uuid())
   
@@ -3481,6 +3497,15 @@ model Product {
   isDeleted           Boolean         @default(false)  
   isFeatured          Boolean         @default(false)
   isAvailable         Boolean         @default(true) 
+  
+  deletedBy           String?
+
+  // Version control for menu changes
+  version             Int             @default(1)
+  lastPublishedAt     DateTime?
+
+  // Performance optimization
+  searchVector        String?
 
   // Visibility
   visibleOnMenu       Boolean         @default(true)
@@ -3488,7 +3513,7 @@ model Product {
   
   // Ordering
   displayOrder        Int             @default(0)
-  preparationTime     Int?            // Minutes
+  preparationTime     Int?           
   
   // Limits
   minOrderQuantity    Int             @default(1)
@@ -3526,6 +3551,8 @@ model Product {
   @@index([tenantUuid, storeUuid, isActive])
   @@index([storeUuid, categoryUuid, displayOrder])
   @@index([isActive, isDeleted, visibleOnMenu])
+  @@index([tenantUuid, storeUuid, isActive, isDeleted])
+  @@index([searchVector])
   @@index([tags]) 
 }
 model ProductOptionGroup {
@@ -3559,7 +3586,8 @@ model ProductOptionGroup {
   updatedAt         DateTime           @updatedAt
   
   @@index([tenantUuid, productUuid])
-  @@index([productUuid, displayOrder])           
+  @@index([productUuid, displayOrder]) 
+  @@index([tenantUuid, productUuid, isActive])         
 }
 model ProductOption {
   uuid              String             @id @default(uuid())
@@ -3605,10 +3633,10 @@ model ProductOption {
   
   @@index([tenantUuid, optionGroupUuid])
   @@index([optionGroupUuid, displayOrder])
+  @@index([tenantUuid, optionGroupUuid, isActive])
 }
 model ProductAvailability {
   uuid              String          @id @default(uuid())
-  
   tenantUuid        String
   storeUuid         String
   productUuid       String
@@ -3638,6 +3666,7 @@ model ProductAvailability {
   @@index([productUuid, dayOfWeek, isActive])
   @@index([productUuid, specificDate])
   @@index([scheduleType, isActive])
+  @@index([tenantUuid, storeUuid, productUuid, isActive])
 }
 model ProductSales {
   productUuid String
@@ -3731,7 +3760,13 @@ model InventoryItem {
   uuid              String      @id @default(uuid())
   tenantUuid        String
   storeUuid         String
-  productUuid       String @unique
+  productUuid       String      @unique
+
+  quantity          Int      @default(0)
+  reservedQuantity  Int      @default(0)
+  
+  lastRestocked     DateTime?
+  lastUpdated       DateTime @default(now())
   
   // Stock levels
   currentStock      Int         @default(0)
@@ -3768,7 +3803,7 @@ model InventoryItem {
   tenant            Tenant      @relation(fields: [tenantUuid], references: [uuid])
   store             Store       @relation(fields: [storeUuid], references: [uuid])
   product           Product     @relation(fields: [productUuid], references: [uuid])
-  
+  reservations      InventoryReservation[]
   movements         InventoryMovement[]
   
   createdAt         DateTime    @default(now())
@@ -3782,7 +3817,9 @@ model InventoryMovement {
   uuid              String          @id @default(uuid())
   
   tenantUuid        String
+  storeUuid         String
   inventoryItemUuid String
+  productUuid       String
   
   type              MovementType
   quantity          Int             
@@ -3808,6 +3845,50 @@ model InventoryMovement {
   
   @@index([tenantUuid, inventoryItemUuid, createdAt])
   @@index([referenceType, referenceUuid])
+}
+model InventoryReservation {
+  uuid              String   @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  inventoryItemUuid String
+  productUuid       String
+  orderUuid         String
+  
+  quantity          Int
+  status            ReservationStatus @default(ACTIVE)
+  releasedAt        DateTime?
+  committedAt       DateTime?
+  
+  inventoryItem     InventoryItem @relation(fields: [inventoryItemUuid], references: [uuid])
+  
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  
+  @@index([orderUuid, status])
+  @@index([expiresAt, status])
+  @@index([tenantUuid, storeUuid])
+}
+model InventoryTransaction {
+  uuid              String   @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  inventoryItemUuid String
+  productUuid       String
+  
+  quantity          Int      // Positive = increase, Negative = decrease
+  previousQuantity  Int?
+  newQuantity       Int?
+  
+  reason            String   // "ORDER_SALE", "RESTOCK", "ADJUSTMENT", "WASTE"
+  orderUuid         String?
+  
+  createdBy         String?
+  createdAt         DateTime @default(now())
+  
+  @@index([tenantUuid, productUuid, createdAt])
+  @@index([orderUuid])
 }
 // ----------------------
 // |                    |
@@ -4221,6 +4302,30 @@ model OrderStatusHistory {
   
   @@index([tenantUuid, orderUuid, createdAt])
   @@index([toStatus, createdAt])
+}
+model OrderDailyMetrics{
+  uuid              String   @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  date              DateTime
+  
+  totalOrders       Int      @default(0)
+  completedOrders   Int      @default(0)
+  cancelledOrders   Int      @default(0)
+  
+  totalRevenue      Int      @default(0)
+  avgOrderValue     Int      @default(0)
+  avgPreparationTime Int     @default(0) // In minutes
+  
+  calculatedAt      DateTime @default(now())
+  createdAt         DateTime @default(now())
+  
+  tenant            Tenant   @relation(fields: [tenantUuid], references: [uuid])
+  store             Store    @relation(fields: [storeUuid], references: [uuid])
+  
+  @@unique([tenantUuid, storeUuid, date])
+  @@index([tenantUuid, storeUuid, date])
 }
 // ----------------------
 // |                    |
@@ -5925,4 +6030,68 @@ model JobExecution {
   
   @@index([jobHeartbeatUuid, startedAt])
   @@index([status, startedAt])
+}
+
+model EventFailureLog {
+  uuid       String   @id @default(uuid())
+  
+  event      String
+  payload    Json
+  error      String
+  stack      String?
+  
+  createdAt  DateTime @default(now())
+  
+  @@index([event, createdAt])
+}
+
+model SMSOutbox {
+  uuid      String   @id @default(uuid())
+  
+  to        String
+  message   String
+  priority  String   @default("NORMAL")
+  status    String   @default("PENDING")
+  
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  
+  @@index([status, createdAt])
+}
+
+model PushNotificationOutbox {
+  uuid        String   @id @default(uuid())
+  
+  userUuid    String
+  deviceToken String
+  platform    String
+  
+  title       String
+  body        String
+  data        Json?
+  
+  priority    String   @default("NORMAL")
+  status      String   @default("PENDING")
+  
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+  
+  @@index([status, createdAt])
+}
+
+model UserDevice {
+  uuid       String   @id @default(uuid())
+  
+  userUuid   String
+  platform   String   // "IOS", "ANDROID"
+  pushToken  String?
+  
+  isActive   Boolean  @default(true)
+  
+  lastSeenAt DateTime?
+  createdAt  DateTime @default(now())
+  
+  user       User     @relation(fields: [userUuid], references: [uuid])
+  
+  @@index([userUuid, isActive])
 }
