@@ -1,0 +1,50 @@
+<h2>Welcome to Coffee App! 🎉</h2>
+
+<p>Hi {{name}},</p>
+
+<p>We're thrilled to have you join the Coffee App family! ☕</p>
+
+<div style="text-align: center; margin: 30px 0;">
+  <img src="{{appUrl}}/images/welcome-coffee.png" alt="Welcome" style="max-width: 300px; border-radius: 8px;">
+</div>
+
+<h3>Get Started:</h3>
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width: 100%; margin: 20px 0;">
+  <tr>
+    <td style="padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-bottom: 10px;">
+      <h4 style="margin: 0 0 10px 0;">☕ Explore Our Menu</h4>
+      <p style="margin: 0; color: #666;">Browse our delicious selection of coffee and treats.</p>
+      <a href="{{appUrl}}/menu" style="color: #667eea; text-decoration: none;">View Menu →</a>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-bottom: 10px;">
+      <h4 style="margin: 0 0 10px 0;">📍 Find a Store</h4>
+      <p style="margin: 0; color: #666;">Locate your nearest Coffee App store.</p>
+      <a href="{{appUrl}}/locations" style="color: #667eea; text-decoration: none;">Find Stores →</a>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
+      <h4 style="margin: 0 0 10px 0;">🎁 Get Your First Reward</h4>
+      <p style="margin: 0; color: #666;">Earn points with every order and get free drinks!</p>
+      <a href="{{appUrl}}/rewards" style="color: #667eea; text-decoration: none;">Learn More →</a>
+    </td>
+  </tr>
+</table>
+
+{{#if promoCode}}
+<div class="success-box" style="text-align: center; padding: 30px;">
+  <p style="font-size: 20px; margin: 0 0 10px 0;"><strong>🎉 Welcome Offer!</strong></p>
+  <p style="margin: 0;">Use code <strong style="font-size: 24px; color: #667eea;">{{promoCode}}</strong> for {{promoDiscount}} off your first order!</p>
+</div>
+{{/if}}
+
+<p>If you have any questions, our support team is here to help:</p>
+<p>📧 Email: <a href="mailto:support@coffeeapp.com">support@coffeeapp.com</a><br>
+💬 Live Chat: Available in the app</p>
+
+<p>Enjoy your coffee journey! ☕</p>
+
+<p>Best regards,<br>The Coffee App Team</p>

@@ -20,6 +20,11 @@ enum Role {
   STAFF
   CUSTOMER
 }
+enum SocialProvider {
+  GOOGLE
+  APPLE
+  FACEBOOK
+}
 
 enum GlobalRole {
   SUPER_ADMIN  
@@ -54,21 +59,30 @@ enum SessionStatus {
 }
 
 enum FraudType {
-  PAYMENT_FRAUD
-  ACCOUNT_TAKEOVER
-  PROMO_ABUSE
-  REFUND_FRAUD
-  IDENTITY_THEFT
-  BOT_ACTIVITY
-  CHARGEBACK
-  SUSPICIOUS_PATTERN
+  // Auth fraud
+  OTP_BRUTE_FORCE
+  MULTIPLE_FAILED_LOGINS
+  SUSPICIOUS_DEVICE
+  ACCOUNT_TAKEOVER_ATTEMPT
+  CREDENTIAL_STUFFING
+  
+  // Payment fraud
+  PAYMENT_FAILED_MULTIPLE
+  PAYMENT_VELOCITY_EXCEEDED
+  REFUND_ABUSE
+  CHARGEBACK_FRAUD
+  
+  // Order fraud
+  ORDER_VELOCITY_EXCEEDED
+  SUSPICIOUS_ORDER_PATTERN
 }
 
 enum FraudCategory {
-  FINANCIAL
-  IDENTITY
-  BEHAVIORAL
-  TECHNICAL
+  AUTHENTICATION
+  PAYMENT
+  ORDER
+  ACCOUNT
+  DEVICE
 }
 
 enum FraudStatus {
@@ -149,15 +163,16 @@ enum AuditCategory {
 }
 
 enum PermissionCategory {
+  PRODUCTS
+  ORDERS
+  PAYMENTS
+  USERS
+  ANALYTICS
+  SETTINGS
+  SECURITY
   SYSTEM
   TENANT
   STORE
-  USER
-  PRODUCT
-  ORDER
-  PAYMENT
-  ANALYTICS
-  SETTINGS
 }
 
 enum PermissionAction {
@@ -193,13 +208,12 @@ enum TokenStatus {
 
 enum RevokeReason {
   USER_LOGOUT
-  USER_LOGOUT_ALL
   ADMIN_REVOKE
-  SECURITY_BREACH
   TOKEN_ROTATION
-  REUSE_DETECTED
-  EXPIRED
   SUSPICIOUS_ACTIVITY
+  PASSWORD_CHANGED
+  TOKEN_REUSE_DETECTED
+  EXPIRED
 }
 
 enum DeviceType {
@@ -424,8 +438,9 @@ enum EventProcessingStatus {
 
 enum TenantStatus {
   ACTIVE
-  SUSPENDED
-  DELETED
+  EXPIRED
+  REVOKED
+  REUSED
 }
 
 enum StockUnit {
@@ -1114,6 +1129,9 @@ enum AlertSource {
   USER_REPORT
   AUTOMATED_CHECK
   MANUAL
+  USER
+  AUTOMATED_RULE
+  INTEGRATION
 }
 
 enum DayOfWeek {
@@ -1193,6 +1211,61 @@ enum AnomalyStatus {
   RESOLVED       
   DISMISSED        
   CONFIRMED       
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+// ----------------------
+// |                    |
+// |      Billing       |
+// ----------------------
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  ONE_TIME
+}
+enum PlanTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+  CUSTOM
+}
+
+enum PlanType {
+  SUBSCRIPTION
+  ONE_TIME
+  USAGE_BASED
+}
+enum FeatureType {
+  BOOLEAN
+  QUANTITY
+  TEXT
+}
+enum UsageType {
+  LICENSED
+  METERED
+}
+enum TierMode {
+  GRADUATED
+  VOLUME
+}
+enum LimitType {
+  HARD
+  SOFT
 }
 // ----------------------
 // |                    |
@@ -1350,6 +1423,23 @@ enum ReservationStatus {
   RELEASED
   EXPIRED
 }
+
+enum BiometricType {
+  FINGERPRINT
+  FACE_ID
+  IRIS
+  TOUCH_ID
+}
+enum ResetInterval {
+  DAILY
+  MONTHLY
+  YEARLY
+}
+enum SocialProvider {
+  GOOGLE
+  APPLE
+  FACEBOOK
+}
 // ----------------------
 // |                    |
 // |      USER          |
@@ -1364,28 +1454,60 @@ model User {
   globalRole       GlobalRole  @default(CUSTOMER)
 
   isVerified       Boolean     @default(false)
-  isGloballyBanned Boolean     @default(false)
+  emailVerified    Boolean     @default(false)
+  phoneVerified    Boolean     @default(false)
 
+
+  isGloballyBanned Boolean     @default(false)
   isBanned         Boolean     @default(false)
   bannedAt         DateTime?
   banReason        String?
+  bannedBy         String?
 
   // Auth
   otpCode          String?
   otpExpiresAt     DateTime?
   otpAttempts      Int         @default(0)
+  otpMethod        OTPMethod   @default(SMS)
 
-  // Tenant memberships
-  tenantUsers      TenantUser[]
-  ownedTenants     Tenant[]    @relation("TenantOwner")
+  resetToken       String?     @unique
+  resetTokenExpiry DateTime?
 
+  emailVerificationToken String?    @unique
+  emailTokenExpiry       DateTime?
+
+
+  tokenVersion           Int         @default(1)
+  passwordChangedAt      DateTime?
+  lastLoginAt            DateTime?
+  lastLoginIp            String?
+
+  failedLoginAttempts    Int         @default(0)
+  lockedUntil            DateTime?
+
+  tenantUsers            TenantUser[]
+  ownedTenants           Tenant[]    @relation("TenantOwner")
+
+  preferredLanguage String?    @default("en")
+  timezone          String?    @default("UTC")
+
+  // Auth relationships
   refreshTokens    RefreshToken[]
   sessions         Session[]
-  admin2FA         Admin2FA[]
+  loginAttempts    LoginAttempt[]
+  admin2FA         Admin2FA?
+  trustedDevices   TrustedDevice[]
+ 
   auditLogs        AuditLog[]
+  fraudEvents      FraudEvent[]
+  securityEvents   SecurityEvent[]
+
+  userStores       UserStore[]
+  userFavorites    UserFavorite[]
 
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
+  deletedAt        DateTime?
 
   FraudEvent       FraudEvent[]
   UserStore        UserStore[]
@@ -1393,11 +1515,13 @@ model User {
 
   @@index([phoneNumber])
   @@index([email])
+  @@index([tokenVersion])
+  @@index([isGloballyBanned, isBanned])
 }  
 model RolePermission {
   uuid              Int            @id @default(autoincrement())
   role              Role           
-  permissionUuid    Int
+  permissionId    Int
   scope             PermissionScope @default(TENANT)
   conditions        Json?          
   grantedBy         String?
@@ -1406,7 +1530,7 @@ model RolePermission {
   
   permission        Permission     @relation(fields: [permissionUuid], references: [uuid])
   
-  @@unique([role, permissionUuid])
+  @@unique([role, permissionId])
   @@index([role])
 } 
 model Permission {
@@ -1449,6 +1573,269 @@ model UserFavorite {
 
   @@unique([userUuid, productUuid])
   @@index([storeUuid])
+}
+model RefreshToken {
+  uuid              String        @id @default(uuid())
+  token             String        @unique
+  
+  userUuid          String
+  tenantUuid        String?       
+  
+  // Token metadata
+  tokenFamily       String        
+  version           Int           @default(1)
+  parentTokenUuid   String? 
+  
+  // Expiry
+  expiresAt         DateTime
+  
+  // Security
+  issuedFrom        String        
+  deviceFingerprint String
+  deviceId          String?
+  userAgent         String?
+
+  // Lifecycle
+  status            TokenStatus   @default(ACTIVE)
+  usedCount         Int           @default(0)
+  lastUsedAt        DateTime?
+  
+  revoked           Boolean       @default(false)
+  revokedAt         DateTime?
+  revokedBy         String?
+  revokedReason     RevokeReason?
+
+  // Reuse detection
+  reused            Boolean       @default(false)
+  reusedAt          DateTime?
+  
+  // Relationships
+  user              User          @relation(fields: [userUuid], references: [uuid])
+  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
+  sessions          Session[]
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([userUuid, status])
+  @@index([tokenFamily, version])
+  @@index([expiresAt, status])
+  @@index([deviceFingerprint, userUuid])
+}
+model Session {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  tenantUuid        String? 
+  refreshTokenUuid  String        @unique
+  storeUuid         String?
+
+  // Device tracking
+  deviceId          String
+  deviceType        String        @default("UNKNOWN")
+  deviceFingerprint String       
+  deviceName        String?     
+  deviceOS          String?      
+  deviceBrowser     String?    
+
+  // Security
+  ipAddress         String
+  userAgent         String?
+  geoLocation       String?
+  geoCountry        String?
+  geoCity           String?
+
+  // Session state
+  status            SessionStatus @default(ACTIVE)
+  lastActivityAt    DateTime      @default(now())
+  expiresAt         DateTime
+
+  // Anomaly detection
+  riskScore         Int           @default(0)
+  riskLevel         RiskLevel     @default(LOW)
+  suspiciousActivity Boolean      @default(false)
+  suspicionReason   String?
+
+  // Revocation
+  revoked           Boolean       @default(false)
+  revokedAt         DateTime?
+  revokedBy         String?
+  revokedReason     String?
+
+  user              User          @relation(fields: [userUuid], references: [uuid])
+  store             Store         @relation(fields: [storeUuid], references: [uuid])
+  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
+  refreshToken      RefreshToken  @relation(fields: [refreshTokenUuid], references: [uuid])
+
+  lastUsedAt        DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([userUuid, status])
+  @@index([tenantUuid, userUuid])
+  @@index([deviceFingerprint, userUuid])
+  @@index([expiresAt, status])
+  @@index([riskLevel, suspiciousActivity])
+}
+model TrustedDevice {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  
+  deviceFingerprint String
+  deviceId          String
+  deviceName        String?
+  deviceType        String
+  deviceOS          String?
+  deviceBrowser     String?
+  
+  // First & last seen
+  firstSeenAt       DateTime      @default(now())
+  lastSeenAt        DateTime      @default(now())
+  
+  // Trust status
+  trusted           Boolean       @default(false)
+  trustedAt         DateTime?
+  trustRevokedAt    DateTime?
+  trustRevokedBy    String?
+  
+  // Security
+  ipAddress         String
+  geoLocation       String?
+  
+  // Usage tracking
+  loginCount        Int           @default(0)
+  
+  isActive          Boolean       @default(true)
+  
+  user              User          @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@unique([userUuid, deviceFingerprint])
+  @@index([userUuid, trusted, isActive])
+  @@index([deviceFingerprint])
+}
+model FraudEvent {
+  uuid              String        @id @default(uuid())
+  tenantUuid        String
+
+  userUuid          String       
+  storeUuid         String?      
+  orderUuid         String?
+  paymentUuid       String?
+  sessionUuid       String?
+
+  type              FraudType
+  category          FraudCategory @default(AUTHENTICATION)
+
+  // Context
+  ipAddress         String?
+  deviceFingerprint String?
+  userAgent         String?
+  geoLocation       String?
+
+  reason            String
+  details           String?
+  severity          FraudSeverity
+
+  metadata          Json?
+
+  // Response
+  status            FraudStatus   @default(PENDING)
+  actionTaken       String?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  resolution        String?
+
+  tenant            Tenant        @relation(fields: [tenantUuid], references: [uuid])
+  user              User          @relation(fields: [userUuid], references: [uuid])  // ✅ Fixed relation
+  store             Store?        @relation(fields: [storeUuid], references: [uuid])
+ 
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([tenantUuid, storeUuid, severity])
+  @@index([userUuid, createdAt])
+  @@index([status, severity, createdAt])
+  @@index([type, severity])
+}
+model BiometricAuth {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  
+  deviceId          String
+  deviceFingerprint String
+  biometricType     BiometricType
+  
+  tokenHash         String        // Hashed biometric token
+  publicKey         String        // Device public key
+  
+  enabled           Boolean       @default(true)
+  expiresAt         DateTime
+  
+  lastUsedAt        DateTime?
+  usedCount         Int           @default(0)
+  
+  disabledAt        DateTime?
+  
+  user              User          @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@unique([userUuid, deviceId])
+  @@index([deviceId, tokenHash])
+  @@index([userUuid, enabled])
+}
+model SocialAccount {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  
+  provider          SocialProvider
+  providerId        String        // Provider's user ID
+  
+  email             String?
+  displayName       String?
+  profilePicture    String?
+  
+  accessToken       String?       // Encrypted
+  refreshToken      String?       // Encrypted
+  expiresAt         DateTime?
+  
+  lastLoginAt       DateTime?
+  
+  user              User          @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@unique([provider, providerId])
+  @@index([userUuid, provider])
+}
+model SocialAccount {
+  uuid              String        @id @default(uuid())
+  userUuid          String
+  
+  provider          SocialProvider
+  providerId        String        // Provider's user ID
+  
+  email             String?
+  displayName       String?
+  profilePicture    String?
+  
+  accessToken       String?       // Encrypted
+  refreshToken      String?       // Encrypted
+  expiresAt         DateTime?
+  
+  lastLoginAt       DateTime?
+  
+  user              User          @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@unique([provider, providerId])
+  @@index([userUuid, provider])
 }
 // ----------------------
 // |                    |
@@ -1562,6 +1949,116 @@ model TenantUser {
   @@index([tenantUuid, role])
   @@index([userUuid])
 }
+model TenantInvitation {
+  uuid              String        @id @default(uuid())
+  tenantUuid        String
+  
+  email             String
+  role              Role
+  
+  token             String        @unique
+  status            InvitationStatus @default(PENDING)
+  
+  expiresAt         DateTime
+  
+  // Store access
+  storeAccess       Json?         // Array of store UUIDs
+  
+  // Invitation tracking
+  invitedBy         String
+  acceptedAt        DateTime?
+  acceptedBy        String?
+  
+  revokedAt         DateTime?
+  revokedBy         String?
+  
+  tenant            Tenant        @relation(fields: [tenantUuid], references: [uuid])
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([tenantUuid, status])
+  @@index([email, status])
+}
+model TenantSettings {
+  uuid                      String    @id @default(uuid())
+  tenantUuid                String    @unique
+  
+  // Regional
+  currency                  String    @default("USD")
+  timezone                  String    @default("UTC")
+  locale                    String    @default("en-US")
+  
+  // Billing
+  taxRate                   Int       @default(0) // basis points
+  serviceChargeRate         Int       @default(0) // basis points
+  
+  // Operations
+  orderAutoCompleteMinutes  Int       @default(30)
+  orderAutoCancelMinutes    Int       @default(15)
+  
+  // Notifications
+  emailNotifications        Boolean   @default(true)
+  smsNotifications          Boolean   @default(false)
+  pushNotifications         Boolean   @default(true)
+  
+  // Business hours
+  businessHours             Json?
+  
+  tenant                    Tenant    @relation(fields: [tenantUuid], references: [uuid])
+  
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  
+  @@index([tenantUuid])
+}
+
+model StoreSettings {
+  uuid                  String    @id @default(uuid())
+  storeUuid             String    @unique
+  
+  // Operations
+  autoAcceptOrders      Boolean   @default(false)
+  orderPrepTimeMinutes  Int       @default(15)
+  maxOrdersPerHour      Int       @default(100)
+  
+  // Features
+  allowPreorders        Boolean   @default(false)
+  requireTableNumber    Boolean   @default(false)
+  
+  // Pricing
+  minimumOrderAmount    Int?      // in cents
+  deliveryFee           Int?      // in cents
+  deliveryRadius        Int?      // in meters
+  
+  store                 Store     @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  @@index([storeUuid])
+}
+model UserPreferences {
+  uuid                  String    @id @default(uuid())
+  userUuid              String    @unique
+  
+  // Notifications
+  emailNotifications    Boolean   @default(true)
+  smsNotifications      Boolean   @default(true)
+  pushNotifications     Boolean   @default(true)
+  
+  // Appearance
+  language              String    @default("en")
+  theme                 String    @default("light")
+  
+  user                  User      @relation(fields: [userUuid], references: [uuid])
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  @@index([userUuid])
+}
+
 // ----------------------
 // |                    |
 // |      STORE         |
@@ -1973,7 +2470,8 @@ model LoginAttempt {
   uuid              String          @id @default(uuid())
   
   phoneNumber       String
-  tenantSlug        String?        
+  tenantSlug        String?  
+  email             String?      
   
   // OTP
   otpCode           String          
@@ -1990,6 +2488,7 @@ model LoginAttempt {
   ipAddress         String
   userAgent         String?
   deviceFingerprint String?
+  geoLocation       String?
 
   // Rate limiting
   blockUntil        DateTime?
@@ -2005,6 +2504,7 @@ model LoginAttempt {
   @@index([phoneNumber, tenantSlug, createdAt])
   @@index([ipAddress, createdAt])
   @@index([expiresAt, used])
+  @@index([blocked, blockUntil])
 }
 model FraudEvent {
   uuid              String        @id @default(uuid())
@@ -2269,95 +2769,6 @@ model FraudIPAddress {
 }
 // ----------------------
 // |                    |
-// |      AUTH          |
-// ----------------------
-model RefreshToken {
-  uuid              String        @id @default(uuid())
-  token             String        @unique
-  
-  userUuid          String
-  tenantUuid        String?       
-  
-  // Token metadata
-  tokenFamily       String        
-  version           Int           @default(1)
-  
-  // Expiry
-  expiresAt         DateTime
-  
-  // Security
-  issuedFrom        String        
-  deviceFingerprint String
-
-  // Lifecycle
-  status            TokenStatus   @default(ACTIVE)
-  usedCount         Int           @default(0)
-  lastUsedAt        DateTime?
-  
-  revokedAt         DateTime?
-  revokedBy         String?       
-  revokedReason     RevokeReason?
-  
-  // Relationships
-  user              User          @relation(fields: [userUuid], references: [uuid])
-  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
-  sessions          Session[]
-
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  
-  @@index([userUuid, status])
-  @@index([tokenFamily, version])
-  @@index([expiresAt, status])
-}
-model Session {
-  uuid              String        @id @default(uuid())
-  userUuid          String
-  tenantUuid        String? 
-  refreshTokenUuid  String        @unique
-  storeUuid         String
-
-  // Device tracking
-  deviceId          String
-  deviceType        String        @default("UNKNOWN")
-  deviceFingerprint String
-
-  // Security
-  ipAddress         String
-  userAgent         String
-  location          String?
-
-  // Session state
-  status            SessionStatus @default(ACTIVE)
-  lastActivityAt    DateTime      @default(now())
-  expiresAt         DateTime
-
-  // Anomaly detection
-  riskScore         Int           @default(0)
-  suspiciousActivity Boolean      @default(false)
-
-  user              User          @relation(fields: [userUuid], references: [uuid])
-  store             Store         @relation(fields: [storeUuid], references: [uuid])
-  tenant            Tenant?       @relation(fields: [tenantUuid], references: [uuid])
-  refreshToken      RefreshToken  @relation(fields: [refreshTokenUuid], references: [uuid])
-
-  revokedAt         DateTime?
-  revokedBy         String?       // User/Admin/System
-  revokedReason     String?
-
-  lastUsedAt        DateTime      @default(now())
-  revoked           Boolean       @default(false)
-
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-
-  @@index([userUuid, status])
-  @@index([tenantUuid, userUuid])
-  @@index([deviceFingerprint, userUuid])
-  @@index([expiresAt, status])
-}
-// ----------------------
-// |                    |
 // |      AUDIT         |
 // ----------------------
 model AuditLog {
@@ -2451,32 +2862,37 @@ model Subscription {
   subscriptionNumber  String         @unique 
   status              SubscriptionStatus
 
-  price               Int  
-  currency            String          @default("USD")
-  amount              Int             
+  // Billing
   interval            BillingInterval
-  intervalCount       Int            
-
+  currentPeriodStart  DateTime
+  currentPeriodEnd    DateTime
+  currentPeriodAmount Int
+  
   // Trial
   trialStart          DateTime?
   trialEnd            DateTime?
   isInTrial           Boolean         @default(false)
+
+  // Cancellation
+  cancelAtPeriodEnd   Boolean           @default(false)
+  cancelledAt         DateTime?
+  cancelledBy         String?
+  cancellationReason  String?
   
+  // Payment
+  lastPaymentAt       DateTime?
+  nextPaymentAt       DateTime?
+  
+  price               Int  
+  currency            String          @default("USD")
+  amount              Int             
+  intervalCount       Int            
+
   // Billing cycle
   billingCycleAnchor  DateTime?      
   startDate           DateTime        @default(now())
   endDate             DateTime?
-
-  // Current period
-  currentPeriodStart  DateTime
-  currentPeriodEnd    DateTime
-
-  // Cancellation
-  cancelAtPeriodEnd   Boolean         @default(false)
-  cancelledAt         DateTime?
-  cancellationReason  String?
-  cancelledBy         String?         
-  
+        
   // Pause/Resume
   pausedAt            DateTime?
   pausedUntil         DateTime?
@@ -3271,6 +3687,28 @@ model PlanQuota {
   
   @@unique([planUuid, quotaKey])
   @@index([planUuid, enforced])
+}
+model UsageQuota {
+  uuid          String    @id @default(uuid())
+  tenantUuid    String
+  
+  quotaKey      String
+  quotaName     String
+  
+  limit         Int
+  used          Int       @default(0)
+  
+  resetInterval ResetInterval?
+  lastResetAt   DateTime?
+  lastUsedAt    DateTime?
+  
+  tenant        Tenant    @relation(fields: [tenantUuid], references: [uuid])
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@unique([tenantUuid, quotaKey])
+  @@index([tenantUuid])
 }
 // ----------------------
 // |                    |
@@ -5410,6 +5848,21 @@ model EmailEvent {
   
   @@index([emailUuid, eventType, occurredAt])
   @@index([eventType, occurredAt])
+}
+model EmailLog {
+  uuid          String    @id @default(uuid())
+  userUuid      String?
+  
+  type          String
+  to            String
+  subject       String?
+  
+  status        String    // SENT, FAILED, BOUNCED
+  error         String?
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([userUuid, type, createdAt])
 }
 // ----------------------
 // |                    |

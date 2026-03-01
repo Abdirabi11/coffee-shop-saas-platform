@@ -1,0 +1,26 @@
+<h2>You're Invited!</h2>
+
+<p>Hi there! 👋</p>
+
+<p><strong>{{inviterName}}</strong> has invited you to join <strong>{{tenantName}}</strong> as a <strong>{{role}}</strong>.</p>
+
+<div class="info-box">
+  <p><strong>🏢 Organization:</strong> {{tenantName}}</p>
+  <p><strong>👤 Role:</strong> {{role}}</p>
+  <p><strong>🏪 Store Access:</strong> {{#if storeNames}}{{storeNames}}{{else}}All stores{{/if}}</p>
+</div>
+
+<p>Click the button below to accept the invitation:</p>
+
+<a href="{{inviteLink}}" class="btn btn-primary">Accept Invitation</a>
+
+<div class="warning-box">
+  <p><strong>⏰ This invitation expires in {{expiresIn}}</strong></p>
+</div>
+
+<p>If the button doesn't work, copy and paste this link into your browser:</p>
+<p style="word-break: break-all; color: #667eea;">{{inviteLink}}</p>
+
+<p>If you don't want to join this organization, you can safely ignore this email.</p>
+
+<p>Best regards,<br>The Coffee App Team</p>

@@ -1,0 +1,103 @@
+<h2>Your Receipt 🧾</h2>
+
+<p>Hi {{customerName}},</p>
+
+<p>Thank you for your order! Here's your receipt:</p>
+
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 8px; margin: 30px 0;">
+  <p style="color: #ffffff; font-size: 18px; margin: 0 0 10px 0;">Order Number</p>
+  <p style="color: #ffffff; font-size: 36px; font-weight: bold; margin: 0;">{{orderNumber}}</p>
+</div>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden;">
+  <tbody>
+    <tr>
+      <td style="padding: 15px; border-bottom: 1px solid #dee2e6;"><strong>Date:</strong></td>
+      <td style="padding: 15px; border-bottom: 1px solid #dee2e6; text-align: right;">{{formatDate orderDate}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 15px; border-bottom: 1px solid #dee2e6;"><strong>Store:</strong></td>
+      <td style="padding: 15px; border-bottom: 1px solid #dee2e6; text-align: right;">{{storeName}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 15px; border-bottom: 1px solid #dee2e6;"><strong>Payment Method:</strong></td>
+      <td style="padding: 15px; border-bottom: 1px solid #dee2e6; text-align: right;">{{paymentMethod}}</td>
+    </tr>
+    {{#if transactionId}}
+    <tr>
+      <td style="padding: 15px;"><strong>Transaction ID:</strong></td>
+      <td style="padding: 15px; text-align: right; font-family: monospace;">{{transactionId}}</td>
+    </tr>
+    {{/if}}
+  </tbody>
+</table>
+
+<h3>Items</h3>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+  <thead>
+    <tr style="background-color: #f8f9fa;">
+      <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;">Item</th>
+      <th style="padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;">Qty</th>
+      <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">Price</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{#each items}}
+    <tr>
+      <td style="padding: 12px; border-bottom: 1px solid #dee2e6;">
+        <strong>{{name}}</strong>
+        {{#if options}}
+        <br><small style="color: #888;">{{options}}</small>
+        {{/if}}
+      </td>
+      <td style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6;">{{quantity}}</td>
+      <td style="padding: 12px; text-align: right; border-bottom: 1px solid #dee2e6;">{{formatCurrency price}}</td>
+    </tr>
+    {{/each}}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right;">Subtotal:</td>
+      <td style="padding: 12px; text-align: right;">{{formatCurrency subtotal}}</td>
+    </tr>
+    {{#if tax}}
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right;">Tax ({{taxRate}}%):</td>
+      <td style="padding: 12px; text-align: right;">{{formatCurrency tax}}</td>
+    </tr>
+    {{/if}}
+    {{#if tip}}
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right;">Tip:</td>
+      <td style="padding: 12px; text-align: right;">{{formatCurrency tip}}</td>
+    </tr>
+    {{/if}}
+    {{#if discount}}
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right; color: #28a745;">Discount:</td>
+      <td style="padding: 12px; text-align: right; color: #28a745;">-{{formatCurrency discount}}</td>
+    </tr>
+    {{/if}}
+    <tr style="background-color: #f8f9fa;">
+      <td colspan="2" style="padding: 15px; text-align: right; font-weight: 700; font-size: 18px; border-top: 2px solid #dee2e6;">Total Paid:</td>
+      <td style="padding: 15px; text-align: right; font-weight: 700; font-size: 18px; border-top: 2px solid #dee2e6;">{{formatCurrency total}}</td>
+    </tr>
+  </tfoot>
+</table>
+
+{{#if loyaltyPoints}}
+<div class="success-box">
+  <p><strong>🎉 You earned {{loyaltyPoints}} points with this order!</strong></p>
+  <p>Total points: {{totalPoints}}</p>
+</div>
+{{/if}}
+
+<div class="info-box">
+  <p><strong>Need help?</strong></p>
+  <p>Contact us at <a href="mailto:support@coffeeapp.com">support@coffeeapp.com</a> or call {{supportPhone}}</p>
+</div>
+
+<p>Thank you for your business! We hope to see you again soon. ☕</p>
+
+<p>Best regards,<br>The {{storeName}} Team</p>

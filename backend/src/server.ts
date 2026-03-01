@@ -28,6 +28,8 @@ import { requireTenantContext } from "./middlewares/requireTenantContext.middlew
 import { ensureTenantIsolation } from "./middlewares/ensureTenantIsolation.ts";
 import { trackTenantUsage } from "./middlewares/tenantUsageTracking.ts";
 import { auditLogMiddleware } from "./middlewares/auditLog.middleware.ts";
+import { DashboardSocket } from "./websockets/DashboardSocket.ts";
+import { createServer } from "http";
 
 
 
@@ -44,6 +46,9 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const httpServer = createServer(app);
+const dashboardSocket = new DashboardSocket(httpServer);
 
 //SECURITY & INFRASTRUCTURE
 app.use(securityHeadersMiddleware);
@@ -109,4 +114,8 @@ MetricsService.initialize();
 app.listen(PORT, () => {
   console.log(`☕ Coffee API running on port ${PORT}`);
   console.log(`🕒 Cron scheduler active`);
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

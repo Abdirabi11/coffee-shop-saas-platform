@@ -4,7 +4,7 @@ import type { RefreshTokenPayload, AccessTokenPayload } from "../types/auth.type
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET!;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET!;
- 
+  
 export const signAccessToken = (payload: AccessTokenPayload) => {
     return jwt.sign(payload, ACCESS_TOKEN_SECRET, {
         expiresIn: "15m",

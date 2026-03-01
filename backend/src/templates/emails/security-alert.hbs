@@ -1,0 +1,45 @@
+<h2>Security Alert 🔒</h2>
+
+<p>Hi {{name}},</p>
+
+<div class="warning-box">
+  <p><strong>⚠️ Unusual Activity Detected</strong></p>
+  <p>We detected {{alertType}} on your account.</p>
+</div>
+
+<h3>Details:</h3>
+
+<div class="info-box">
+  <p><strong>📅 Date:</strong> {{formatDate timestamp}}</p>
+  <p><strong>🌍 Location:</strong> {{location}}</p>
+  <p><strong>🌐 IP Address:</strong> {{ipAddress}}</p>
+  <p><strong>🖥️ Device:</strong> {{device}}</p>
+  <p><strong>🔍 Activity:</strong> {{activity}}</p>
+</div>
+
+<h3>Was this you?</h3>
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 20px 0;">
+  <tr>
+    <td style="padding-right: 10px;">
+      <a href="{{confirmUrl}}" class="btn btn-primary">Yes, This Was Me</a>
+    </td>
+    <td>
+      <a href="{{secureUrl}}" class="btn btn-secondary" style="background-color: #dc3545; color: #ffffff;">No, Secure My Account</a>
+    </td>
+  </tr>
+</table>
+
+<div class="warning-box">
+  <p><strong>If this wasn't you:</strong></p>
+  <ul style="margin: 10px 0; padding-left: 20px;">
+    <li>Click "Secure My Account" immediately</li>
+    <li>Change your password</li>
+    <li>Review your recent activity</li>
+    <li>Contact support if needed</li>
+  </ul>
+</div>
+
+<p>We take security seriously. If you have any questions, please don't hesitate to reach out to our support team.</p>
+
+<p>Best regards,<br>The Coffee App Security Team</p>

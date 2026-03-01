@@ -1,0 +1,28 @@
+<h2>Your Order is Ready! ☕</h2>
+
+<p>Hi {{customerName}},</p>
+
+<div class="success-box" style="text-align: center; padding: 30px;">
+  <p style="font-size: 24px; margin: 0;"><strong>🎉 Order #{{orderNumber}} is ready!</strong></p>
+</div>
+
+<p style="font-size: 18px; text-align: center;">Come pick it up at your convenience!</p>
+
+<div class="info-box">
+  <p><strong>📍 Pick up at:</strong> {{storeName}}</p>
+  <p>{{storeAddress}}</p>
+  {{#if tableNumber}}
+  <p><strong>🪑 We'll bring it to Table {{tableNumber}}</strong></p>
+  {{/if}}
+</div>
+
+{{#if qrCode}}
+<div style="text-align: center; margin: 30px 0;">
+  <p><strong>Show this code at pickup:</strong></p>
+  <img src="{{qrCode}}" alt="Pickup QR Code" style="max-width: 200px;">
+</div>
+{{/if}}
+
+<p style="text-align: center;">See you soon! ☕</p>
+
+<p>Best regards,<br>The {{storeName}} Team</p>

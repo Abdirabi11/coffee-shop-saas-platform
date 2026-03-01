@@ -34,6 +34,12 @@ import { LowStockAlertJob } from "./Product/lowStockAlert.job.ts";
 import { ProductMetricsCalculationJob } from "./Product/productMetricsCalculation.job.ts";
 import { OrderExpiryCleanupJobs } from "./Order/orderExpiryCleanup.jobs.ts";
 import { OrderMetricsCalculationJob } from "./Order/orderMetricsCalculation.job.ts";
+import { DeviceCleanupJob } from "./auth/DeviceCleanup.job.ts";
+import { FraudEventCleanupJob } from "./auth/FraudEventCleanup.job.ts";
+import { OTPCleanupJob } from "./auth/OTPCleanup.job.ts";
+import { SessionCleanupJob } from "./auth/SessionCleanup.job.ts";
+import { QuotaResetJob } from "./Billing/QuotaReset.job.js";
+import { SubscriptionRenewalJob } from "./Billing/SubscriptionRenewal.job.js";
 
 
 
@@ -179,6 +185,48 @@ export function startScheduler() {
   console.log("  - Daily 4 AM: RiskScoreDecay");
   console.log("  - Daily 5 AM: OrphanedPaymentDetection");
 
+// AUTH & SECURITY JOBS
+
+// Every hour - Clean up expired sessions
+cron.schedule("0 * * * *", async () => {
+  console.log("[CRON] Running SessionCleanupJob");
+  try {
+    await SessionCleanupJob.run();
+  } catch (error) {
+    console.error("[CRON] SessionCleanupJob failed:", error);
+  }
+});
+
+// Every 30 minutes - Clean up expired OTPs
+cron.schedule("*/30 * * * *", async () => {
+  console.log("[CRON] Running OTPCleanupJob");
+  try {
+    await OTPCleanupJob.run();
+  } catch (error) {
+    console.error("[CRON] OTPCleanupJob failed:", error);
+  }
+});
+
+// Daily at 3:00 AM - Clean up old devices
+cron.schedule("0 3 * * *", async () => {
+  console.log("[CRON] Running DeviceCleanupJob");
+  try {
+    await DeviceCleanupJob.run();
+  } catch (error) {
+    console.error("[CRON] DeviceCleanupJob failed:", error);
+  }
+});
+
+// Daily at 4:00 AM - Archive old fraud events
+cron.schedule("0 4 * * *", async () => {
+  console.log("[CRON] Running FraudEventCleanupJob");
+  try {
+    await FraudEventCleanupJob.run();
+  } catch (error) {
+    console.error("[CRON] FraudEventCleanupJob failed:", error);
+  }
+});
+
   //📦 ORDER JOBS
 
   // Every 5 minutes - Cancel expired orders
@@ -278,6 +326,47 @@ export function startScheduler() {
       await StaleOrderMetricsJob.runDaily();
     } catch (error) {
       console.error("[CRON] StaleOrderMetricsJob failed:", error);
+    }
+  });
+
+  //Subscription & plan Jobs
+
+  cron.schedule("0 1 * * *", async () => {
+    console.log("[CRON] Running SubscriptionRenewalJob");
+    try {
+      await SubscriptionRenewalJob.run();
+    } catch (error) {
+      console.error("[CRON] SubscriptionRenewalJob failed:", error);
+    }
+  });
+
+  // Daily at 12:00 AM - Reset daily quotas
+  cron.schedule("0 0 * * *", async () => {
+    console.log("[CRON] Resetting daily quotas");
+    try {
+      await QuotaResetJob.runDaily();
+    } catch (error) {
+      console.error("[CRON] Daily quota reset failed:", error);
+    }
+  });
+
+  // Monthly on 1st at 12:00 AM - Reset monthly quotas
+  cron.schedule("0 0 1 * *", async () => {
+    console.log("[CRON] Resetting monthly quotas");
+    try {
+      await QuotaResetJob.runMonthly();
+    } catch (error) {
+      console.error("[CRON] Monthly quota reset failed:", error);
+    }
+  });
+
+  // Yearly on Jan 1st at 12:00 AM - Reset yearly quotas
+  cron.schedule("0 0 1 1 *", async () => {
+    console.log("[CRON] Resetting yearly quotas");
+    try {
+      await QuotaResetJob.runYearly();
+    } catch (error) {
+      console.error("[CRON] Yearly quota reset failed:", error);
     }
   });
 

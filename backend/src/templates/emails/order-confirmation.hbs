@@ -1,0 +1,74 @@
+<h2>Order Confirmed! 🎉</h2>
+
+<p>Hi {{customerName}},</p>
+
+<p>Thank you for your order! We've received it and we're getting it ready.</p>
+
+<div class="success-box">
+  <p><strong>✅ Order #{{orderNumber}}</strong></p>
+  <p>Estimated ready time: <strong>{{estimatedReadyTime}}</strong></p>
+</div>
+
+<h3>Order Details</h3>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+  <thead>
+    <tr style="background-color: #f8f9fa;">
+      <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;">Item</th>
+      <th style="padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;">Qty</th>
+      <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">Price</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{#each items}}
+    <tr>
+      <td style="padding: 12px; border-bottom: 1px solid #dee2e6;">
+        <strong>{{name}}</strong>
+        {{#if options}}
+        <br><small style="color: #888;">{{options}}</small>
+        {{/if}}
+      </td>
+      <td style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6;">{{quantity}}</td>
+      <td style="padding: 12px; text-align: right; border-bottom: 1px solid #dee2e6;">{{formatCurrency price}}</td>
+    </tr>
+    {{/each}}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right; font-weight: 600;">Subtotal:</td>
+      <td style="padding: 12px; text-align: right;">{{formatCurrency subtotal}}</td>
+    </tr>
+    {{#if tax}}
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right;">Tax:</td>
+      <td style="padding: 12px; text-align: right;">{{formatCurrency tax}}</td>
+    </tr>
+    {{/if}}
+    {{#if discount}}
+    <tr>
+      <td colspan="2" style="padding: 12px; text-align: right; color: #28a745;">Discount:</td>
+      <td style="padding: 12px; text-align: right; color: #28a745;">-{{formatCurrency discount}}</td>
+    </tr>
+    {{/if}}
+    <tr style="background-color: #f8f9fa;">
+      <td colspan="2" style="padding: 12px; text-align: right; font-weight: 700; font-size: 18px;">Total:</td>
+      <td style="padding: 12px; text-align: right; font-weight: 700; font-size: 18px;">{{formatCurrency total}}</td>
+    </tr>
+  </tfoot>
+</table>
+
+<div class="info-box">
+  <p><strong>📍 Pick up at:</strong> {{storeName}}</p>
+  <p>{{storeAddress}}</p>
+  {{#if tableNumber}}
+  <p><strong>🪑 Table Number:</strong> {{tableNumber}}</p>
+  {{/if}}
+</div>
+
+<a href="{{trackOrderUrl}}" class="btn btn-primary">Track Your Order</a>
+
+<p>We'll send you another email when your order is ready for pickup!</p>
+
+<p>Thanks for choosing Coffee App! ☕</p>
+
+<p>Best regards,<br>The {{storeName}} Team</p>
