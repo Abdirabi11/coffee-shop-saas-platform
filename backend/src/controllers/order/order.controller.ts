@@ -7,7 +7,7 @@ import { OrderModificationService } from "../../services/order/orderModification
 import { OrderQueryService } from "../../services/order/orderQuery.service.ts";
 import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
 import { OrderValidationService } from "../../services/order/orderValidation.service.ts";
-import { createOrderSchema } from "../../validators/order.validator.ts";
+import { createOrderSchema } from "../../validators/order.validator.js";
 
 export class OrderController {
   //POST /api/orders

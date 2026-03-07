@@ -1,10 +1,11 @@
-import { MetricsService } from "../../infrastructure/observability/metrics.ts";
-import { FinalizeOrderJob } from "../../jobs/OrderJobs/finalizeOrder.job.ts";
-import { EmailService } from "../../services/email.service.ts";
-import { LedgerService } from "../../services/payment/ledger.service.ts";
-import { PaymentFraudEvaluator } from "../../services/payment/paymentFraudEvaluator.service.ts";
 import prisma from "../../config/prisma.ts"
-import { PaymentEventBus } from "../eventBus.ts";
+import { PaymentEventBus } from "../../events/eventBus.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.js";
+import { FinalizeOrderJob } from "../../jobs/Order/finalizeOrder.job.ts";
+import { EmailService } from "../../services/notification/Email.service.ts";
+import { LedgerService } from "../../services/payment/ledger.service.ts";
+import { PaymentFraudEvaluator } from "../../services/payment/paymentFraudEvaluator.service.js";
+
 
 PaymentEventBus.on("PAYMENT_CONFIRMED", async (payload) => {
   const { paymentUuid, orderUuid, tenantUuid, storeUuid, amount } = payload;

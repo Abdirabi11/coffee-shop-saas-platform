@@ -2,7 +2,7 @@ import { AlertService } from "../services/alert.service.ts";
 import { EmailService } from "../services/email.service.ts";
 import { FraudSignalService } from "../services/fraud.service.ts";
 import { MetricsService } from "../services/metrics.service.ts";
-import { WebhookDispatcher } from "../services/webhook.service.ts";
+import { WebhookDispatcher } from "../services/webhooks/webhook.service.js";
 import { RefundEventBus } from "./eventBus.ts";
 import { EventBus } from "./eventBus.ts";
 

@@ -7,7 +7,7 @@ import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { RiskPolicyEnforcer } from "../../services/fraud/riskPolicyEnforcer.service.ts";
 import { env } from "../../config/env.ts";
 import { MetricsService } from "../../infrastructure/observability/metrics.ts";
-import { WebhookDeadLetterQueue } from "../../services/webhooks/WebhookDeadLetterQueue.service.ts";
+import { WebhookDeadLetterQueue } from "../../services/webhooks/WebhookDeadLetterQueue.service.js";
 import { PaymentDisputeService } from "../../services/payment/paymentDispute.service.ts";
 import { WebhookVerifier } from "../../infrastructure/webhooks/webhookVerifier.ts";
 

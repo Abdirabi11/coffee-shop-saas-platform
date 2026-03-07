@@ -1,12 +1,12 @@
-import { logWithContext } from "../infrastructure/observability/logger.ts";
-import prisma from "../config/prisma.ts"
-import { InventoryService } from "../services/inventory/inventory.service.ts";
-import { RefundService } from "../services/payment/refund.service.ts";
-import { EventBus } from "./eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.js";
+import prisma from "../../config/prisma.js"
+import { InventoryService } from "../../services/inventory/inventory.service.js";
+import { RefundService } from "../../services/payment/refund.service.js";
+import { EventBus } from "../../events/eventBus.js";
 import { OrderStatusService } from "../services/order/order-status.service.ts";
-import { MetricsService } from "../infrastructure/observability/metricsService.ts";
-import { OrderCacheService } from "../services/cache/orderCache.service.ts";
-import { DeadLetterQueue } from "../services/order/deadLetterQueue.service.js";
+import { MetricsService } from "../../infrastructure/observability/metricsService.js";
+import { OrderCacheService } from "../../services/cache/orderCache.service.js";
+import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.js";
 
 
 //Order Created → Start payment flow

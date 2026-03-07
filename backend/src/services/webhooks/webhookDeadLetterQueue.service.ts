@@ -1,4 +1,7 @@
-import prisma from "../../config/prisma.ts"
+import prisma from "../../config/prisma.js"
+import { EventBus } from "../../events/eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 interface FailedWebhook {
     provider: string;
@@ -7,59 +10,82 @@ interface FailedWebhook {
     payload: any;
     error: string;
     attemptCount: number;
-};
+}
 
-export class WebhookDeadLetterQueue{
-    static async add(input: FailedWebhook){
-        await prisma.webhookDeadLetter.create({
-            data: {
+export class WebhookDeadLetterQueue {
+  
+    static async add(input: FailedWebhook) {
+        try {
+            const dlq = await prisma.webhookDeadLetter.create({
+                data: {
+                    provider: input.provider,
+                    eventUuid: input.eventUuid,
+                    eventType: input.eventType,
+                    payload: input.payload,
+                    errorMessage: input.error,
+                    attemptCount: input.attemptCount,
+                    status: "FAILED",
+                },
+            });
+
+            logWithContext("error", "[DLQ] Webhook added to dead letter queue", {
+                dlqUuid: dlq.uuid,
                 provider: input.provider,
                 eventUuid: input.eventUuid,
                 eventType: input.eventType,
-                payload: input.payload,
-                errorMessage: input.error,
-                attemptCount: input.attemptCount,
-                status: "FAILED",
-            },
-        });
+            });
 
-        console.log(`[WebhookDLQ] Added failed webhook: ${input.eventId}`);
+            MetricsService.increment("webhook.dlq.added", 1, {
+                provider: input.provider,
+                eventType: input.eventType,
+            });
+
+            // Emit event for monitoring
+            EventBus.emit("WEBHOOK_FAILED", {
+                dlqUuid: dlq.uuid,
+                provider: input.provider,
+                eventType: input.eventType,
+                error: input.error,
+            });
+
+            return dlq;
+
+        } catch (error: any) {
+            logWithContext("error", "[DLQ] Failed to add to DLQ", {
+                error: error.message,
+            });
+            throw error;
+        }
     }
 
-    /**
-   * Retry webhook from DLQ
-   */
     static async retry(dlqUuid: string) {
         const dlq = await prisma.webhookDeadLetter.findUnique({
             where: { uuid: dlqUuid },
         });
 
         if (!dlq) {
-            throw new Error("DLQ record not found");
-        }
+            throw new Error("DLQ_RECORD_NOT_FOUND");
+        };
 
         if (dlq.status === "RESOLVED") {
-            throw new Error("Webhook already resolved");
-        }
+            throw new Error("WEBHOOK_ALREADY_RESOLVED");
+        };
+
+        // Update to RETRYING
+        await prisma.webhookDeadLetter.update({
+            where: { uuid: dlqUuid },
+            data: {
+                status: "RETRYING",
+                attemptCount: { increment: 1 },
+            },
+        });
 
         try {
-            // Re-process the webhook
-            const PaymentWebhookController = require("@/controllers/payment/webhook/PaymentWebhook.controller");
-            
-            // Mock request object
-            const mockReq = {
-                body: dlq.payload,
-                headers: {},
-                rawBody: Buffer.from(JSON.stringify(dlq.payload)),
-            };
+            // Get the appropriate handler based on provider
+            const handler = this.getHandlerForProvider(dlq.provider);
 
-            const mockRes = {
-                status: (code: number) => ({
-                    json: (data: any) => ({ code, data }),
-                }),
-            };
-
-            await PaymentWebhookController.PaymentWebhookController.handleStripe(mockReq as any, mockRes as any);
+            // Process the webhook
+            await handler(dlq.payload);
 
             // Mark as resolved
             await prisma.webhookDeadLetter.update({
@@ -67,41 +93,160 @@ export class WebhookDeadLetterQueue{
                 data: {
                     status: "RESOLVED",
                     resolvedAt: new Date(),
-                    attemptCount: { increment: 1 },
                 },
             });
 
-            console.log(`[WebhookDLQ] Successfully retried: ${dlq.eventUuid}`);
-        
+            logWithContext("info", "[DLQ] Webhook successfully retried", {
+                dlqUuid,
+                eventUuid: dlq.eventUuid,
+            });
+
+            MetricsService.increment("webhook.dlq.retry.success", 1, {
+                provider: dlq.provider,
+            });
+
+            return { success: true };
+
         } catch (error: any) {
-            // Update attempt count
+            // Mark as failed again
             await prisma.webhookDeadLetter.update({
                 where: { uuid: dlqUuid },
                 data: {
-                    attemptCount: { increment: 1 },
+                    status: "FAILED",
                     errorMessage: error.message,
                 },
             });
 
+            logWithContext("error", "[DLQ] Retry failed", {
+                dlqUuid,
+                error: error.message,
+            });
+
+            MetricsService.increment("webhook.dlq.retry.failed", 1, {
+                provider: dlq.provider,
+            });
+
             throw error;
-        };
+        }
     }
 
-    /**
-     * Get failed webhooks
-    */
+    static async retryBulk(input: {
+        provider?: string;
+        eventType?: string;
+        limit?: number;
+    }) {
+        const where: any = {
+            status: "FAILED",
+            attemptCount: { lt: 5 },
+        };
+
+        if (input.provider) where.provider = input.provider;
+        if (input.eventType) where.eventType = input.eventType;
+
+        const dlqs = await prisma.webhookDeadLetter.findMany({
+            where,
+            orderBy: { createdAt: "asc" },
+            take: input.limit || 10,
+        });
+
+        const results = {
+            total: dlqs.length,
+            success: 0,
+            failed: 0,
+        };
+
+        for (const dlq of dlqs) {
+            try {
+                await this.retry(dlq.uuid);
+                results.success++;
+            } catch (error) {
+                results.failed++;
+            }
+        }
+
+        logWithContext("info", "[DLQ] Bulk retry completed", results);
+
+        return results;
+    }
+
+    //Get DLQ items
+
     static async getAll(filters?: {
         provider?: string;
         status?: string;
+        eventType?: string;
+        dateFrom?: Date;
+        dateTo?: Date;
+        page?: number;
         limit?: number;
     }) {
-        return prisma.webhookDeadLetter.findMany({
-            where: {
-                ...(filters?.provider && { provider: filters.provider }),
-                ...(filters?.status && { status: filters.status as any }),
+        const page = filters?.page || 1;
+        const limit = filters?.limit || 50;
+        const skip = (page - 1) * limit;
+
+        const where: any = {};
+
+        if (filters?.provider) where.provider = filters.provider;
+        if (filters?.status) where.status = filters.status;
+        if (filters?.eventType) where.eventType = filters.eventType;
+        if (filters?.dateFrom || filters?.dateTo) {
+            where.createdAt = {};
+            if (filters.dateFrom) where.createdAt.gte = filters.dateFrom;
+            if (filters.dateTo) where.createdAt.lte = filters.dateTo;
+        };
+
+        const [items, total] = await Promise.all([
+            prisma.webhookDeadLetter.findMany({
+                where,
+                orderBy: { createdAt: "desc" },
+                skip,
+                take: limit,
+            }),
+            prisma.webhookDeadLetter.count({ where }),
+        ]);
+
+        return {
+            data: items,
+            meta: {
+                page,
+                limit,
+                total,
+                pages: Math.ceil(total / limit),
             },
-            orderBy: { createdAt: "desc" },
-            take: filters?.limit || 100,
+        };
+    }
+
+  
+    //Abandon webhook (no more retries)
+    static async abandon(dlqUuid: string, reason?: string) {
+        await prisma.webhookDeadLetter.update({
+            where: { uuid: dlqUuid },
+            data: {
+                status: "ABANDONED",
+                errorMessage: reason || "Manually abandoned",
+            },
         });
+
+        logWithContext("warn", "[DLQ] Webhook abandoned", {
+            dlqUuid,
+            reason,
+        });
+
+        MetricsService.increment("webhook.dlq.abandoned", 1);
+    }
+
+    private static getHandlerForProvider(provider: string): (payload: any) => Promise<void> {
+        switch (provider.toLowerCase()) {
+            case "stripe":
+                const { StripeWebhookHandler } = require("@/handlers/webhooks/StripeWebhook.handler");
+                return StripeWebhookHandler.process;
+
+            case "evc_plus":
+                const { EVCWebhookHandler } = require("@/handlers/webhooks/EVCWebhook.handler");
+                return EVCWebhookHandler.process;
+
+            default:
+                throw new Error(`UNSUPPORTED_PROVIDER: ${provider}`);
+        }
     }
 }

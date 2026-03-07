@@ -38,8 +38,18 @@ import { DeviceCleanupJob } from "./auth/DeviceCleanup.job.ts";
 import { FraudEventCleanupJob } from "./auth/FraudEventCleanup.job.ts";
 import { OTPCleanupJob } from "./auth/OTPCleanup.job.ts";
 import { SessionCleanupJob } from "./auth/SessionCleanup.job.ts";
-import { QuotaResetJob } from "./Billing/QuotaReset.job.js";
-import { SubscriptionRenewalJob } from "./Billing/SubscriptionRenewal.job.js";
+import { QuotaResetJob } from "./Billing/QuotaReset.job.ts";
+import { SubscriptionRenewalJob } from "./Billing/SubscriptionRenewal.job.ts";
+import { WebhookMonitoringJob } from "./webhook/WebhookMonitoring.job.ts";
+import { WebhookCleanupJob } from "./webhook/WebhookCleanup.job.ts";
+import { MissedShiftTrackerJob } from "./staff/MissedShiftTracker.job.ts";
+import { AutoClockOutJob } from "./staff/AutoClockOut.job.ts";
+import { ShiftReminderJob } from "./staff/ShiftReminder.job.ts";
+import { PerformanceCalculationJob } from "./staff/PerformanceCalculation.job.ts";
+import { BreakEnforcementMonitorJob } from "./staff/BreakEnforcementMonitor.job.ts";
+import { LaborCostSnapshotJob } from "./staff/LaborCostSnapshot.job.ts";
+import { CommissionCalculationJob } from "./staff/CommissionCalculation.job.ts";
+import { TipPoolCalculationJob } from "./staff/TipPoolCalculation.job.ts";
 
 
 
@@ -224,6 +234,112 @@ cron.schedule("0 4 * * *", async () => {
     await FraudEventCleanupJob.run();
   } catch (error) {
     console.error("[CRON] FraudEventCleanupJob failed:", error);
+  }
+});
+
+//Staff Cron
+
+/**
+ * Daily Performance Calculation
+ * Every day at 2:00 AM
+ */
+cron.schedule("0 2 * * *", async () => {
+  console.log("[CRON] Running PerformanceCalculationJob");
+  try {
+    await PerformanceCalculationJob.run();
+  } catch (error: any) {
+    console.error("[CRON] PerformanceCalculationJob failed:", error.message);
+  }
+});
+
+/**
+ * Shift Reminders
+ * Every 5 minutes
+ */
+cron.schedule("*/5 * * * *", async () => {
+  console.log("[CRON] Running ShiftReminderJob");
+  try {
+    await ShiftReminderJob.run();
+  } catch (error: any) {
+    console.error("[CRON] ShiftReminderJob failed:", error.message);
+  }
+});
+
+/**
+ * Auto Clock-Out
+ * Every hour
+ */
+cron.schedule("0 * * * *", async () => {
+  console.log("[CRON] Running AutoClockOutJob");
+  try {
+    await AutoClockOutJob.run();
+  } catch (error: any) {
+    console.error("[CRON] AutoClockOutJob failed:", error.message);
+  }
+});
+
+/**
+ * Missed Shift Tracker
+ * Every 15 minutes
+ */
+cron.schedule("*/15 * * * *", async () => {
+  console.log("[CRON] Running MissedShiftTrackerJob");
+  try {
+    await MissedShiftTrackerJob.run();
+  } catch (error: any) {
+    console.error("[CRON] MissedShiftTrackerJob failed:", error.message);
+  }
+});
+
+/**
+ * Daily Tip Pool Calculation
+ * Every day at 1:00 AM
+ */
+cron.schedule("0 1 * * *", async () => {
+  console.log("[CRON] Running TipPoolCalculationJob");
+  try {
+    await TipPoolCalculationJob.run();
+  } catch (error: any) {
+    console.error("[CRON] TipPoolCalculationJob failed:", error.message);
+  }
+});
+
+/**
+ * Monthly Commission Calculation
+ * 1st day of month at 3:00 AM
+ */
+cron.schedule("0 3 1 * *", async () => {
+  console.log("[CRON] Running CommissionCalculationJob");
+  try {
+    await CommissionCalculationJob.run();
+  } catch (error: any) {
+    console.error("[CRON] CommissionCalculationJob failed:", error.message);
+  }
+});
+
+/**
+ * Hourly Labor Cost Snapshot
+ * Every hour at minute 0
+ */
+cron.schedule("0 * * * *", async () => {
+  console.log("[CRON] Running LaborCostSnapshotJob");
+  try {
+    await LaborCostSnapshotJob.run();
+  } catch (error: any) {
+    console.error("[CRON] LaborCostSnapshotJob failed:", error.message);
+  }
+});
+
+/**
+ * Break Enforcement Monitor
+ * Every 10 minutes
+ */
+cron.schedule("*/10 * * * *", async () => {
+  console.log("[CRON] Running BreakEnforcementMonitorJob");
+  try {
+    await BreakEnforcementMonitorJob.run();
+  } catch (error: any) {
+    console.error("[CRON] BreakEnforcementMonitorJob failed:", error.message);
   }
 });
 
@@ -487,9 +603,52 @@ cron.schedule("0 4 * * *", async () => {
   });
 
   //Webhook jobs
+cron.schedule("*/30 * * * * *", async () => {
+  console.log("[CRON] Running WebhookOutboxProcessor");
+  try {
+    await WebhookOutboxProcessorJob.run(100);
+  } catch (error: any) {
+    console.error("[CRON] WebhookOutboxProcessor failed:", error.message);
+  }
+});
 
-  cron.schedule("*/15 * * * *", async () => {
+/**
+ * Webhook Retry Job
+ * Every 5 minutes - Retry failed deliveries
+ */
+cron.schedule("*/5 * * * *", async () => {
+  console.log("[CRON] Running WebhookRetryJob");
+  try {
     await WebhookRetryJob.run();
+  } catch (error: any) {
+    console.error("[CRON] WebhookRetryJob failed:", error.message);
+  }
+});
+
+/**
+ * Webhook Monitoring
+ * Every 10 minutes - Monitor webhook health
+ */
+  cron.schedule("*/10 * * * *", async () => {
+    console.log("[CRON] Running WebhookMonitoringJob");
+    try {
+      await WebhookMonitoringJob.run();
+    } catch (error: any) {
+      console.error("[CRON] WebhookMonitoringJob failed:", error.message);
+    }
+  });
+
+  /**
+   * Webhook Cleanup
+   * Daily at 3:00 AM - Clean up old records
+   */
+  cron.schedule("0 3 * * *", async () => {
+    console.log("[CRON] Running WebhookCleanupJob");
+    try {
+      await WebhookCleanupJob.run();
+    } catch (error: any) {
+      console.error("[CRON] WebhookCleanupJob failed:", error.message);
+    }
   });
 
   //📊 ANALYTICS JOBS

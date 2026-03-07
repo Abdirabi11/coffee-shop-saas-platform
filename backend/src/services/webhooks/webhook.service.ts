@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import prisma from "../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
 
 
 function signPayload(payload: any, secret: string): string {

@@ -1222,6 +1222,80 @@ enum InvitationStatus {
 
 // ----------------------
 // |                    |
+// |      STAFF         |
+// ----------------------
+
+enum TipMethod {
+  CASH
+  CARD
+  APP
+}
+enum PoolPeriodType {
+  SHIFT
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+enum DistributionMethod {
+  EQUAL_SPLIT
+  HOURS_WEIGHTED
+  ORDERS_WEIGHTED
+}
+enum PoolStatus {
+  OPEN
+  CALCULATED
+  DISTRIBUTED
+  CLOSED
+}
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+enum CommissionPeriodType {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+}
+enum PayrollPeriodType {
+  WEEKLY
+  BIWEEKLY
+  SEMI_MONTHLY
+  MONTHLY
+}
+enum PayrollStatus {
+  DRAFT
+  CALCULATED
+  APPROVED
+  EXPORTED
+  PROCESSED
+}
+enum ExportFormat {
+  QUICKBOOKS_IIF
+  QUICKBOOKS_QBO
+  ADP_CSV
+  GUSTO_CSV
+  PAYCHEX_CSV
+  GENERIC_CSV
+  EXCEL
+}
+enum SnapshotPeriodType {
+  HOURLY
+  DAILY
+  WEEKLY
+}
+enum ViolationType {
+  MISSED_BREAK
+  LATE_BREAK
+  SHORT_BREAK
+  NO_BREAK
+}
+
+// ----------------------
+// |                    |
 // |      Billing       |
 // ----------------------
 enum SubscriptionStatus {
@@ -1266,6 +1340,30 @@ enum TierMode {
 enum LimitType {
   HARD
   SOFT
+}
+// ----------------------
+// |                    |
+// |      Webhook       |
+// ----------------------
+enum WebhookDeliveryStatus {
+  PENDING
+  SENDING
+  SUCCESS
+  FAILED
+  TIMEOUT
+  RATE_LIMITED
+}
+enum DLQStatus {
+  FAILED
+  RETRYING
+  RESOLVED
+  ABANDONED
+}
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+  ABANDONED
 }
 // ----------------------
 // |                    |
@@ -1440,6 +1538,143 @@ enum SocialProvider {
   APPLE
   FACEBOOK
 }
+
+// ----------------------
+// |                    |
+// |      Staff         |
+// ----------------------
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum GlobalRole {
+  SUPER_ADMIN
+  PLATFORM_MANAGER
+}
+
+enum TenantRole {
+  TENANT_ADMIN
+  REGIONAL_MANAGER
+  STAFF
+}
+
+enum StoreRole {
+  STORE_MANAGER
+  SHIFT_SUPERVISOR
+  CASHIER
+  BARISTA
+  KITCHEN_STAFF
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ShiftType {
+  REGULAR
+  OVERTIME
+  COVER
+  TRAINING
+}
+
+enum ShiftStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum SwapStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum DrawerStatus {
+  CLOSED
+  OPEN
+  RECONCILING
+}
+
+enum CountType {
+  OPEN
+  MID_SHIFT
+  CLOSE
+}
+
+enum BreakType {
+  PAID
+  UNPAID
+  MEAL
+}
+
+enum PeriodType {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PoolType {
+  EQUAL_SPLIT
+  HOURS_WEIGHTED
+  PERFORMANCE_WEIGHTED
+}
+
+enum DistributionStatus {
+  PENDING
+  CALCULATED
+  DISTRIBUTED
+}
+
+enum ApprovalType {
+  LATE_CLOCK_IN
+  MISSED_CLOCK_OUT
+  REFUND
+  VOID
+  CASH_VARIANCE
+  TIME_OFF
+  SCHEDULE_CHANGE
+  TEMP_PERMISSION
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
 // ----------------------
 // |                    |
 // |      USER          |
@@ -1449,7 +1684,30 @@ model User {
   phoneNumber      String      @unique
   email            String?     @unique
   name             String?
+  passwordHash     String?
   password         String?
+  pinHash          String?
+
+  firstName         String
+  lastName          String
+  profilePhoto      String?
+  dateOfBirth       DateTime?
+
+  emergencyName     String?
+  emergencyPhone    String?
+  emergencyRelation String?
+
+  employmentStatus  EmploymentStatus @default(ACTIVE)
+  hireDate          DateTime?
+  terminationDate   DateTime?
+
+  certifications    Json?  
+
+  preferredLanguage String          @default("en")
+  
+  // Device
+  lastDeviceId      String?
+  lastLoginAt       DateTime?
 
   globalRole       GlobalRole  @default(CUSTOMER)
 
@@ -1465,13 +1723,13 @@ model User {
   bannedBy         String?
 
   // Auth
-  otpCode          String?
-  otpExpiresAt     DateTime?
-  otpAttempts      Int         @default(0)
-  otpMethod        OTPMethod   @default(SMS)
+  otpCode                String?
+  otpExpiresAt           DateTime?
+  otpAttempts            Int         @default(0)
+  otpMethod              OTPMethod   @default(SMS)
 
-  resetToken       String?     @unique
-  resetTokenExpiry DateTime?
+  resetToken             String?     @unique
+  resetTokenExpiry       DateTime?
 
   emailVerificationToken String?    @unique
   emailTokenExpiry       DateTime?
@@ -1488,8 +1746,14 @@ model User {
   tenantUsers            TenantUser[]
   ownedTenants           Tenant[]    @relation("TenantOwner")
 
-  preferredLanguage String?    @default("en")
-  timezone          String?    @default("UTC")
+  timezone               String?     @default("UTC")
+
+  ordersTaken            Order[]         @relation("OrdersTaken")
+  ordersServed           Order[]         @relation("OrdersServed")
+  tipDistributions       TipDistribution[]
+  commissions            Commission[]
+  payrollRecords         PayrollRecord[]
+  breakViolations        BreakViolation[]
 
   // Auth relationships
   refreshTokens    RefreshToken[]
@@ -1512,6 +1776,16 @@ model User {
   FraudEvent       FraudEvent[]
   UserStore        UserStore[]
   UserFavorite     UserFavorite[]
+
+  shifts            Shift[]
+  timeEntries       TimeEntry[]
+  cashDrawers       CashDrawer[]
+  performanceRecords StaffPerformance[]
+  tasks             StaffTask[]
+  permissions       UserPermission[]
+  tempPermissions   TemporaryPermission[]
+  approvalRequests  StaffApprovalRequest[]
+  givenApprovals    StaffApprovalRequest[] @relation("ApprovedBy")
 
   @@index([phoneNumber])
   @@index([email])
@@ -2013,6 +2287,84 @@ model TenantSettings {
   @@index([tenantUuid])
 }
 
+model TenantUser {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  userUuid          String
+  
+  // Role at tenant level
+  role              TenantRole      @default(STAFF)
+  
+  // Employment details
+  employeeId        String?         // Company employee ID
+  employmentType    EmploymentType  @default(PART_TIME)
+  payRate           Int?            // Cents per hour
+  currency          String          @default("USD")
+  
+  // Status
+  isActive          Boolean         @default(true)
+  startDate         DateTime        @default(now())
+  endDate           DateTime?
+  
+  // Metadata
+  metadata          Json?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([tenantUuid, userUuid])
+  @@index([tenantUuid, isActive])
+  @@index([userUuid])
+}
+
+model UserStore {
+  uuid              String          @id @default(uuid())
+  
+  userUuid          String
+  storeUuid         String
+  tenantUuid        String
+  
+  // Role at this specific store
+  role              StoreRole       @default(CASHIER)
+  
+  // Primary store indicator
+  isPrimary         Boolean         @default(false)
+  
+  // Access control
+  canAccessPOS      Boolean         @default(true)
+  canOpenDrawer     Boolean         @default(false)
+  canCloseDrawer    Boolean         @default(false)
+  canManageStaff    Boolean         @default(false)
+  
+  // Status
+  isActive          Boolean         @default(true)
+  startDate         DateTime        @default(now())
+  endDate           DateTime?
+  
+  // Transfer tracking
+  transferredFrom   String?         // Previous store UUID
+  transferDate      DateTime?
+  transferReason    String?
+  
+  // Relationships
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([userUuid, storeUuid])
+  @@index([storeUuid, isActive])
+  @@index([userUuid, isActive])
+  @@index([tenantUuid])
+}
+
 model StoreSettings {
   uuid                  String    @id @default(uuid())
   storeUuid             String    @unique
@@ -2057,6 +2409,1027 @@ model UserPreferences {
   updatedAt             DateTime  @updatedAt
   
   @@index([userUuid])
+}
+
+// ----------------------
+// |                    |
+// |ROLES & PERMISSIONS |
+// ----------------------
+model Role {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String?         // Null = system role
+  
+  name              String
+  slug              String
+  description       String?
+  
+  // Hierarchy
+  level             Int             @default(0) // Higher = more privileges
+  
+  // Metadata
+  isSystemRole      Boolean         @default(false)
+  isActive          Boolean         @default(true)
+  
+  // Relationships
+  tenant            Tenant?         @relation(fields: [tenantUuid], references: [uuid])
+  permissions       RolePermission[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([tenantUuid, slug])
+  @@index([tenantUuid, isActive])
+}
+
+model Permission {
+  uuid              String          @id @default(uuid())
+  
+  resource          String          // "order", "product", "staff", etc.
+  action            String          // "create", "read", "update", "delete", "approve"
+  
+  name              String
+  slug              String          @unique
+  description       String?
+  
+  // Categorization
+  category          String?         // "operations", "management", "financial"
+  
+  // Risk level
+  riskLevel         RiskLevel       @default(LOW)
+  requiresApproval  Boolean         @default(false)
+  
+  // Metadata
+  isSystemPermission Boolean        @default(true)
+  
+  // Relationships
+  roles             RolePermission[]
+  userPermissions   UserPermission[]
+  tempPermissions   TemporaryPermission[]
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([resource, action])
+}
+
+model RolePermission {
+  uuid              String          @id @default(uuid())
+  
+  roleUuid          String
+  permissionUuid    String
+  
+  // Relationships
+  role              Role            @relation(fields: [roleUuid], references: [uuid])
+  permission        Permission      @relation(fields: [permissionUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@unique([roleUuid, permissionUuid])
+  @@index([roleUuid])
+  @@index([permissionUuid])
+}
+
+model UserPermission {
+  uuid              String          @id @default(uuid())
+  
+  userUuid          String
+  storeUuid         String?         // Store-specific permission
+  permissionUuid    String
+  
+  // Grant details
+  granted           Boolean         @default(true) // False = explicitly revoked
+  grantedBy         String
+  grantedAt         DateTime        @default(now())
+  
+  reason            String?
+  
+  // Relationships
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  store             Store?          @relation(fields: [storeUuid], references: [uuid])
+  permission        Permission      @relation(fields: [permissionUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@unique([userUuid, storeUuid, permissionUuid])
+  @@index([userUuid, storeUuid])
+}
+
+model TemporaryPermission {
+  uuid              String          @id @default(uuid())
+  
+  userUuid          String
+  storeUuid         String
+  permissionUuid    String
+  
+  // Time bounds
+  validFrom         DateTime        @default(now())
+  validUntil        DateTime
+  
+  // Grant details
+  grantedBy         String
+  reason            String
+  
+  // Usage tracking
+  used              Boolean         @default(false)
+  usedAt            DateTime?
+  usedFor           String?         // "Refund order #1234"
+  
+  // Status
+  revoked           Boolean         @default(false)
+  revokedBy         String?
+  revokedAt         DateTime?
+  
+  // Relationships
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  permission        Permission      @relation(fields: [permissionUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([userUuid, storeUuid, validUntil])
+  @@index([validUntil, revoked])
+}
+
+// ----------------------
+// |                    |
+// |TIPS & COMMISSION   |
+// ----------------------
+model TipPool {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  
+  // Period
+  periodStart       DateTime
+  periodEnd         DateTime
+  periodType        PoolPeriodType  @default(DAILY)
+  
+  // Pool totals
+  totalTips         Int             @default(0) // Cents
+  totalOrders       Int             @default(0)
+  
+  // Distribution
+  distributionMethod DistributionMethod @default(EQUAL_SPLIT)
+  totalHoursWorked  Float           @default(0)
+  
+  // Status
+  status            PoolStatus      @default(OPEN)
+  calculatedAt      DateTime?
+  distributedAt     DateTime?
+  distributedBy     String?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  distributions     TipDistribution[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([storeUuid, periodStart, periodType])
+  @@index([storeUuid, periodStart])
+  @@index([status])
+}
+model TipDistribution {
+  uuid              String          @id @default(uuid())
+  
+  tipPoolUuid       String
+  userUuid          String
+  storeUuid         String
+  
+  // Calculation
+  hoursWorked       Float           // Hours during this period
+  ordersServed      Int             @default(0)
+  tipAmount         Int             // Cents allocated to this staff
+  
+  // Payout
+  payoutStatus      PayoutStatus    @default(PENDING)
+  paidAt            DateTime?
+  paidBy            String?
+  paymentMethod     String?         // "payroll", "cash", "direct_deposit"
+  
+  // Relationships
+  tipPool           TipPool         @relation(fields: [tipPoolUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([tipPoolUuid])
+  @@index([userUuid, storeUuid])
+}
+model Commission {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  userUuid          String
+  
+  // Period
+  periodStart       DateTime
+  periodEnd         DateTime
+  periodType        CommissionPeriodType @default(MONTHLY)
+  
+  // Sales
+  totalSales        Int             // Total sales in cents
+  commissionableAmount Int          // Amount eligible for commission
+  
+  // Commission calculation
+  commissionRate    Float           // Percentage (e.g., 2.5 = 2.5%)
+  commissionAmount  Int             // Calculated commission in cents
+  
+  // Targets & bonuses
+  salesTarget       Int?            // Monthly sales target
+  targetMet         Boolean         @default(false)
+  bonusAmount       Int             @default(0)
+  
+  // Payout
+  payoutStatus      PayoutStatus    @default(PENDING)
+  paidAt            DateTime?
+  paidBy            String?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([userUuid, storeUuid, periodStart, periodType])
+  @@index([storeUuid, periodStart])
+  @@index([userUuid])
+}
+
+// ----------------------
+// |                    |
+// |      PAYROLL       |
+// ----------------------
+
+model PayrollPeriod {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String?         // Null = all stores
+  
+  // Period
+  periodStart       DateTime
+  periodEnd         DateTime
+  periodType        PayrollPeriodType @default(BIWEEKLY)
+  
+  // Status
+  status            PayrollStatus   @default(DRAFT)
+  
+  // Totals
+  totalHours        Float           @default(0)
+  totalRegularHours Float           @default(0)
+  totalOvertimeHours Float          @default(0)
+  totalGrossPay     Int             @default(0) // Cents
+  
+  // Processing
+  calculatedAt      DateTime?
+  calculatedBy      String?
+  approvedAt        DateTime?
+  approvedBy        String?
+  exportedAt        DateTime?
+  exportedBy        String?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store?          @relation(fields: [storeUuid], references: [uuid])
+  records           PayrollRecord[]
+  exports           PayrollExport[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([tenantUuid, periodStart, periodType])
+  @@index([storeUuid, periodStart])
+  @@index([status])
+}
+model PayrollRecord {
+  uuid              String          @id @default(uuid())
+  
+  payrollPeriodUuid String
+  userUuid          String
+  storeUuid         String
+  
+  // Hours
+  regularHours      Float           @default(0)
+  overtimeHours     Float           @default(0)
+  totalHours        Float           @default(0)
+  
+  // Pay rates
+  regularRate       Int             // Cents per hour
+  overtimeRate      Int             // Cents per hour (1.5x)
+  
+  // Pay
+  regularPay        Int             @default(0) // Cents
+  overtimePay       Int             @default(0) // Cents
+  tipIncome         Int             @default(0) // Cents
+  commissionIncome  Int             @default(0) // Cents
+  bonuses           Int             @default(0) // Cents
+  grossPay          Int             @default(0) // Total cents
+  
+  // Deductions (optional, for reference)
+  deductions        Json?           // {taxes, benefits, etc}
+  netPay            Int?            // After deductions
+  
+  // Relationships
+  payrollPeriod     PayrollPeriod   @relation(fields: [payrollPeriodUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([payrollPeriodUuid, userUuid, storeUuid])
+  @@index([payrollPeriodUuid])
+  @@index([userUuid])
+}
+model PayrollExport {
+  uuid              String          @id @default(uuid())
+  
+  payrollPeriodUuid String
+  
+  // Export details
+  format            ExportFormat
+  fileName          String
+  fileUrl           String?
+  fileSize          Int?            // Bytes
+  
+  // Export data
+  recordCount       Int
+  totalAmount       Int             // Total gross pay exported
+  
+  // Processing
+  exportedBy        String
+  exportedAt        DateTime        @default(now())
+  
+  // Metadata
+  metadata          Json?           // Provider-specific data
+  
+  // Relationships
+  payrollPeriod     PayrollPeriod   @relation(fields: [payrollPeriodUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([payrollPeriodUuid])
+  @@index([format])
+}
+
+// ----------------------
+// |                    |
+// |LABOR COST TRACKING |
+// ----------------------
+model LaborCostSnapshot {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  
+  // Snapshot period
+  snapshotDate      DateTime
+  periodType        SnapshotPeriodType @default(HOURLY)
+  
+  // Labor metrics
+  scheduledStaff    Int             @default(0)
+  clockedInStaff    Int             @default(0)
+  totalLaborHours   Float           @default(0)
+  laborCost         Int             @default(0) // Cents
+  
+  // Sales metrics
+  totalSales        Int             @default(0) // Cents
+  orderCount        Int             @default(0)
+  
+  // Calculated metrics
+  laborCostPercent  Float           @default(0) // Labor cost as % of sales
+  salesPerLaborHour Int             @default(0) // Cents
+  
+  // Alerts
+  isOverBudget      Boolean         @default(false)
+  budgetVariance    Float           @default(0) // Difference from target %
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@unique([storeUuid, snapshotDate, periodType])
+  @@index([storeUuid, snapshotDate])
+  @@index([isOverBudget])
+}
+model LaborBudget {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  
+  // Budget settings
+  targetLaborPercent Float          @default(30.0) // Target: 30% of sales
+  maxLaborPercent   Float           @default(35.0) // Alert threshold
+  
+  // Day-specific targets (optional)
+  mondayTarget      Float?
+  tuesdayTarget     Float?
+  wednesdayTarget   Float?
+  thursdayTarget    Float?
+  fridayTarget      Float?
+  saturdayTarget    Float?
+  sundayTarget      Float?
+  
+  // Active period
+  effectiveFrom     DateTime        @default(now())
+  effectiveUntil    DateTime?
+  
+  isActive          Boolean         @default(true)
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, isActive])
+}
+
+// ----------------------
+// |                    |
+// |BREAK ENFORCEMENT   |
+// ----------------------
+
+model BreakPolicy {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String?         // Null = all stores
+  
+  name              String
+  description       String?
+  
+  // Policy rules
+  minShiftHours     Float           // Minimum shift hours to trigger break
+  breakType         BreakType
+  breakDuration     Int             // Minutes
+  isPaid            Boolean
+  
+  // Enforcement
+  isRequired        Boolean         @default(true)
+  reminderMinutes   Int             @default(15) // Remind X min before required
+  allowSkip         Boolean         @default(false)
+  
+  // Grace periods
+  earlyClockInGrace Int             @default(5) // Minutes early OK
+  lateClockInGrace  Int             @default(5) // Minutes late OK
+  
+  // Active
+  isActive          Boolean         @default(true)
+  priority          Int             @default(0) // Higher = more important
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store?          @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([tenantUuid, isActive])
+  @@index([storeUuid, isActive])
+}
+model BreakViolation {
+  uuid              String          @id @default(uuid())
+  
+  timeEntryUuid     String
+  userUuid          String
+  storeUuid         String
+  breakPolicyUuid   String
+  
+  // Violation details
+  violationType     ViolationType
+  expectedBreakAt   DateTime
+  actualBreakAt     DateTime?
+  
+  hoursWorked       Float           // Hours worked before break should have occurred
+  
+  // Status
+  acknowledged      Boolean         @default(false)
+  acknowledgedBy    String?
+  acknowledgedAt    DateTime?
+  
+  waived            Boolean         @default(false)
+  waivedBy          String?
+  waivedReason      String?
+  
+  // Relationships
+  timeEntry         TimeEntry       @relation(fields: [timeEntryUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  breakPolicy       BreakPolicy     @relation(fields: [breakPolicyUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([timeEntryUuid])
+  @@index([userUuid, storeUuid])
+  @@index([violationType, acknowledged])
+}
+
+// ----------------------
+// |                    |
+// |SHIFT MANAGEMENT    |
+// ----------------------
+model Shift {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  userUuid          String
+  
+  // Shift details
+  shiftType         ShiftType       @default(REGULAR)
+  role              StoreRole       // Role for this shift
+  
+  // Schedule
+  scheduledStart    DateTime
+  scheduledEnd      DateTime
+  
+  // Break requirements
+  requiredBreaks    Int             @default(0) // Number of breaks
+  breakDuration     Int             @default(30) // Minutes per break
+  
+  // Status
+  status            ShiftStatus     @default(SCHEDULED)
+  
+  // Actual times (set via TimeEntry)
+  actualStart       DateTime?
+  actualEnd         DateTime?
+  
+  // Approval
+  requiresApproval  Boolean         @default(false)
+  approvedBy        String?
+  approvedAt        DateTime?
+  
+  // Notes
+  notes             String?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  timeEntry         TimeEntry?
+  breakEntries      BreakEntry[]
+  swapRequests      ShiftSwapRequest[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, scheduledStart])
+  @@index([userUuid, scheduledStart])
+  @@index([status, scheduledStart])
+}
+model TimeEntry {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  userUuid          String
+  shiftUuid         String?         // Linked shift (if scheduled)
+  
+  // Clock times
+  clockInAt         DateTime
+  clockOutAt        DateTime?
+  
+  // Device & location (for geofencing)
+  clockInDevice     String
+  clockInLat        Float?
+  clockInLng        Float?
+  clockInDistanceM  Float?          // Distance from store in meters
+  
+  clockOutDevice    String?
+  clockOutLat       Float?
+  clockOutLng       Float?
+  clockOutDistanceM Float?
+  
+  // Calculated duration
+  hoursWorked       Float?          // Decimal hours (e.g., 8.5)
+  breakMinutes      Int?            // Total break time
+  
+  // Approval
+  requiresApproval  Boolean         @default(false)
+  approvalReason    String?         // "Clocked in late", "Missed clock out"
+  approvedBy        String?
+  approvedAt        DateTime?
+  
+  // Pay
+  payRate           Int?            // Cents per hour (snapshot)
+  totalPay          Int?            // Calculated pay in cents
+  
+  // Sync
+  syncedAt          DateTime?
+  syncConflict      Boolean         @default(false)
+  conflictReason    String?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  shift             Shift?          @relation(fields: [shiftUuid], references: [uuid])
+  breakEntries      BreakEntry[]
+  breakViolations   BreakViolation[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@unique([shiftUuid])
+  @@index([storeUuid, clockInAt])
+  @@index([userUuid, clockInAt])
+  @@index([syncConflict])
+}
+model BreakEntry {
+  uuid              String          @id @default(uuid())
+  
+  timeEntryUuid     String
+  shiftUuid         String?
+  
+  breakStart        DateTime
+  breakEnd          DateTime?
+  
+  breakType         BreakType       @default(UNPAID)
+  duration          Int?            // Minutes
+  
+  // Compliance
+  required          Boolean         @default(false)
+  late              Boolean         @default(false) // Started late
+  
+  // Relationships
+  timeEntry         TimeEntry       @relation(fields: [timeEntryUuid], references: [uuid])
+  shift             Shift?          @relation(fields: [shiftUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([timeEntryUuid])
+  @@index([shiftUuid])
+}
+model ShiftSwapRequest {
+  uuid              String          @id @default(uuid())
+  
+  shiftUuid         String
+  requestedBy       String          // User UUID who wants to swap
+  requestedWith     String?         // User UUID to swap with (if specific)
+  
+  reason            String
+  status            SwapStatus      @default(PENDING)
+  
+  // Approval
+  managerApproved   Boolean         @default(false)
+  managerUuid       String?
+  managerNotes      String?
+  
+  respondedAt       DateTime?
+  
+  // Relationships
+  shift             Shift           @relation(fields: [shiftUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([shiftUuid, status])
+  @@index([requestedBy])
+}
+
+// ----------------------
+// |                    |
+// |CASH DRAWER MANAGEMENT |
+// ----------------------
+model CashDrawer {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  userUuid          String          // Cashier assigned
+  
+  drawerNumber      String?         // Physical drawer identifier
+  
+  // Status
+  status            DrawerStatus    @default(CLOSED)
+  
+  // Open details
+  openedAt          DateTime?
+  openedBy          String?
+  startingCash      Int             // Cents
+  
+  // Close details
+  closedAt          DateTime?
+  closedBy          String?
+  expectedCash      Int?            // Calculated from transactions
+  actualCash        Int?            // Counted by cashier
+  variance          Int?            // Actual - Expected
+  varianceApproved  Boolean         @default(false)
+  varianceApprovedBy String?
+  
+  // Performance
+  totalSales        Int?            // Total sales during drawer session
+  cashSales         Int?            // Cash-only sales
+  refunds           Int?            // Refunds given
+  
+  // Notes
+  notes             String?
+  
+  // Sync
+  syncedAt          DateTime?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  cashDrops         CashDrop[]
+  cashCounts        CashCount[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, status])
+  @@index([userUuid, status])
+  @@index([openedAt])
+}
+model CashDrop {
+  uuid              String          @id @default(uuid())
+  
+  cashDrawerUuid    String
+  storeUuid         String
+  
+  // Drop details
+  amount            Int             // Cents dropped to safe
+  droppedBy         String          // User UUID
+  droppedAt         DateTime        @default(now())
+  
+  // Reason
+  reason            String          @default("Excess cash removal")
+  
+  // Verification
+  verifiedBy        String?         // Manager UUID
+  verifiedAt        DateTime?
+  
+  // Receipt
+  receiptNumber     String?
+  
+  // Relationships
+  cashDrawer        CashDrawer      @relation(fields: [cashDrawerUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([cashDrawerUuid])
+  @@index([storeUuid, droppedAt])
+}
+model CashCount {
+  uuid              String          @id @default(uuid())
+  
+  cashDrawerUuid    String
+  
+  // Count details
+  countType         CountType       @default(CLOSE)
+  countedBy         String          // User UUID
+  countedAt         DateTime        @default(now())
+  
+  // Denominations (in cents)
+  pennies           Int             @default(0)
+  nickels           Int             @default(0)
+  dimes             Int             @default(0)
+  quarters          Int             @default(0)
+  ones              Int             @default(0)
+  fives             Int             @default(0)
+  tens              Int             @default(0)
+  twenties          Int             @default(0)
+  fifties           Int             @default(0)
+  hundreds          Int             @default(0)
+  
+  // Totals
+  totalCoins        Int             // Sum of coin denominations
+  totalBills        Int             // Sum of bill denominations
+  totalCash         Int             // Total counted
+  
+  // Verification
+  verifiedBy        String?
+  verifiedAt        DateTime?
+  
+  // Relationships
+  cashDrawer        CashDrawer      @relation(fields: [cashDrawerUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([cashDrawerUuid])
+}
+
+// PERFORMANCE & METRICS
+model StaffPerformance {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  userUuid          String
+  
+  // Period
+  periodStart       DateTime
+  periodEnd         DateTime
+  periodType        PeriodType      @default(DAILY)
+  
+  // Sales metrics
+  ordersCount       Int             @default(0)
+  ordersCancelled   Int             @default(0)
+  totalRevenue      Int             @default(0)
+  avgOrderValue     Int             @default(0)
+  upsellsCount      Int             @default(0)
+  
+  // Time metrics
+  hoursWorked       Float           @default(0)
+  lateArrivals      Int             @default(0)
+  missedShifts      Int             @default(0)
+  
+  // Quality metrics
+  refundsGiven      Int             @default(0)
+  voidsCreated      Int             @default(0)
+  complaints        Int             @default(0)
+  
+  // Cash metrics (for cashiers)
+  cashVariance      Int?            // Total variance for period
+  cashShortages     Int             @default(0)
+  cashOverages      Int             @default(0)
+  
+  // Tips (if tracked)
+  tipsReceived      Int?            // Cents
+  
+  // Calculated scores
+  performanceScore  Float?          // 0-100
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  user              User            @relation(fields: [userUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  
+  @@unique([userUuid, storeUuid, periodStart, periodType])
+  @@index([storeUuid, periodStart])
+  @@index([userUuid, periodStart])
+}
+
+// ----------------------
+// |                    |
+// |   COMMUNICATION    |
+// ----------------------
+model ShiftAnnouncement {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String?         // Null = all stores
+  
+  title             String
+  message           String
+  priority          Priority        @default(NORMAL)
+  
+  // Targeting
+  targetRoles       StoreRole[]     @default([])
+  targetUsers       String[]        @default([]) // User UUIDs
+  
+  // Visibility
+  activeFrom        DateTime        @default(now())
+  activeUntil       DateTime?
+  
+  // Read tracking
+  readBy            String[]        @default([]) // User UUIDs who read
+  
+  // Author
+  createdBy         String
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store?          @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, activeFrom])
+  @@index([priority, activeFrom])
+}
+model StaffTask {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  assignedTo        String          // User UUID
+  
+  title             String
+  description       String?
+  priority          Priority        @default(NORMAL)
+  
+  // Due date
+  dueAt             DateTime?
+  
+  // Status
+  status            TaskStatus      @default(PENDING)
+  completedAt       DateTime?
+  completedBy       String?
+  
+  // Assignment
+  assignedBy        String
+  assignedAt        DateTime        @default(now())
+  
+  // Verification
+  requiresVerification Boolean      @default(false)
+  verifiedBy        String?
+  verifiedAt        DateTime?
+  
+  // Notes
+  notes             String?
+  completionNotes   String?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  user              User            @relation(fields: [assignedTo], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, status])
+  @@index([assignedTo, status])
+  @@index([dueAt])
+}
+
+// ----------------------
+// |                    |
+// | TIPS & COMMISSION  |
+// ----------------------
+model TipDistribution {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  
+  // Period
+  periodStart       DateTime
+  periodEnd         DateTime
+  
+  // Pool details
+  poolType          PoolType        @default(EQUAL_SPLIT)
+  totalTips         Int             // Total cents in pool
+  
+  // Distribution
+  distributions     Json            // {userUuid: {amount: 1000, hours: 8.5}}
+  
+  // Status
+  status            DistributionStatus @default(PENDING)
+  distributedBy     String?
+  distributedAt     DateTime?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, periodStart])
+  @@index([status])
+}
+
+// ----------------------
+// |                    |
+// |     APPROVALS      |
+// ----------------------
+model StaffApprovalRequest {
+  uuid              String          @id @default(uuid())
+  
+  tenantUuid        String
+  storeUuid         String
+  requestedBy       String          // User UUID
+  
+  approvalType      ApprovalType
+  requestData       Json            // Context for approval
+  
+  // Status
+  status            ApprovalStatus  @default(PENDING)
+  
+  // Resolution
+  approvedBy        String?
+  approvalNotes     String?
+  respondedAt       DateTime?
+  
+  // Relationships
+  tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
+  store             Store           @relation(fields: [storeUuid], references: [uuid])
+  requester         User            @relation(fields: [requestedBy], references: [uuid])
+  approver          User?           @relation("ApprovedBy", fields: [approvedBy], references: [uuid])
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([storeUuid, status])
+  @@index([requestedBy, status])
+  @@index([approvedBy, status])
 }
 
 // ----------------------
@@ -4602,6 +5975,14 @@ model Order {
   tableNumber       String?         
   deliveryAddress   Json?           
 
+  takenBy           String?         // Staff who took the order
+  preparedBy        String[]        @default([]) // Staff who prepared (multiple for team)
+  servedBy          String?  
+
+  tipAmount         Int?            // Tip in cents
+  tipMethod         TipMethod?
+  commissionableAmount Int?
+
   currency          String          @default("USD")
   subtotal          Int             
   taxAmount         Int             @default(0)
@@ -4634,9 +6015,6 @@ model Order {
   customerNotes      String?
   kitchenNotes       String?
   internalNotes      String?
-
-  preparedBy         String?         
-  servedBy           String?         
   
   cancelledAt        DateTime?
   cancelledBy        String?         
@@ -4646,8 +6024,10 @@ model Order {
   store              Store           @relation(fields: [storeUuid], references: [uuid])
   tenantUser         TenantUser      @relation(fields: [tenantUserUuid], references: [uuid])
   menuSnapshot       MenuSnapshot?   @relation(fields: [menuSnapshotUuid], references: [uuid])
-  
-  payments Payment[]
+  takenByUser         User?          @relation("OrdersTaken", fields: [takenBy], references: [uuid])
+  servedByUser        User?          @relation("OrdersServed", fields: [servedBy], references: [uuid])
+
+  payments           Payment[]
   items              OrderItem[]
   payment            Payment?
   refunds            Refund[]
@@ -6065,39 +7445,39 @@ model DLQRetry {
 // ----------------------
 model Webhook {
   uuid              String          @id @default(uuid())
-  
-  // Multi-tenant context
   tenantUuid        String
-  storeUuid         String?         // Null = tenant-level webhook
+  storeUuid         String?      
   
   // Webhook configuration
-  name              String          // Human-readable name
+  name              String          
   description       String?
-  url               String          // Target endpoint
+  url               String          
+  secret            String 
   
-  // Events to subscribe to
-  eventTypes        WebhookEventType[]  // Array of event types
-  eventFilters      Json?           // Advanced filtering rules
+  eventTypes        WebhookEventType[]  
+  eventFilters      Json?         
   
   // Security
-  secretHash        String          // Hashed secret for HMAC
+  secretHash        String        
   algorithm         SignatureAlgorithm @default(SHA256)
-  version           Int             @default(1)  // For secret rotation
+  version           Int             @default(1)
   
   // HTTP configuration
   httpMethod        String          @default("POST")
-  headers           Json?           // Custom headers (sanitized)
-  timeout           Int             @default(30000)  // Milliseconds
+  headers           Json?           
+  timeout           Int             @default(30000) 
   
   // Retry policy
   maxRetries        Int             @default(3)
   retryBackoff      RetryStrategy   @default(EXPONENTIAL)
   retryDelayMs      Int             @default(1000)
   maxRetryDelayMs   Int             @default(60000)
+  retryDelay        Int      @default(60)
   
   // Status & health
   status            WebhookStatus   @default(ACTIVE)
   isActive          Boolean         @default(true)
+  ipWhitelist       String[]        @default([])
   
   // Health monitoring
   successCount      Int             @default(0)
@@ -6146,8 +7526,6 @@ model Webhook {
 }
 model WebhookDelivery {
   uuid              String          @id @default(uuid())
-  
-  // Context
   tenantUuid        String
   storeUuid         String?
   webhookUuid       String
@@ -6172,12 +7550,14 @@ model WebhookDelivery {
   
   // Status tracking
   status            DeliveryStatus  @default(PENDING)
+  error             String?
   
   // Retry management
   attempts          Int             @default(0)
   maxRetries        Int             @default(3)
   nextRetryAt       DateTime?
   lastAttemptAt     DateTime?
+  retriedAt         DateTime?
   
   // Response tracking
   responseStatus    Int?            // HTTP status code
@@ -6196,6 +7576,8 @@ model WebhookDelivery {
   completedAt       DateTime?
   failedAt          DateTime?
   expiredAt         DateTime?       // Max age for delivery attempts
+  attemptNumber     Int      @default(1)
+  duration          Int?     // milliseconds
   
   // Relationships
   tenant            Tenant          @relation(fields: [tenantUuid], references: [uuid])
@@ -6206,7 +7588,11 @@ model WebhookDelivery {
   
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
-  
+
+  requestUrl      String
+  requestHeaders  Json
+  requestBody     Json
+
   @@unique([webhookUuid, eventUuid])  // Prevent duplicate deliveries
   @@index([tenantUuid, status, nextRetryAt])
   @@index([webhookUuid, status])
@@ -6310,7 +7696,7 @@ model WebhookDeadLetter {
   uuid          String          @id @default(uuid())
 
   provider      String
-  eventId       String
+  eventUuid       String
   eventType     String
   
   payload       Json
@@ -6391,6 +7777,26 @@ model WebhookReplay {
   
   @@index([provider, status])
   @@index([createdAt])
+}
+model WebhookOutbox {
+  uuid          String   @id @default(uuid())
+  
+  tenantUuid    String
+  storeUuid     String?
+  
+  eventType     String
+  payload       Json
+  
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  lastError     String?
+  nextRetryAt   DateTime?
+  
+  createdAt     DateTime @default(now())
+  sentAt        DateTime?
+  
+  @@index([status, nextRetryAt])
+  @@index([tenantUuid, status])
 }
 // ----------------------
 // |                    |

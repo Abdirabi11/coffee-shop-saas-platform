@@ -1,113 +1,155 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { WebhookDeadLetterQueue } from "../../services/webhooks/webhookDeadLetterQueue.service.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 export class WebhookRetryJob{
-    static async run(){
-        const startTime = Date.now();
-        logWithContext("info", "[WebhookRetry] Starting retry job");
+    //Retry failed webhook deliveries
+    static async run() {
+    const startTime = Date.now();
 
-        console.log("[WebhookRetry] Starting...");
+    logWithContext("info", "[WebhookRetry] Starting retry job");
 
         try {
-            // Get failed webhooks that are retryable
-            const failedWebhooks = await prisma.webhookDeadLetter.findMany({
+            // Get failed deliveries ready for retry
+            const deliveries = await prisma.webhookDelivery.findMany({
                 where: {
-                    status: "FAILED",
-                    attemptCount: { lt: 5 },
+                    status: "PENDING",
+                    nextRetryAt: { lte: new Date() },
                 },
-                orderBy: { createdAt: "asc" },
-                take: 20,
+                include: {
+                    webhook: true,
+                },
+                orderBy: { nextRetryAt: "asc" },
+                take: 50,
             });
 
-            if (failedWebhooks.length === 0) {
-                logWithContext("info", "[WebhookRetry] No failed webhooks to retry");
-                return;
-            }
-        
+            if (deliveries.length === 0) {
+                logWithContext("debug", "[WebhookRetry] No deliveries to retry");
+                return { retried: 0, failed: 0 };
+            };
+
             let retried = 0;
             let failed = 0;
             let abandoned = 0;
-    
-            for (const webhook of failedWebhooks) {
+
+            for (const delivery of deliveries) {
                 try {
-                    // Calculate exponential backoff
-                    const backoffMinutes = Math.pow(2, webhook.attemptCount)
-                    const nextRetryTime = new Date(webhook.updatedAt.getTime() + backoffMinutes * 60 * 1000);
-                    // Skip if not ready for retry yet
-                    if (new Date() < nextRetryTime) {
-                        continue;
-                    };
-
-                    logWithContext("info", "[WebhookRetry] Retrying webhook", {
-                        webhookUuid: webhook.uuid,
-                        eventId: webhook.eventId,
-                        attemptCount: webhook.attemptCount + 1,
-                    });
-                    
-                    await WebhookDeadLetterQueue.retry(webhook.uuid);
-                    retried++;
-
-                    //double
-                    MetricsService.increment("webhook.retry.success", 1, {
-                        provider: webhook.provider,
-                    });
-                } catch (error: any) {
-                    failed++;
-                    logWithContext("error", "[WebhookRetry] Retry failed", {
-                        webhookUuid: webhook.uuid,
-                        error: error.message,
-                    });
-
-                    MetricsService.increment("webhook.retry.failed", 1, {
-                        provider: webhook.provider,
-                    });
-                    
-                    // If max retries reached, mark as ABANDONED
-                    if (webhook.attemptCount >= 4) {
-                        await prisma.webhookDeadLetter.update({
-                            where: { uuid: webhook.uuid },
-                            data: { status: "ABANDONED" },
+                    // Check if max retries exceeded
+                    if (delivery.attemptNumber >= delivery.webhook.maxRetries) {
+                        await prisma.webhookDelivery.update({
+                            where: { uuid: delivery.uuid },
+                            data: { status: "FAILED" },
                         });
 
                         abandoned++;
 
-                        const tenantUuid = await this.extractTenantUuid(webhook.payload);
-            
-                        // Create critical alert
-                        await prisma.adminAlert.create({
+                        logWithContext("warn", "[WebhookRetry] Max retries exceeded", {
+                            deliveryUuid: delivery.uuid,
+                            attempts: delivery.attemptNumber,
+                        });
+
+                        continue;
+                    };
+
+                    // Update attempt number
+                    await prisma.webhookDelivery.update({
+                        where: { uuid: delivery.uuid },
+                        data: {
+                            status: "SENDING",
+                            attemptNumber: { increment: 1 },
+                            retriedAt: new Date(),
+                        },
+                    });
+
+                    // Retry the delivery
+                    const response = await fetch(delivery.requestUrl, {
+                        method: "POST",
+                        headers: delivery.requestHeaders as any,
+                        body: JSON.stringify(delivery.requestBody),
+                        signal: AbortSignal.timeout(30000),
+                    });
+
+                    const duration = Date.now() - startTime;
+                    const responseBody = await response.text().catch(() => null);
+
+                    if (response.ok) {
+                        // Success
+                        await prisma.webhookDelivery.update({
+                        where: { uuid: delivery.uuid },
+                        data: {
+                            status: "SUCCESS",
+                            responseStatus: response.status,
+                            responseBody: responseBody?.substring(0, 10000),
+                            duration,
+                            completedAt: new Date(),
+                        },
+                        });
+
+                        retried++;
+
+                        logWithContext("info", "[WebhookRetry] Retry successful", {
+                            deliveryUuid: delivery.uuid,
+                            attempt: delivery.attemptNumber + 1,
+                        });
+
+                        MetricsService.increment("webhook.retry.success", 1, {
+                            eventType: delivery.eventType,
+                        });
+
+                    } else {
+                        // Still failing, schedule next retry
+                        const nextRetryAt = this.calculateNextRetry(
+                            delivery.attemptNumber + 1,
+                            delivery.webhook.retryDelay
+                        );
+
+                        await prisma.webhookDelivery.update({
+                            where: { uuid: delivery.uuid },
                             data: {
-                                tenantUuid: tenantUuid || "SYSTEM",
-                                alertType: "WEBHOOK_ABANDONED",
-                                category: "SYSTEM",
-                                level: "CRITICAL",
-                                priority: "HIGH",
-                                title: "Webhook Failed After Max Retries",
-                                message: `Webhook ${webhook.eventId} abandoned after 5 attempts - REQUIRES MANUAL INTERVENTION`,
-                                context: {
-                                    webhookUuid: webhook.uuid,
-                                    provider: webhook.provider,
-                                    eventType: webhook.eventType,
-                                    eventId: webhook.eventId,
-                                    error: webhook.errorMessage,
-                                    attemptCount: webhook.attemptCount,
-                                    payload: webhook.payload,
-                                },
+                                status: "PENDING",
+                                responseStatus: response.status,
+                                responseBody: responseBody?.substring(0, 10000),
+                                error: `HTTP ${response.status}`,
+                                nextRetryAt,
                             },
                         });
 
-                        logWithContext("error", "[WebhookRetry] Webhook ABANDONED - manual intervention required", {
-                            webhookUuid: webhook.uuid,
-                            eventId: webhook.eventId,
+                        failed++;
+
+                        MetricsService.increment("webhook.retry.failed", 1, {
+                            eventType: delivery.eventType,
                         });
-                    }
+                    };
+
+                } catch (error: any) {
+                    // Error during retry
+                    const nextRetryAt = this.calculateNextRetry(
+                        delivery.attemptNumber + 1,
+                        delivery.webhook.retryDelay
+                    );
+
+                    await prisma.webhookDelivery.update({
+                        where: { uuid: delivery.uuid },
+                        data: {
+                        status: "PENDING",
+                        error: error.message,
+                        nextRetryAt,
+                        },
+                    });
+
+                    failed++;
+
+                    logWithContext("error", "[WebhookRetry] Retry error", {
+                        deliveryUuid: delivery.uuid,
+                        error: error.message,
+                    });
                 }
             }
 
             const duration = Date.now() - startTime;
 
             logWithContext("info", "[WebhookRetry] Job completed", {
-                total: failedWebhooks.length,
+                total: deliveries.length,
                 retried,
                 failed,
                 abandoned,
@@ -115,33 +157,26 @@ export class WebhookRetryJob{
             });
 
             MetricsService.timing("webhook.retry.job.duration", duration);
-            MetricsService.gauge("webhook.retry.queue_size", failedWebhooks.length);
+
+            return { retried, failed, abandoned };
 
         } catch (error: any) {
             logWithContext("error", "[WebhookRetry] Job failed", {
                 error: error.message,
-                stack: error.stack,
             });
-        
-            MetricsService.increment("webhook.retry.job.error", 1);
-            throw error;
-        };
-    }
 
-    //Extract tenant UUID from webhook payload
-    private static async extractTenantUuid(payload: any): Promise<string | null> {
-        try {
-            const orderUuid = payload.data?.object?.metadata?.orderUuid;
-            if (!orderUuid) return null;
-      
-            const order = await prisma.order.findUnique({
-                where: { uuid: orderUuid },
-                select: { tenantUuid: true },
-            });
-      
-            return order?.tenantUuid || null;  
-        } catch (error: any) {
-            return null;
+            MetricsService.increment("webhook.retry.job.error", 1);
+
+            throw error;
         }
     }
-};
+
+    private static calculateNextRetry(attemptNumber: number, baseDelaySeconds: number): Date {
+        const delaySeconds = Math.min(
+            Math.pow(2, attemptNumber - 1) * baseDelaySeconds,
+            3600 // Max 1 hour
+        );
+
+        return new Date(Date.now() + delaySeconds * 1000);
+    }
+}

@@ -5,9 +5,9 @@ import { AuthService } from "../../services/auth/Auth.service.ts";
 import { SessionService } from "../../services/auth/Session.service.ts";
 import { TokenService } from "../../services/auth/Token.service.ts";
 import { DeviceTrustService } from "../../services/security/deviceTrust.service.ts";
-import { requestLoginOtpSchema, verifyLoginOtpSchema } from "../../validators/auth.validator.ts";
-import { verifySignupSchema } from "../../validators/auth.validator.ts";
-import { requestSignupOtpSchema } from "../../validators/auth.validator.ts";
+import { requestLoginOtpSchema, verifyLoginOtpSchema } from "../../validators/auth.validator.js";
+import { verifySignupSchema } from "../../validators/auth.validator.js";
+import { requestSignupOtpSchema } from "../../validators/auth.validator.js";
 import { FraudService } from "../../services/security/Fraud.service.js";
 
 

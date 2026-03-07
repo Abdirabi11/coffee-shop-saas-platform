@@ -2,7 +2,7 @@ import type { Request, Response } from "express"
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import { MenuCacheService } from "../../services/cache/menuCache.service.ts";
 import { InventoryService } from "../../services/inventory/inventory.service.ts";
-import { MenuAnalyticsService } from "../../services/menu/menu-analytics.service.ts";
+import { MenuAnalyticsService } from "../../services/menu/menuAnalytics.service.js";
 import { MenuFilterService } from "../../services/menu/menu-filter.service.ts";
 import { MenuPrewarmService } from "../../services/menu/menu-prewarm.service.ts";
 import { MenuPersonalizationService } from "../../services/menu/menu.service.ts";
