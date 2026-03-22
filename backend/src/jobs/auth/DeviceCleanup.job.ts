@@ -1,6 +1,6 @@
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
-import { DeviceTrustService } from "../../services/security/deviceTrust.service.ts";
+import { DeviceTrustService } from "../../services/security/DeviceTrust.service.js";
 
 export class DeviceCleanupJob {
     /**

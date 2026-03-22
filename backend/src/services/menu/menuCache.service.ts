@@ -1,80 +1,160 @@
 import { bumpCacheVersion, getCacheVersion } from "../../cache/cacheVersion.ts";
-import { redis } from "../../lib/redis.ts";
-import { MenuEventService } from "./menu-events.ts";
-import { MenuPrewarmService } from "./menu-prewarm.service.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MenuEventService } from "../../events/menu.events.js";
 import { MenuService } from "./menu.service.ts";
+import { MenuSnapshotService } from "./menuSnapshot.service.ts";
 
 
 export class MenuCacheService {
     
-    //Get cached menu or fetch fresh
-    static async getMenu(input: {
-        tenantUuid: string;
-        storeUuid: string;
-        checkAvailability?: boolean;
-    }) {
-        const cacheKey = `menu:${input.storeUuid}`;
-        const version = await getCacheVersion(cacheKey);
-        
-        try {
-            // Try cache first
-            const cached = await redis.get(`${cacheKey}:v${version}`);
-            if (cached) {
-                return JSON.parse(cached);
-            }
-
-            // Cache miss - fetch fresh
-            const menu = await MenuService.getStoreMenu(input.storeUuid);
-            
-            // Cache for 5 minutes
-            await redis.setex(
-                `${cacheKey}:v${version}`,
-                300,
-                JSON.stringify(menu)
-            );
-
-            return menu;
-
-        } catch (error) {
-            console.error("[MenuCache] Get failed:", error);
-            // Fallback to direct fetch
-            return MenuService.getStoreMenu(input.storeUuid);
-        }
-    }
-
-    //Invalidate menu cache
     static async invalidate(input: {
         tenantUuid: string;
         storeUuid: string;
         reason?: string;
         triggeredBy?: string;
     }) {
-        const cacheKey = `menu:${input.storeUuid}`;
-        
         try {
-            // Bump version
-            await bumpCacheVersion(cacheKey);
+            const startTime = Date.now();
 
-            // Emit event
-            await MenuEventService.emit("MENU_INVALIDATED", {
+            // 1. Bump cache version
+            await bumpCacheVersion(`menu:${input.storeUuid}`);
+
+            logWithContext("info", "[MenuCache] Cache invalidated", {
                 storeUuid: input.storeUuid,
                 reason: input.reason,
                 triggeredBy: input.triggeredBy,
             });
 
-            // Prewarm
-            await MenuPrewarmService.prewarmStoreMenu(input.storeUuid);
+            // 2. Emit event
+            await MenuEventService.emit("MENU_INVALIDATED", {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                reason: input.reason,
+                triggeredBy: input.triggeredBy,
+            });
+
+            // 3. Prewarm cache immediately (async)
+            this.prewarmCache({
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+            }).catch((error) => {
+                logWithContext("error", "[MenuCache] Prewarm failed", {
+                    error: error.message,
+                });
+            });
+
+            // 4. Create snapshot (async)
+            MenuSnapshotService.createSnapshot({
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                reason: (input.reason as any) || "MANUAL",
+                triggeredBy: input.triggeredBy,
+            }).catch((error) => {
+                logWithContext("error", "[MenuCache] Snapshot failed", {
+                    error: error.message,
+                });
+            });
+
+            const duration = Date.now() - startTime;
+            MetricsService.histogram("menu.cache.invalidate.duration", duration);
 
             return { success: true };
 
-        } catch (error) {
-            console.error("[MenuCache] Invalidate failed:", error);
+        } catch (error: any) {
+            logWithContext("error", "[MenuCache] Invalidate failed", {
+                storeUuid: input.storeUuid,
+                error: error.message,
+            });
+
+            MetricsService.increment("menu.cache.invalidate.error");
+
             throw error;
         }
     }
 
-    //Warm cache for store
-    static async warm(storeUuid: string) {
-        return MenuPrewarmService.prewarmStoreMenu(storeUuid);
+    static async prewarmCache(input: {
+        tenantUuid: string;
+        storeUuid: string;
+    }) {
+        try {
+            logWithContext("info", "[MenuCache] Prewarming cache", {
+                storeUuid: input.storeUuid,
+            });
+
+            // Fetch menu (this will populate cache)
+            await MenuService.getStoreMenu({
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                includeUnavailable: false,
+            });
+
+            // Also warm "all" version
+            await MenuService.getStoreMenu({
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                includeUnavailable: true,
+            });
+
+            await MenuEventService.emit("MENU_PREWARMED", {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+            });
+
+            logWithContext("info", "[MenuCache] Cache prewarmed", {
+                storeUuid: input.storeUuid,
+            });
+
+            MetricsService.increment("menu.cache.prewarm.success");
+
+        } catch (error: any) {
+            logWithContext("error", "[MenuCache] Prewarm failed", {
+                storeUuid: input.storeUuid,
+                error: error.message,
+            });
+
+            MetricsService.increment("menu.cache.prewarm.error");
+
+            throw error;
+        }
+    }
+
+    //Get cache statistics
+    static async getStats(storeUuid: string) {
+        try {
+            const metadata = await prisma.menuCacheMetadata.findUnique({
+                where: { storeUuid },
+            });
+
+            if (!metadata) {
+                return {
+                    storeUuid,
+                    currentVersion: 1,
+                    cacheHits: 0,
+                    cacheMisses: 0,
+                    hitRate: 0,
+                };
+            };
+
+            const total = metadata.cacheHits + metadata.cacheMisses;
+            const hitRate = total > 0 ? (metadata.cacheHits / total) * 100 : 0;
+
+            return {
+                storeUuid,
+                currentVersion: metadata.currentVersion,
+                cacheHits: metadata.cacheHits,
+                cacheMisses: metadata.cacheMisses,
+                hitRate: hitRate.toFixed(2),
+                avgLoadTime: metadata.avgLoadTime,
+                lastInvalidated: metadata.lastInvalidated,
+                lastWarmed: metadata.lastWarmed,
+            };
+        } catch (error: any) {
+            logWithContext("error", "[MenuCache] Get stats failed", {
+                error: error.message,
+            });
+
+            throw error;
+        }
     }
 }

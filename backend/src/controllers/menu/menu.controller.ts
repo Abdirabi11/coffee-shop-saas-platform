@@ -1,94 +1,45 @@
 import type { Request, Response } from "express"
-import { getCacheVersion } from "../../cache/cacheVersion.ts";
-import { MenuCacheService } from "../../services/cache/menuCache.service.ts";
-import { InventoryService } from "../../services/inventory/inventory.service.ts";
-import { MenuAnalyticsService } from "../../services/menu/menuAnalytics.service.js";
-import { MenuFilterService } from "../../services/menu/menu-filter.service.ts";
-import { MenuPrewarmService } from "../../services/menu/menu-prewarm.service.ts";
-import { MenuPersonalizationService } from "../../services/menu/menu.service.ts";
-import { MenuPolicyService } from "../../services/menu/menu.service.ts";
+import { MenuAnalyticsService } from "../../services/menu/menuAnalytics.service.ts";
 import { MenuService } from "../../services/menu/menu.service.ts";
-import { ProductService } from "../../services/products/product.service.ts";
-import { ProductOptionService } from "../../services/products/productOption.service.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { FavoriteService } from "../../services/menu/favorite.service.ts";
 
-export const getStoreMenu= async(req: Request, res: Response)=>{
-    try {
-        const {storeUuid}= req.params;
-        if(!storeUuid){
-            return res.status(400).json({ message: "storeUuid is required" });
-        };
 
-        const baseMenu = await MenuService.getStoreMenu(storeUuid);
-        const personalized = MenuPersonalizationService.apply(
-            baseMenu,
-            req.user
-        );
-        const filtered = MenuFilterService.apply(personalized, req.query);
-
-        res.json(filtered);
-    } catch (err) {
-        console.error("[MENU_FETCH_FAILED]", err);
-        res.status(500).json({ message: "Failed to load menu" });
-    }
-};
-
-export const prewarmMenu = async (req: Request, res: Response) => {
-    const { storeUuid } = req.params;
+export class MenuController {
   
-    await MenuPrewarmService.prewarmStoreMenu(storeUuid);
-  
-    res.json({ message: "Menu pre-warmed successfully" });
-};
-
-export const getPublicMenu = async (req: Request, res: Response) => {
-    const { storeUuid } = req.params;
-  
-    const currentVersion = await getCacheVersion(`menu:${storeUuid}`);
-    const clientVersion = req.headers["if-none-match"];
-  
-    if (clientVersion === currentVersion) {
-      return res.status(304).end();
-    };
-
-    const baseMenu = await MenuService.getStoreMenu(storeUuid);
-    const finalMenu = MenuPolicyService.apply(baseMenu, req.user);
-
-    MenuAnalyticsService.trackMenuView(storeUuid).catch(console.error);
-
-    res.setHeader("ETag", currentVersion);
-    res.setHeader("Cache-Control", "public, max-age=60");
-  
-    res.json(finalMenu);
-};
-
- export class  MenuController {
-
-    //GET /api/public/menu/:storeUuid
-    //Get menu for mobile app (NO authentication required)
+    //GET /api/menu/:storeUuid
     static async getMenu(req: Request, res: Response) {
         try {
             const { storeUuid } = req.params;
-            const tenantUuid = req.headers["x-tenant-id"] as string;
+            const tenantUuid = req.tenantUuid!;
+            const userUuid = req.user?.uuid;
 
-            if (!tenantUuid) {
-                return res.status(400).json({
-                    error: "TENANT_REQUIRED",
-                    message: "x-tenant-id header is required",
-                });
-            };
-
-            // Get menu from cache
-            const menu = await MenuCacheService.getMenu({
+            const menu = await MenuService.getStoreMenu({
                 tenantUuid,
                 storeUuid,
-                checkAvailability: true, // Check current availability
+                includeUnavailable: false,
+                userUuid,
             });
+
+            // Track analytics (async, don't block)
+            MenuAnalyticsService.trackMenuView({
+                tenantUuid,
+                storeUuid,
+                userUuid,
+                sessionId: req.sessionID,
+                deviceType: req.headers["user-agent"]?.includes("Mobile") ? "IOS" : "WEB",
+            }).catch(() => {});
 
             return res.status(200).json({
                 success: true,
                 menu,
             });
+
         } catch (error: any) {
+            logWithContext("error", "[MenuController] Get menu failed", {
+                error: error.message,
+            });
+
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: "Failed to retrieve menu",
@@ -96,45 +47,56 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         }
     }
 
-    //GET /api/public/products/:productUuid
-    //Get single product details for mobile app
+    //GET /api/menu/products/:productUuid
     static async getProduct(req: Request, res: Response) {
         try {
             const { productUuid } = req.params;
-            const tenantUuid = req.headers["x-tenant-id"] as string;
-            const storeUuid = req.headers["x-store-id"] as string;
+            const { storeUuid } = req.query;
+            const tenantUuid = req.tenantUuid!;
+            const userUuid = req.user?.uuid;
 
-            const product = await ProductService.getByUuid({
-                tenantUuid,
-                storeUuid,
-                productUuid,
-                checkAvailability: true,
-            });
-
-            if (!product) {
-                return res.status(404).json({
-                  error: "PRODUCT_NOT_FOUND",
-                  message: "Product not found",
+            if (!storeUuid) {
+                return res.status(400).json({
+                    error: "VALIDATION_ERROR",
+                    message: "storeUuid query parameter is required",
                 });
-            };
-        
-            // Check stock availability
-            const hasStock = await InventoryService.checkStock({
+            }
+
+            const product = await MenuService.getProduct({
                 tenantUuid,
-                storeUuid,
+                storeUuid: storeUuid as string,
                 productUuid,
-                requestedQuantity: 1,
+                userUuid,
             });
-        
+
+            // Track analytics (async)
+            MenuAnalyticsService.trackProductView({
+                tenantUuid,
+                storeUuid: storeUuid as string,
+                productUuid: product.uuid,
+                productName: product.name,
+                productPrice: product.basePrice,
+                userUuid,
+                sessionId: req.sessionID,
+            }).catch(() => {});
+
             return res.status(200).json({
                 success: true,
-                product: {
-                  ...product,
-                  inStock: hasStock,
-                },
+                product,
             });
-        
+
         } catch (error: any) {
+            if (error.message === "PRODUCT_NOT_FOUND") {
+                return res.status(404).json({
+                    error: "PRODUCT_NOT_FOUND",
+                    message: "Product not found",
+                });
+            }
+
+            logWithContext("error", "[MenuController] Get product failed", {
+                error: error.message,
+            });
+
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: "Failed to retrieve product",
@@ -142,86 +104,151 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         }
     }
 
-    //POST /api/public/products/validate
-    //Validate product + options before adding to cart
+    //POST /api/menu/validate
     static async validateOrder(req: Request, res: Response) {
         try {
-            const { productUuid, quantity, selectedOptions } = req.body;
-            const tenantUuid = req.headers["x-tenant-id"] as string;
-            const storeUuid = req.headers["x-store-id"] as string;
+            const { productUuid, quantity, selectedOptions, storeUuid } = req.body;
+            const tenantUuid = req.tenantUuid!;
 
-            // 1. Check product exists and is available
-            const product = await ProductService.getByUuid({
+            const validation = await MenuService.validateOrder({
                 tenantUuid,
                 storeUuid,
                 productUuid,
-                checkAvailability: true,
-            });
-
-            if (!product || !product.isActive || !product.isAvailable) {
-                return res.status(400).json({
-                    error: "PRODUCT_NOT_AVAILABLE",
-                    message: "Product is not available",
-                });
-            };
-
-            // 2. Check stock
-            const hasStock = await InventoryService.checkStock({
-                tenantUuid,
-                storeUuid,
-                productUuid,
-                requestedQuantity: quantity,
-            });
-
-            if (!hasStock) {
-                return res.status(400).json({
-                    error: "OUT_OF_STOCK",
-                    message: "Product is out of stock",
-                });
-            };
-
-            // 3. Validate option selections
-            const validation = await ProductOptionService.validateSelections({
-                productUuid,
-                selections: selectedOptions,
+                quantity,
+                selectedOptions,
             });
 
             if (!validation.valid) {
                 return res.status(400).json({
-                    error: "INVALID_OPTIONS",
-                    message: "Invalid option selections",
-                    details: validation.errors,
+                success: false,
+                ...validation,
                 });
             };
 
-            // 4. Calculate price
-            const basePrice = product.basePrice;
-            const optionsCost = selectedOptions.reduce((sum: number, selection: any) => {
-                const group = product.optionGroups.find((g: any) => g.uuid === selection.groupUuid);
-                const options = group?.options.filter((o: any) => 
-                    selection.optionUuids.includes(o.uuid)
-                );
-                return sum + (options?.reduce((s: number, o: any) => s + o.extraCost, 0) || 0);
-            }, 0);
-
-            const totalPrice = (basePrice + optionsCost) * quantity;
-
             return res.status(200).json({
                 success: true,
-                valid: true,
-                pricing: {
-                    basePrice,
-                    optionsCost,
-                    subtotal: basePrice + optionsCost,
-                    quantity,
-                    totalPrice,
-                },
+                ...validation,
             });
 
         } catch (error: any) {
+            logWithContext("error", "[MenuController] Validation failed", {
+                error: error.message,
+            });
+
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: "Failed to validate order",
+            });
+        }
+    }
+
+    //GET /api/menu/search
+    static async searchMenu(req: Request, res: Response) {
+        try {
+            const { query, storeUuid, categoryUuid, maxResults } = req.query;
+            const tenantUuid = req.tenantUuid!;
+
+            const results = await MenuService.searchMenu({
+                tenantUuid,
+                storeUuid: storeUuid as string,
+                query: query as string,
+                categoryUuid: categoryUuid as string,
+                maxResults: maxResults ? parseInt(maxResults as string) : undefined,
+            });
+
+            // Track analytics (async)
+            MenuAnalyticsService.trackEvent({
+                tenantUuid,
+                storeUuid: storeUuid as string,
+                eventType: "MENU_SEARCH",
+                eventCategory: "SEARCH",
+                metadata: {
+                    query,
+                    resultCount: results.count,
+                },
+                userUuid: req.user?.uuid,
+                sessionId: req.sessionID,
+            }).catch(() => {});
+
+            return res.status(200).json({
+                success: true,
+                ...results,
+            });
+
+        } catch (error: any) {
+            logWithContext("error", "[MenuController] Search failed", {
+                error: error.message,
+            });
+
+            return res.status(500).json({
+                error: "INTERNAL_SERVER_ERROR",
+                message: "Failed to search menu",
+            });
+        }
+    }
+
+    //POST /api/menu/favorites/toggle
+    static async toggleFavorite(req: Request, res: Response) {
+        try {
+            const { productUuid, storeUuid } = req.body;
+            const tenantUuid = req.tenantUuid!;
+            const userUuid = req.user!.uuid;
+
+            const result = await FavoriteService.toggleFavorite({
+                tenantUuid,
+                userUuid,
+                storeUuid,
+                productUuid,
+            });
+
+            return res.status(200).json({
+                success: true,
+                ...result,
+            });
+
+        } catch (error: any) {
+            logWithContext("error", "[MenuController] Toggle favorite failed", {
+                error: error.message,
+            });
+
+            return res.status(500).json({
+                error: "INTERNAL_SERVER_ERROR",
+                message: "Failed to toggle favorite",
+            });
+        }
+    }
+
+    //GET /api/menu/favorites
+    static async getFavorites(req: Request, res: Response) {
+        try {
+            const { storeUuid } = req.query;
+            const userUuid = req.user!.uuid;
+
+            if (!storeUuid) {
+                return res.status(400).json({
+                    error: "VALIDATION_ERROR",
+                    message: "storeUuid query parameter is required",
+                });
+            }
+
+            const favorites = await FavoriteService.getUserFavorites({
+                userUuid,
+                storeUuid: storeUuid as string,
+            });
+
+            return res.status(200).json({
+                success: true,
+                favorites,
+            });
+
+        } catch (error: any) {
+            logWithContext("error", "[MenuController] Get favorites failed", {
+                error: error.message,
+            });
+
+            return res.status(500).json({
+                error: "INTERNAL_SERVER_ERROR",
+                message: "Failed to retrieve favorites",
             });
         }
     }

@@ -3,6 +3,17 @@ import dayjs from "dayjs";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { StoreDashboardService } from "../../services/Dashboards/StoreDashboard.service.ts";
 
+
+// Store manager dashboard endpoint — Add inventory section
+//    In your existing StoreManagerDashboard controller, add:
+//
+//      const inventoryHealth = await InventoryDashboardService
+//        .getStoreInventoryHealth(tenantUuid, storeUuid);
+//
+//      return {
+//        ...existingDashboardData,
+//        inventory: inventoryHealth,  // ← Add this
+//      };
 export class StoreDashboardController {
   
     //GET /api/store/dashboard/overview

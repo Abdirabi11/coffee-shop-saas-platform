@@ -1,34 +1,19 @@
 import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.ts";
+import { eventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 export class FraudService {
-  
-    //Record OTP fraud
     static async recordOtpFraud(input: {
         userUuid: string;
+        tenantUuid: string;
         ipAddress: string;
         reason: string;
     }) {
         try {
-            const user = await prisma.user.findUnique({
-                where: { uuid: input.userUuid },
-                include: {
-                    tenantUsers: {
-                        where: { isActive: true },
-                        take: 1,
-                    },
-                },
-            });
-  
-            if (!user) return;
-    
-            const tenantUuid = user.tenantUsers[0]?.tenantUuid || "SYSTEM";
-    
             const fraudEvent = await prisma.fraudEvent.create({
                 data: {
-                    tenantUuid,
+                    tenantUuid: input.tenantUuid,
                     userUuid: input.userUuid,
                     type: "OTP_BRUTE_FORCE",
                     category: "AUTHENTICATION",
@@ -38,69 +23,46 @@ export class FraudService {
                     status: "PENDING",
                 },
             });
-    
-            // Create admin alert
-            await prisma.adminAlert.create({
-                data: {
-                    tenantUuid,
-                    alertType: "FRAUD",
-                    category: "SECURITY",
-                    level: "ERROR",
-                    priority: "HIGH",
-                    title: "OTP Brute Force Detected",
-                    message: `User ${input.userUuid} triggered OTP brute force protection`,
-                    context: {
-                        userUuid: input.userUuid,
-                        ipAddress: input.ipAddress,
-                        fraudEventUuid: fraudEvent.uuid,
-                    },
+        
+            await this.createSecurityAlert({
+                tenantUuid: input.tenantUuid,
+                title: "OTP Brute Force Detected",
+                message: `User ${input.userUuid} triggered OTP brute force protection`,
+                level: "ERROR",
+                context: {
+                    userUuid: input.userUuid,
+                    ipAddress: input.ipAddress,
+                    fraudEventUuid: fraudEvent.uuid,
                 },
             });
-    
-            // Evaluate auto-ban
+        
             await this.evaluateAutoBan(input.userUuid);
-    
-            logWithContext("warn", "[Fraud] OTP fraud recorded", {
-            userUuid: input.userUuid,
-            fraudEventUuid: fraudEvent.uuid,
-            });
-    
+        
             MetricsService.increment("fraud.otp_brute_force", 1);
     
-            EventBus.emit("FRAUD_DETECTED", {
-            type: "OTP_BRUTE_FORCE",
-            userUuid: input.userUuid,
-            fraudEventUuid: fraudEvent.uuid,
+            eventBus.emit("FRAUD_DETECTED", {
+                type: "OTP_BRUTE_FORCE",
+                userUuid: input.userUuid,
+                tenantUuid: input.tenantUuid,
+                fraudEventUuid: fraudEvent.uuid,
             });
-  
         } catch (error: any) {
             logWithContext("error", "[Fraud] Failed to record OTP fraud", {
                 error: error.message,
             });
         }
     }
-
-    //Record login brute force
+ 
     static async recordLoginBruteForce(input: {
         userUuid: string;
+        tenantUuid: string;
         ipAddress: string;
-        attemptUuid: string;
+        attemptUuid?: string;
     }) {
         try {
-            const user = await prisma.user.findUnique({
-                where: { uuid: input.userUuid },
-                include: {
-                    tenantUsers: { where: { isActive: true }, take: 1 },
-                },
-            });
-        
-            if (!user) return;
-        
-            const tenantUuid = user.tenantUsers[0]?.tenantUuid || "SYSTEM";
-        
             await prisma.fraudEvent.create({
                 data: {
-                    tenantUuid,
+                    tenantUuid: input.tenantUuid,
                     userUuid: input.userUuid,
                     type: "MULTIPLE_FAILED_LOGINS",
                     category: "AUTHENTICATION",
@@ -108,78 +70,54 @@ export class FraudService {
                     reason: "Multiple failed login attempts",
                     ipAddress: input.ipAddress,
                     status: "CONFIRMED",
-                    metadata: {
-                        attemptUuid: input.attemptUuid,
-                    },
-                },
-            });
-    
-            // Increment failed login attempts
-            await prisma.user.update({
-                where: { uuid: input.userUuid },
-                data: {
-                    failedLoginAttempts: { increment: 1 },
+                    metadata: input.attemptUuid ? { attemptUuid: input.attemptUuid } : undefined,
                 },
             });
         
-            // Lock account if too many failures
-            const updated = await prisma.user.findUnique({
+            // Increment failed attempts and check lock threshold
+            const user = await prisma.user.update({
                 where: { uuid: input.userUuid },
+                data: { failedLoginAttempts: { increment: 1 } },
                 select: { failedLoginAttempts: true },
             });
     
-            if (updated && updated.failedLoginAttempts >= 10) {
+            if (user.failedLoginAttempts >= 10) {
                 await prisma.user.update({
                     where: { uuid: input.userUuid },
                     data: {
-                        lockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000), // Lock for 24 hours
+                        lockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
                     },
                 });
         
-                await this.createAlert({
-                    tenantUuid,
-                    title: "Account Locked",
-                    message: `User ${input.userUuid} locked due to too many failed login attempts`,
+                await this.createSecurityAlert({
+                    tenantUuid: input.tenantUuid,
+                    title: "Account Locked — Too Many Failed Logins",
+                    message: `User locked after ${user.failedLoginAttempts} failed attempts`,
                     level: "CRITICAL",
+                    context: { userUuid: input.userUuid },
                 });
-            };
-    
-            logWithContext("warn", "[Fraud] Login brute force recorded", {
-                userUuid: input.userUuid,
-            });
+            }
         
             MetricsService.increment("fraud.login_brute_force", 1);
-    
         } catch (error: any) {
             logWithContext("error", "[Fraud] Failed to record login brute force", {
                 error: error.message,
             });
         }
     }
- 
-    //Record suspicious login
+    
     static async recordSuspiciousLogin(input: {
         userUuid: string;
+        tenantUuid: string;
         riskLevel: string;
         reason: string;
         ipAddress: string;
         deviceFingerprint?: string;
     }) {
         try {
-            const user = await prisma.user.findUnique({
-                where: { uuid: input.userUuid },
-                include: {
-                    tenantUsers: { where: { isActive: true }, take: 1 },
-                },
-            });
-        
-            if (!user) return;
-        
-            const tenantUuid = user.tenantUsers[0]?.tenantUuid || "SYSTEM";
-    
             await prisma.fraudEvent.create({
                 data: {
-                    tenantUuid,
+                    tenantUuid: input.tenantUuid,
                     userUuid: input.userUuid,
                     type: "SUSPICIOUS_DEVICE",
                     category: "AUTHENTICATION",
@@ -192,8 +130,8 @@ export class FraudService {
             });
     
             if (input.riskLevel === "CRITICAL" || input.riskLevel === "HIGH") {
-                await this.createAlert({
-                    tenantUuid,
+                await this.createSecurityAlert({
+                    tenantUuid: input.tenantUuid,
                     title: "Suspicious Login Detected",
                     message: input.reason,
                     level: input.riskLevel === "CRITICAL" ? "CRITICAL" : "ERROR",
@@ -203,17 +141,11 @@ export class FraudService {
                         deviceFingerprint: input.deviceFingerprint,
                     },
                 });
-            };
+            }
         
-            logWithContext("warn", "[Fraud] Suspicious login recorded", {
-                userUuid: input.userUuid,
-                riskLevel: input.riskLevel,
-            });
-    
             MetricsService.increment("fraud.suspicious_login", 1, {
                 riskLevel: input.riskLevel,
             });
-        
         } catch (error: any) {
             logWithContext("error", "[Fraud] Failed to record suspicious login", {
                 error: error.message,
@@ -221,11 +153,10 @@ export class FraudService {
         }
     }
  
-    //Record payment fraud
     static async recordPaymentFraud(input: {
         tenantUuid: string;
         userUuid?: string;
-        storeUuid: string;
+        storeUuid?: string;
         orderUuid?: string;
         paymentUuid?: string;
         type: string;
@@ -238,7 +169,7 @@ export class FraudService {
             await prisma.fraudEvent.create({
                 data: {
                     tenantUuid: input.tenantUuid,
-                    userUuid: input.userUuid,
+                    userUuid: input.userUuid ?? "UNKNOWN",
                     storeUuid: input.storeUuid,
                     orderUuid: input.orderUuid,
                     paymentUuid: input.paymentUuid,
@@ -251,9 +182,9 @@ export class FraudService {
                     status: "PENDING",
                 },
             });
-        
+    
             if (input.severity === "HIGH" || input.severity === "CRITICAL") {
-                await this.createAlert({
+                await this.createSecurityAlert({
                     tenantUuid: input.tenantUuid,
                     storeUuid: input.storeUuid,
                     title: "Payment Fraud Detected",
@@ -264,18 +195,12 @@ export class FraudService {
                         paymentUuid: input.paymentUuid,
                     },
                 });
-            };
-        
-            logWithContext("warn", "[Fraud] Payment fraud recorded", {
-                type: input.type,
-                severity: input.severity,
-            });
+            }
     
             MetricsService.increment("fraud.payment", 1, {
                 type: input.type,
                 severity: input.severity,
             });
-    
         } catch (error: any) {
             logWithContext("error", "[Fraud] Failed to record payment fraud", {
                 error: error.message,
@@ -283,67 +208,76 @@ export class FraudService {
         }
     }
  
-    //Evaluate auto-ban
     static async evaluateAutoBan(userUuid: string) {
         try {
-            // Count fraud events in last 7 days
-            const recentFraudEvents = await prisma.fraudEvent.count({
+            const recentEvents = await prisma.fraudEvent.findMany({
                 where: {
                     userUuid,
-                    severity: { in: ["HIGH", "CRITICAL"] },
-                    createdAt: {
-                        gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-                    },
+                    createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
                 },
+                orderBy: { createdAt: "desc" },
+                take: 20,
+                select: { severity: true },
             });
         
-            // Auto-ban if 3+ high/critical fraud events
-            if (recentFraudEvents >= 3) {
+            // Score-based evaluation (from fraud.engine.ts, improved)
+            const score = recentEvents.reduce((acc, e) => {
+                switch (e.severity) {
+                    case "LOW": return acc + 1;
+                    case "MEDIUM": return acc + 3;
+                    case "HIGH": return acc + 6;
+                    case "CRITICAL": return acc + 10;
+                    default: return acc;
+                }
+            }, 0);
+    
+            if (score >= 20) {
                 await prisma.user.update({
                     where: { uuid: userUuid },
                     data: {
                         isBanned: true,
                         bannedAt: new Date(),
-                        banReason: `Auto-banned: ${recentFraudEvents} fraud events in 7 days`,
+                        banReason: `Auto-banned: fraud score ${score} (${recentEvents.length} events in 7 days)`,
                     },
                 });
         
-                const user = await prisma.user.findUnique({
-                    where: { uuid: userUuid },
-                    include: {
-                        tenantUsers: { where: { isActive: true }, take: 1 },
-                    },
+                // Get tenant for alert
+                const tenantUser = await prisma.tenantUser.findFirst({
+                    where: { userUuid, isActive: true },
+                    select: { tenantUuid: true },
                 });
         
-                if (user) {
-                    const tenantUuid = user.tenantUsers[0]?.tenantUuid || "SYSTEM";
-            
-                    await this.createAlert({
-                        tenantUuid,
+                if (tenantUser) {
+                    await this.createSecurityAlert({
+                        tenantUuid: tenantUser.tenantUuid,
                         title: "User Auto-Banned",
-                        message: `User ${userUuid} was automatically banned due to ${recentFraudEvents} fraud events`,
+                        message: `User ${userUuid} auto-banned (score: ${score})`,
                         level: "CRITICAL",
-                        priority: "URGENT",
+                        context: { userUuid, score, eventCount: recentEvents.length },
                     });
                 }
         
                 logWithContext("warn", "[Fraud] User auto-banned", {
                     userUuid,
-                    fraudEventCount: recentFraudEvents,
+                    score,
+                    eventCount: recentEvents.length,
                 });
         
                 MetricsService.increment("fraud.auto_ban", 1);
-            };
-    
+        
+                return { banned: true, score };
+            }
+        
+            return { banned: false, score };
         } catch (error: any) {
             logWithContext("error", "[Fraud] Failed to evaluate auto-ban", {
                 error: error.message,
             });
+            return { banned: false, score: 0 };
         }
     }
-    
-    //Calculate fraud score
-    static calculateFraudScore(input: {
+ 
+    static calculateRiskLevel(input: {
         rapidSessions: boolean;
         newFingerprint: boolean;
         geoChanged: boolean;
@@ -364,24 +298,23 @@ export class FraudService {
         return "LOW";
     }
  
-    //Create admin alert
-    private static async createAlert(input: {
+    private static async createSecurityAlert(input: {
         tenantUuid: string;
         storeUuid?: string;
         title: string;
         message: string;
         level: "INFO" | "WARNING" | "ERROR" | "CRITICAL";
-        priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
         context?: any;
     }) {
         await prisma.adminAlert.create({
             data: {
                 tenantUuid: input.tenantUuid,
                 storeUuid: input.storeUuid,
-                alertType: "FRAUD",
+                alertType: "FRAUD_DETECTED",   // FIX #3: valid AlertType
                 category: "SECURITY",
                 level: input.level,
-                priority: input.priority || "HIGH",
+                priority: input.level === "CRITICAL" ? "HIGH" : "MEDIUM",
+                source: "AUTOMATED_CHECK",
                 title: input.title,
                 message: input.message,
                 context: input.context,

@@ -1,97 +1,131 @@
 import dayjs from "dayjs";
-import { prisma } from "../../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 
-export class DailyReconciliationJob{
+export class DailyReconciliationJob {
+    static cronSchedule = "0 1 * * *";
+    
     static async run(date: Date = new Date()) {
         const startOfDay = dayjs(date).startOf("day").toDate();
         const endOfDay = dayjs(date).endOf("day").toDate();
     
-        console.log(`[DailyReconciliation] Running for ${startOfDay.toISOString()}`);
+        logWithContext("info", "[DailyReconciliation] Starting", {
+            date: startOfDay.toISOString(),
+        });
     
-        // Get all stores
         const stores = await prisma.store.findMany({
             where: { status: "ACTIVE" },
+            select: { uuid: true, tenantUuid: true, name: true },
         });
+    
+        let reconciled = 0;
+        let withVariance = 0;
+        let failed = 0;
     
         for (const store of stores) {
             try {
-                await this.reconcileStore(store.uuid, startOfDay, endOfDay);
+                const result = await this.reconcileStore(
+                    store.uuid,
+                    store.tenantUuid,
+                    startOfDay,
+                    endOfDay
+                );
+                reconciled++;
+                if (result.hasVariance) withVariance++;
             } catch (error: any) {
-                console.error(`[DailyReconciliation] Failed for store ${store.uuid}:`, error.message);
+                failed++;
+                logWithContext("error", "[DailyReconciliation] Store failed", {
+                    storeUuid: store.uuid,
+                    error: error.message,
+                });
             }
         }
+    
+        logWithContext("info", "[DailyReconciliation] Completed", {
+        stores: stores.length,
+        reconciled,
+        withVariance,
+        failed,
+        });
+    
+        return { reconciled, withVariance, failed };
     }
-
+    
     private static async reconcileStore(
         storeUuid: string,
+        tenantUuid: string,
         startOfDay: Date,
         endOfDay: Date
     ) {
-        // Get all completed payments for the day
-        const payments = await prisma.payment.findMany({
-            where: {
-                storeUuid,
-                status: "COMPLETED",
-                paymentFlow: "CASHIER",
-                processedAt: {
-                    gte: startOfDay,
-                    lte: endOfDay,
-                },
-            },
-        });
+        //Using DB aggregation instead of loading all records
+        const [cashAgg, cardAgg, orderAgg, paymentCount, orderCount] =
+            await Promise.all([
+                // Cash total
+                prisma.payment.aggregate({
+                    where: {
+                        storeUuid,
+                        status: "COMPLETED",
+                        paymentFlow: "CASHIER",
+                        paymentMethod: "CASH",
+                        processedAt: { gte: startOfDay, lte: endOfDay },
+                    },
+                    _sum: { amount: true },
+                    _count: true,
+                }),
+                // Card total
+                prisma.payment.aggregate({
+                    where: {
+                        storeUuid,
+                        status: "COMPLETED",
+                        paymentFlow: "CASHIER",
+                        paymentMethod: "CARD_TERMINAL",
+                        processedAt: { gte: startOfDay, lte: endOfDay },
+                    },
+                    _sum: { amount: true },
+                    _count: true,
+                }),
+                // Orders total
+                prisma.order.aggregate({
+                    where: {
+                        storeUuid,
+                        status: "COMPLETED",
+                        createdAt: { gte: startOfDay, lte: endOfDay },
+                    },
+                    _sum: { totalAmount: true },
+                    _count: true,
+                }),
+                // Payment count (for missing detection)
+                prisma.payment.count({
+                    where: {
+                        storeUuid,
+                        paymentFlow: "CASHIER",
+                        processedAt: { gte: startOfDay, lte: endOfDay },
+                    },
+                }),
+                // Order count
+                prisma.order.count({
+                    where: {
+                        storeUuid,
+                        status: "COMPLETED",
+                        createdAt: { gte: startOfDay, lte: endOfDay },
+                    },
+                }),
+            ]);
     
-        // Calculate totals by method
-        const cashTotal = payments
-          .filter((p) => p.paymentMethod === "CASH")
-          .reduce((sum, p) => sum + p.amount, 0);
-    
-        const cardTotal = payments
-          .filter((p) => p.paymentMethod === "CARD_TERMINAL")
-          .reduce((sum, p) => sum + p.amount, 0);
-    
+        const cashTotal = cashAgg._sum.amount ?? 0;
+        const cardTotal = cardAgg._sum.amount ?? 0;
         const totalPayments = cashTotal + cardTotal;
-    
-        // Get orders total for validation
-        const orders = await prisma.order.findMany({
-            where: {
-                storeUuid,
-                status: "COMPLETED",
-                createdAt: {
-                    gte: startOfDay,
-                    lte: endOfDay,
-                },
-            },
-        });
-    
-        const ordersTotal = orders.reduce((sum, o) => sum + o.totalAmount, 0);
-    
-        // Detect variance
+        const ordersTotal = orderAgg._sum.totalAmount ?? 0;
         const variance = totalPayments - ordersTotal;
-        const hasVariance = Math.abs(variance) > 100; // >$1 difference
+        const hasVariance = Math.abs(variance) > 100;
     
-        // Find missing/extra payments
-        const orderUuids = new Set(orders.map((o) => o.uuid));
-        const paymentOrderUuids = new Set(payments.map((p) => p.orderUuid));
-    
-        const missingPayments = orders
-          .filter((o) => !paymentOrderUuids.has(o.uuid))
-          .map((o) => o.uuid);
-    
-        const extraPayments = payments
-          .filter((p) => !orderUuids.has(p.orderUuid))
-          .map((p) => p.uuid);
-    
-        // Create or update reconciliation report
         await prisma.dailyReconciliation.upsert({
             where: {
-                storeUuid_date: {
-                    storeUuid,
-                    date: startOfDay,
-                },
+                storeUuid_date: { storeUuid, date: startOfDay },
             },
             update: {
-                ordersCount: orders.length,
+                ordersCount: orderCount,
                 ordersTotal,
                 cashDeclared: cashTotal,
                 cardDeclared: cardTotal,
@@ -99,15 +133,13 @@ export class DailyReconciliationJob{
                 totalVariance: variance,
                 variancePercent: ordersTotal > 0 ? (variance / ordersTotal) * 100 : 0,
                 hasVariance,
-                missingPayments,
-                extraPayments,
                 status: hasVariance ? "NEEDS_REVIEW" : "RECONCILED",
             },
             create: {
                 storeUuid,
-                tenantUuid: (await prisma.store.findUnique({ where: { uuid: storeUuid } }))!.tenantUuid,
+                tenantUuid,
                 date: startOfDay,
-                ordersCount: orders.length,
+                ordersCount: orderCount,
                 ordersTotal,
                 cashDeclared: cashTotal,
                 cardDeclared: cardTotal,
@@ -116,13 +148,19 @@ export class DailyReconciliationJob{
                 variancePercent: ordersTotal > 0 ? (variance / ordersTotal) * 100 : 0,
                 hasVariance,
                 requiresReview: hasVariance,
-                missingPayments,
-                extraPayments,
                 status: hasVariance ? "NEEDS_REVIEW" : "RECONCILED",
                 reconciledBy: "SYSTEM",
             },
         });
     
-        console.log(`[DailyReconciliation] Store ${storeUuid}: ${totalPayments / 100} (variance: ${variance / 100})`);
+        logWithContext(hasVariance ? "warn" : "info", "[DailyReconciliation] Store reconciled", {
+            storeUuid,
+            totalPayments,
+            ordersTotal,
+            variance,
+            hasVariance,
+        });
+    
+        return { hasVariance, variance };
     }
-};
+}

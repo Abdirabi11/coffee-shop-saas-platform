@@ -1,33 +1,61 @@
 import prisma from "../config/prisma.ts"
-import { PaymentService } from "../../services/payment/payment.service.ts";
-import { OrderEventBus } from "../../events/order.events.ts";
+import { PaymentService } from "../../services/payment/payment.service.js";
+import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { eventBus } from "../../events/eventBus.js";
 
-const MAX_RETRIES = 3;
 
-export class PaymentRetryJob{
-    static async run(){
-        const failedPayemnts= await prisma.payment.findMany({
+export class PaymentRetryJob {
+    static cronSchedule = "*/30 * * * *";
+    
+    static async run() {
+        logWithContext("info", "[PaymentRetry] Starting");
+    
+        const failedPayments = await prisma.payment.findMany({
             where: {
+                paymentFlow: "PROVIDER",
                 status: "FAILED",
-                retries: { lt: MAX_RETRIES },
-            }
+                retries: { lt: 3 }, // Default max retries
+                // Only retry recent failures (last 24h)
+                failedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            },
+            take: 20,
         });
-
-        for(const payment of failedPayemnts){
+    
+        if (failedPayments.length === 0) {
+            logWithContext("info", "[PaymentRetry] No retryable payments");
+            return { retried: 0, failed: 0 };
+        }
+    
+        let retried = 0;
+        let failed = 0;
+    
+        for (const payment of failedPayments) {
             try {
-                await PaymentService.retry(payment.uuid);
-            } catch{
-                const updated = await prisma.payment.update({
-                    where: { uuid: payment.uuid },
-                    data: { retries: { increment: 1 } },
+                await PaymentService.retryFailedPayment(payment.uuid);
+                retried++;
+            } catch (error: any) {
+                failed++;
+                logWithContext("warn", "[PaymentRetry] Retry failed", {
+                    paymentUuid: payment.uuid,
+                    retries: payment.retries,
+                    error: error.message,
                 });
-
-                if (updated.retries >= MAX_RETRIES) {
-                    OrderEventBus.emit("PAYMENT_FAILED_FINAL", {
-                      orderUuid: payment.orderUuid,
+        
+                if (payment.retries + 1 >= payment.maxRetries) {
+                // FIX #2: eventBus instead of OrderEventBus
+                    eventBus.emit("PAYMENT_FAILED", {
+                        paymentUuid: payment.uuid,
+                        orderUuid: payment.orderUuid,
+                        tenantUuid: payment.tenantUuid,
+                        storeUuid: payment.storeUuid,
+                        failureCode: "MAX_RETRIES_EXCEEDED",
+                        failureReason: "Payment failed after all retry attempts",
                     });
                 }
             }
         }
+    
+        logWithContext("info", "[PaymentRetry] Completed", { retried, failed });
+        return { retried, failed };
     }
-};
+}

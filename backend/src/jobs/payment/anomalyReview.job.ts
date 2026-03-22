@@ -1,7 +1,12 @@
-import prisma from "../../config/prisma.ts"
+import prisma from "../../config/prisma.js"
+import { logWithContext } from "../../infrastructure/observability/logger.js";
 
 export class AnomalyReviewJob {
+    static cronSchedule = "0 * * * *";
+ 
     static async run() {
+        logWithContext("info", "[AnomalyReview] Starting");
+    
         const anomalies = await prisma.paymentAnomaly.findMany({
             where: {
                 status: "PENDING",
@@ -9,41 +14,43 @@ export class AnomalyReviewJob {
             },
             include: {
                 payment: {
-                    include: {
-                        order: true,
-                    },
+                    select: { uuid: true, amount: true, storeUuid: true },
                 },
             },
         });
-
+    
         if (anomalies.length === 0) {
-            console.log("[AnomalyReview] No pending high-severity anomalies");
-            return;
+            logWithContext("info", "[AnomalyReview] No pending high-severity anomalies");
+            return { alertsCreated: 0 };
         };
-      
+ 
         // Group by store
-        const byStore = anomalies.reduce((acc, anomaly) => {
-            if (!acc[anomaly.storeUuid]) {
-                acc[anomaly.storeUuid] = [];
-            }
-            acc[anomaly.storeUuid].push(anomaly);
-            return acc;
-        }, {} as Record<string, typeof anomalies>);
-      
-        // Notify managers for each store
-        for (const [storeUuid, storeAnomalies] of Object.entries(byStore)) {
+        const byStore = new Map<string, typeof anomalies>();
+        for (const anomaly of anomalies) {
+            const key = anomaly.storeUuid;
+            if (!byStore.has(key)) byStore.set(key, []);
+            byStore.get(key)!.push(anomaly);
+        }
+    
+        let alertsCreated = 0;
+ 
+        for (const [storeUuid, storeAnomalies] of byStore) {
             await prisma.adminAlert.create({
                 data: {
                     tenantUuid: storeAnomalies[0].tenantUuid,
                     storeUuid,
-                    alertType: "PAYMENT_ANOMALY",
+                    alertType: "PAYMENT_FAILED", 
                     category: "FINANCIAL",
                     level: "WARNING",
                     priority: "HIGH",
+                    source: "AUTOMATED_CHECK",
                     title: `${storeAnomalies.length} Payment Anomalies Need Review`,
-                    message: `${storeAnomalies.length} suspicious payments detected and require manager review`,
+                    message: `${storeAnomalies.length} suspicious payments detected requiring manager review`,
                     context: {
+                        subType: "PAYMENT_ANOMALY_BATCH",
+                        anomalyCount: storeAnomalies.length,
                         anomalies: storeAnomalies.map((a) => ({
+                            uuid: a.uuid,
                             paymentUuid: a.paymentUuid,
                             type: a.anomalyType,
                             severity: a.severity,
@@ -52,8 +59,15 @@ export class AnomalyReviewJob {
                     },
                 },
             });
-        };
-      
-        console.log(`[AnomalyReview] Created alerts for ${Object.keys(byStore).length} stores`);
+            alertsCreated++;
+        }
+    
+        logWithContext("info", "[AnomalyReview] Completed", {
+            anomalies: anomalies.length,
+            stores: byStore.size,
+            alertsCreated,
+        });
+    
+        return { alertsCreated };
     }
 }

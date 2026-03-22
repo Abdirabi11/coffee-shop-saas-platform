@@ -1,4 +1,4 @@
-import prisma from "../../config/prisma.ts"
+import prisma from "../../config/prisma.js"
 import { logWithContext } from "../../infrastructure/observability/logger.js";
 import { redis } from "../../lib/redis.js";
 

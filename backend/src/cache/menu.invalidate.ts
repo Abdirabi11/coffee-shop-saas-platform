@@ -1,4 +1,4 @@
-import { MenuEventService } from "../services/menu/menu-events.ts";
+import { MenuEventService } from "../events/menu.events.js";
 import { MenuPrewarmService } from "../services/menu/menu-prewarm.service.ts";
 import { MenuSnapshotService } from "../services/menu/menu-snapshot.service.ts";
 import { bumpCacheVersion } from "./cacheVersion.ts.ts"

@@ -1,8 +1,20 @@
 import { Request, Response } from "express";
 import dayjs from "dayjs";
-import { TenantDashboardService } from "../../services/tenant/tenant-dashboard.service.ts";
+import { TenantDashboardService } from "../../services/tenant/ TenantDashboard.service.js";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
+
+//Tenant admin dashboard endpoint — Add inventory section
+//    Same pattern:
+//
+//      const inventoryHealth = await InventoryDashboardService
+//        .getTenantInventoryHealth(tenantUuid);
+//
+//      return {
+//        ...existingDashboardData,
+//        inventory: inventoryHealth,
+//      };
+ 
 export class TenantDashboardController {
   
     //GET /api/tenant/dashboard/overview

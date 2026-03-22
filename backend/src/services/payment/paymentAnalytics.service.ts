@@ -1,103 +1,153 @@
+import { withCache } from "../../cache/cache.js";
 import prisma from "../../config/prisma.ts"
 
 
+interface MetricsFilter {
+  tenantUuid?: string;
+  storeUuid?: string;
+  startDate: Date;
+  endDate: Date;
+}
+
 export class PaymentAnalyticsService {
-    //Get payment metrics for date range
-    static async getMetrics(input: {
-        tenantUuid?: string;
-        storeUuid?: string;
-        startDate: Date;
-        endDate: Date;
-    }) {
-        const payments = await prisma.payment.findMany({
-            where: {
-                ...(input.tenantUuid && { tenantUuid: input.tenantUuid }),
-                ...(input.storeUuid && { storeUuid: input.storeUuid }),
-                createdAt: {
-                    gte: input.startDate,
-                    lte: input.endDate,
-                },
-            },
-        });
-  
-        const total = payments.length;
-        const successful = payments.filter(p => p.status === "PAID").length;
-        const failed = payments.filter(p => p.status === "FAILED").length;
-        const cancelled = payments.filter(p => p.status === "CANCELLED").length;
-  
-        const totalAmount = payments
-            .filter(p => p.status === "PAID")
-            .reduce((sum, p) => sum + p.amount, 0);
-    
-        const averageAmount = successful > 0 ? totalAmount / successful : 0;
-    
-        // By payment method
-        const byMethod = payments.reduce((acc, p) => {
-            if (!acc[p.paymentMethod]) {
-                acc[p.paymentMethod] = { count: 0, amount: 0 };
-            }
-            acc[p.paymentMethod].count++;
-            if (p.status === "PAID") {
-                acc[p.paymentMethod].amount += p.amount;
-            }
-            return acc;
-        }, {} as Record<string, { count: number; amount: number }>);
-  
-        // Success rate
-        const successRate = total > 0 ? (successful / total) * 100 : 0;
-  
-        // Average processing time
-        const processingTimes = payments
-            .filter(p => p.status === "PAID" && p.paidAt)
-            .map(p => p.paidAt!.getTime() - p.createdAt.getTime());
-        
-        const avgProcessingTime = processingTimes.length > 0
-            ? processingTimes.reduce((sum, t) => sum + t, 0) / processingTimes.length
-            : 0;
-  
-        return {
-            total,
-            successful,
-            failed,
-            cancelled,
-            successRate: Math.round(successRate * 100) / 100,
-            totalAmount,
-            averageAmount,
-            byMethod,
-            avgProcessingTime: Math.round(avgProcessingTime / 1000), // in seconds
+    static async getMetrics(input: MetricsFilter) {
+        const where = {
+            ...(input.tenantUuid && { tenantUuid: input.tenantUuid }),
+            ...(input.storeUuid && { storeUuid: input.storeUuid }),
+            createdAt: { gte: input.startDate, lte: input.endDate },
         };
+    
+        const cacheKey = `payment-analytics:${input.tenantUuid ?? "all"}:${input.storeUuid ?? "all"}:${input.startDate.toISOString()}`;
+    
+        return withCache(cacheKey, 120, async () => {
+            const [
+                total,
+                byStatus,
+                byMethod,
+                successfulAgg,
+                avgProcessingTime,
+            ] = await Promise.all([
+                prisma.payment.count({ where }),
+        
+                prisma.payment.groupBy({
+                    by: ["status"],
+                    where,
+                    _count: true,
+                }),
+        
+                prisma.payment.groupBy({
+                    by: ["paymentMethod"],
+                    where: {
+                        ...where,
+                        status: { in: ["PAID", "COMPLETED"] }, // FIX #3: Both statuses
+                    },
+                    _sum: { amount: true },
+                    _count: true,
+                }),
+    
+                prisma.payment.aggregate({
+                    where: {
+                        ...where,
+                        status: { in: ["PAID", "COMPLETED"] }, // FIX #3: Both statuses
+                    },
+                    _sum: { amount: true },
+                    _count: true,
+                    _avg: { amount: true },
+                }),
+    
+                // Average processing time — raw SQL for date diff
+                prisma.$queryRaw<{ avg_seconds: number }[]>`
+                SELECT AVG(
+                    EXTRACT(EPOCH FROM ("paidAt" - "createdAt"))
+                )::float as avg_seconds
+                FROM "Payment"
+                WHERE "paidAt" IS NOT NULL
+                    AND status IN ('PAID', 'COMPLETED')
+                    AND "createdAt" >= ${input.startDate}
+                    AND "createdAt" <= ${input.endDate}
+                    ${input.tenantUuid ? prisma.$queryRaw`AND "tenantUuid" = ${input.tenantUuid}` : prisma.$queryRaw``}
+                    ${input.storeUuid ? prisma.$queryRaw`AND "storeUuid" = ${input.storeUuid}` : prisma.$queryRaw``}
+                `,
+            ]);
+    
+            // Build status map
+            const statusMap: Record<string, number> = {};
+            for (const s of byStatus) {
+                statusMap[s.status] = s._count;
+            };
+        
+            const successful = successfulAgg._count ?? 0;
+            const totalAmount = successfulAgg._sum.amount ?? 0;
+            const successRate = total > 0 ? (successful / total) * 100 : 0;
+    
+            return {
+                total,
+                successful,
+                failed: statusMap["FAILED"] ?? 0,
+                cancelled: statusMap["CANCELLED"] ?? 0,
+                pending: statusMap["PENDING"] ?? 0,
+                voided: statusMap["VOIDED"] ?? 0,
+                successRate: Math.round(successRate * 100) / 100,
+                totalAmount,
+                averageAmount: Math.round((successfulAgg._avg.amount ?? 0) * 100) / 100,
+                byMethod: byMethod.map((m) => ({
+                    method: m.paymentMethod,
+                    count: m._count,
+                    amount: m._sum.amount ?? 0,
+                })),
+                byStatus: statusMap,
+                avgProcessingTimeSeconds: Math.round(
+                    avgProcessingTime[0]?.avg_seconds ?? 0
+                ),
+            };
+        });
     }
-  
-    //Get fraud metrics
+ 
     static async getFraudMetrics(input: {
         tenantUuid?: string;
         startDate: Date;
         endDate: Date;
-    }){
-        const fraudEvents = await prisma.fraudEvent.findMany({
-            where: {
-                ...(input.tenantUuid && { tenantUuid: input.tenantUuid }),
-                createdAt: {
-                    gte: input.startDate,
-                    lte: input.endDate,
-                },
-            },
-        });
-    
-        const byType = fraudEvents.reduce((acc, e) => {
-            acc[e.type] = (acc[e.type] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-    
-        const bySeverity = fraudEvents.reduce((acc, e) => {
-            acc[e.severity] = (acc[e.severity] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-  
-        return {
-            total: fraudEvents.length,
-            byType,
-            bySeverity,
+    }) {
+        const where = {
+            ...(input.tenantUuid && { tenantUuid: input.tenantUuid }),
+            createdAt: { gte: input.startDate, lte: input.endDate },
         };
+    
+        const cacheKey = `fraud-analytics:${input.tenantUuid ?? "all"}:${input.startDate.toISOString()}`;
+    
+        return withCache(cacheKey, 120, async () => {
+            const [total, byType, bySeverity] = await Promise.all([
+                prisma.fraudEvent.count({ where }),
+        
+                prisma.fraudEvent.groupBy({
+                    by: ["type"],
+                    where,
+                    _count: true,
+                    orderBy: { _count: { type: "desc" } },
+                }),
+        
+                prisma.fraudEvent.groupBy({
+                    by: ["severity"],
+                    where,
+                    _count: true,
+                }),
+            ]);
+        
+            const typeMap: Record<string, number> = {};
+            for (const t of byType) {
+                typeMap[t.type] = t._count;
+            }
+    
+            const severityMap: Record<string, number> = {};
+            for (const s of bySeverity) {
+                severityMap[s.severity] = s._count;
+            }
+    
+            return {
+                total,
+                byType: typeMap,
+                bySeverity: severityMap,
+            };
+        });
     }
 }

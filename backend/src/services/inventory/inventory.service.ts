@@ -1,96 +1,19 @@
 import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
-import { MetricsService } from "../../infrastructure/observability/metricsService.js";
+import { eventBus } from "../../events/eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 export class InventoryService{
+
     static async adjustStock(input: {
         tenantUuid: string;
         storeUuid: string;
         productUuid: string;
         quantity: number; // Positive = increase, Negative = decrease
+        type: "RESTOCK" | "ADJUSTMENT" | "WASTE" | "DAMAGE" | "TRANSFER" | "RETURN";
         reason: string;
         adjustedBy: string;
-    }){
-        const inventory= await prisma.inventoryItem.findUnique({
-            where: {
-                tenantUuid: input.tenantUuid,
-                storeUuid: input.storeUuid,
-                productUuid: input.productUuid,
-            },
-        });
-
-        if(!inventory){
-            throw new Error("INVENTORY_NOT_FOUND");
-        };
-
-        const newQuantity = inventory.quantity + input.quantity;
-
-        if (newQuantity < 0) {
-          throw new Error("INSUFFICIENT_STOCK");
-        };
-
-        const updated= await prisma.inventoryItem.update({
-            where: { uuid: inventory.uuid},
-            data: {
-                quantity: newQuantity,
-                lastUpdated: new Date(),
-            },
-        });
-
-        // Create inventory transaction log
-        await prisma.inventoryTransaction.create({
-            data: {
-                tenantUuid: input.tenantUuid,
-                storeUuid: input.storeUuid,
-                inventoryItemUuid: inventory.uuid,
-                productUuid: input.productUuid,
-                type: input.quantity > 0 ? "RESTOCK" : "ADJUSTMENT",
-                quantity: input.quantity,
-                previousStock: inventory.quantity,
-                newStock: newQuantity,
-                referenceType: "MANUAL",
-                reason: input.reason,
-                performedBy: input.adjustedBy,
-            },
-        });
-
-        const product= await prisma.product.findUnique({
-            where: {uuid: input.productUuid}
-        });
-
-        if (product?.lowStockThreshold && newQuantity <= product.lowStockThreshold) {
-            EventBus.emit("INVENTORY_LOW_STOCK", {
-                tenantUuid: input.tenantUuid,
-                storeUuid: input.storeUuid,
-                productUuid: input.productUuid,
-                productName: product.name,
-                currentStock: newQuantity,
-                threshold: product.lowStockThreshold,
-            });
-        };
-
-        logWithContext("info", "[Inventory] Stock adjusted", {
-            productUuid: input.productUuid,
-            adjustment: input.quantity,
-            newQuantity,
-            reason: input.reason,
-        });
-      
-        MetricsService.increment("inventory.adjusted", 1, {
-            type: input.quantity > 0 ? "increase" : "decrease",
-        });
-      
-        return updated;
-    }
-
-    //Check if product has sufficient stock  
-    static async checkStock(input: {
-        tenantUuid: string;
-        storeUuid: string;
-        productUuid: string;
-        requestedQuantity: number;
-   }): Promise<boolean> {
+    }) {
         const inventory = await prisma.inventoryItem.findFirst({
             where: {
                 tenantUuid: input.tenantUuid,
@@ -99,277 +22,216 @@ export class InventoryService{
             },
         });
     
-        if (!inventory) return false;
-
-        const available = inventory.quantity - (inventory.reservedQuantity || 0);
-
-        return available >= input.requestedQuantity;
-    }
-
-    //Reserve stock for pending order (prevents overselling)
-    static async reserveStock(input: {
-        tenantUuid: string;
-        storeUuid: string;
-        orderUuid: string;
-        items: Array<{
-            productUuid: string;
-            quantity: number;
-        }>;
-        tx?: PrismaTransaction;
-    }){
-        const execute = async (prismaClient: any) => {
-            for (const item of input.items) {
-                // Get current inventory
-                const inventory = await prismaClient.inventoryItem.findFirst({
-                    where: {
-                        tenantUuid: input.tenantUuid,
-                        storeUuid: input.storeUuid,
-                        productUuid: item.productUuid,
-                    },
-                });
-      
-                if (!inventory) {
-                    throw new Error(`INVENTORY_NOT_FOUND: ${item.productUuid}`);
-                };
-    
-                // Calculate available stock
-                const available = inventory.quantity - (inventory.reservedQuantity || 0);
-    
-                if (available < item.quantity) {
-                    // Get product name for better error message
-                    const product = await prismaClient.product.findUnique({
-                        where: { uuid: item.productUuid },
-                        select: { name: true },
-                    });
-        
-                    throw new Error(
-                        `INSUFFICIENT_STOCK: ${product?.name || "Product"} - Available: ${available}, Requested: ${item.quantity}`
-                    );
-                };
-
-                // Create reservation record
-                await prismaClient.inventoryReservation.create({
-                    data: {
-                        tenantUuid: input.tenantUuid,
-                        storeUuid: input.storeUuid,
-                        inventoryItemUuid: inventory.uuid,
-                        productUuid: item.productUuid,
-                        orderUuid: input.orderUuid,
-                        quantity: item.quantity,
-                        expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
-                        status: "ACTIVE",
-                    },
-                });
-  
-                // Increment reserved quantity
-                await prismaClient.inventoryItem.update({
-                    where: { uuid: inventory.uuid },
-                    data: {
-                        reservedQuantity: { increment: item.quantity },
-                        lastUpdated: new Date(),
-                    },
-                });
-        
-                // Create inventory movement log
-                await prismaClient.inventoryMovement.create({
-                    data: {
-                        tenantUuid: input.tenantUuid,
-                        storeUuid: input.storeUuid,
-                        inventoryItemUuid: inventory.uuid,
-                        productUuid: item.productUuid,
-                        type: "RESERVATION",
-                        quantity: item.quantity,
-                        previousStock: inventory.quantity,
-                        newStock: inventory.quantity, // Quantity doesn't change, only reserved
-                        referenceType: "ORDER",
-                        referenceUuid: input.orderUuid,
-                        reason: "Stock reserved for order",
-                    },
-                });
-  
-                logWithContext("info", "[Inventory] Stock reserved", {
-                    productUuid: item.productUuid,
-                    quantity: item.quantity,
-                    orderUuid: input.orderUuid,
-                });
-            };  
+        if (!inventory) {
+            throw new Error("INVENTORY_NOT_FOUND");
         };
-
-        // Execute with or without transaction
-        if (input.tx) {
-            await execute(input.tx);
-        } else {
-            await prisma.$transaction(async (tx) => {
-                await execute(tx);
-            });
-        }
-  
-        MetricsService.increment("inventory.reserved", 1, {
-            tenantUuid: input.tenantUuid,
-            storeUuid: input.storeUuid,
-        });
-    }
-
-    //Release reserved stock (order cancelled/expired)
-    //Called when: Order cancelled, Order payment timeout
-    static async releaseStock(input: {
-        orderUuid: string;
-        tx?: PrismaTransaction;
-    }) {
-        const execute = async (prismaClient: any) => {
-            const reservations = await prismaClient.inventoryReservation.findMany({
-                where: {
-                    orderUuid: input.orderUuid,
-                    status: "ACTIVE",
-                },
-            });
-        
-            if (reservations.length === 0) {
-                    logWithContext("warn", "[Inventory] No active reservations to release", {
-                    orderUuid: input.orderUuid,
-                });
-                return;
-            }
-    
-            for (const reservation of reservations) {
-                // Mark reservation as released
-                await prismaClient.inventoryReservation.update({
-                    where: { uuid: reservation.uuid },
-                    data: {
-                        status: "RELEASED",
-                        releasedAt: new Date(),
-                    },
-                });
-        
-                // Decrement reserved quantity
-                await prismaClient.inventoryItem.update({
-                    where: { uuid: reservation.inventoryItemUuid },
-                    data: {
-                        reservedQuantity: { decrement: reservation.quantity },
-                        lastUpdated: new Date(),
-                    },
-                });
-        
-                // Create inventory movement log
-                await prismaClient.inventoryMovement.create({
-                    data: {
-                        tenantUuid: reservation.tenantUuid,
-                        storeUuid: reservation.storeUuid,
-                        inventoryItemUuid: reservation.inventoryItemUuid,
-                        productUuid: reservation.productUuid,
-                        type: "RELEASE",
-                        quantity: reservation.quantity,
-                        referenceType: "ORDER",
-                        referenceUuid: input.orderUuid,
-                        reason: "Reservation released (order cancelled/expired)",
-                    },
-                });
-        
-                logWithContext("info", "[Inventory] Reservation released", {
-                    productUuid: reservation.productUuid,
-                    quantity: reservation.quantity,
-                    orderUuid: input.orderUuid,
-                });
-            }
+ 
+        const newCurrentStock = inventory.currentStock + input.quantity;
+            if (newCurrentStock < 0) {
+            throw new Error("INSUFFICIENT_STOCK");
         };
     
-        if (input.tx) {
-            await execute(input.tx);
-        } else {
-            await prisma.$transaction(async (tx) => {
-                await execute(tx);
-            });
-        }
-    
-        MetricsService.increment("inventory.released", 1);
-    }
+        const newAvailableStock = newCurrentStock - inventory.reservedStock;
+        const newStatus = newCurrentStock <= 0
+            ? "OUT_OF_STOCK"
+            : (inventory.reorderPoint && newCurrentStock <= inventory.reorderPoint)
+                ? "LOW_STOCK"
+                : "IN_STOCK";
 
-    //Commit reservation (order paid)
-    static async commitReservation(input: {
-        orderUuid: string;
-    }) {
-        const reservations = await prisma.inventoryReservation.findMany({
-            where: {
-                orderUuid: input.orderUuid,
-                status: "ACTIVE",
+        const updated = await prisma.inventoryItem.update({
+            where: { uuid: inventory.uuid },
+            data: {
+                currentStock: newCurrentStock,
+                availableStock: Math.max(0, newAvailableStock),
+                quantity: newCurrentStock,
+                status: newStatus,
+                lastUpdated: new Date(),
+                ...(input.type === "RESTOCK" && {
+                    lastRestockedAt: new Date(),
+                    lastRestockedBy: input.adjustedBy,
+                    lastRestockQty: Math.abs(input.quantity),
+                    lastRestocked: new Date(),
+                }),
             },
         });
-
-        for (const reservation of reservations) {
-            // Mark as committed
-            await prisma.inventoryReservation.update({
-                where: { uuid: reservation.uuid },
-                data: { status: "COMMITTED" },
-            });
-
-            // Decrease actual quantity
+ 
+        // Movement log (all required fields included)
+        await prisma.inventoryMovement.create({
+            data: {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid, // Was missing in some old code paths
+                inventoryItemUuid: inventory.uuid,
+                productUuid: input.productUuid, // Was missing in some old code paths
+                type: input.type,
+                quantity: input.quantity,
+                previousStock: inventory.currentStock,
+                newStock: newCurrentStock,
+                referenceType: "MANUAL",
+                reason: input.reason,
+                performedBy: input.adjustedBy,
+            },
+        });
+ 
+        await prisma.inventoryTransaction.create({
+            data: {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                inventoryItemUuid: inventory.uuid,
+                productUuid: input.productUuid,
+                quantity: input.quantity,
+                previousQuantity: inventory.currentStock, // FIX: was `previousStock`
+                newQuantity: newCurrentStock,              // FIX: was `newStock`
+                reason: input.type,
+                createdBy: input.adjustedBy,
+            },
+        });
+ 
+        // Low stock alert (use InventoryItem.reorderPoint, not Product.lowStockThreshold)
+        if (inventory.reorderPoint && newCurrentStock <= inventory.reorderPoint) {
+            if (!inventory.lowStockAlertSent) {
+                const product = await prisma.product.findUnique({
+                    where: { uuid: input.productUuid },
+                    select: { name: true },
+                });
+        
+                eventBus.emit("INVENTORY_LOW_STOCK", {
+                    tenantUuid: input.tenantUuid,
+                    storeUuid: input.storeUuid,
+                    productUuid: input.productUuid,
+                    productName: product?.name,
+                    currentStock: newCurrentStock,
+                    threshold: inventory.reorderPoint,
+                });
+        
+                await prisma.inventoryItem.update({
+                    where: { uuid: inventory.uuid },
+                    data: { lowStockAlertSent: true },
+                });
+            }
+        } else if (inventory.lowStockAlertSent) {
             await prisma.inventoryItem.update({
-                where: { uuid: reservation.inventoryItemUuid },
-                data: {
-                quantity: { decrement: reservation.quantity },
-                    reservedQuantity: { decrement: reservation.quantity },
-                },
+                where: { uuid: inventory.uuid },
+                data: { lowStockAlertSent: false, outOfStockAlertSent: false },
             });
-
-            // Create transaction log
-            await prisma.inventoryTransaction.create({
-                data: {
-                    tenantUuid: reservation.tenantUuid,
-                    storeUuid: reservation.storeUuid,
-                    inventoryItemUuid: reservation.inventoryItemUuid,
-                    productUuid: reservation.productUuid,
-                    quantity: -reservation.quantity,
-                    reason: "ORDER_SALE",
-                    orderUuid: input.orderUuid,
-                },
-            });
-        };
+        }
+    
+        logWithContext("info", "[Inventory] Stock adjusted", {
+            productUuid: input.productUuid,
+            type: input.type,
+            adjustment: input.quantity,
+            newStock: newCurrentStock,
+        });
+    
+        MetricsService.increment("inventory.adjusted", 1, { type: input.type });
+        return updated;
     }
-
-    static async getStatus(input:{
+ 
+    static async checkStock(input: {
         tenantUuid: string;
         storeUuid: string;
         productUuid: string;
-    }){
-        const inventory= await prisma.inventoryItem.findFirst({
+        requestedQuantity: number;
+    }): Promise<{ available: boolean; currentStock: number; availableStock: number }> {
+        const inventory = await prisma.inventoryItem.findFirst({
             where: {
                 tenantUuid: input.tenantUuid,
                 storeUuid: input.storeUuid,
                 productUuid: input.productUuid,
             },
-            include: {
-                product: true,
-            },
         });
-
+    
         if (!inventory) {
-            return {
-                exists: false,
-                quantity: 0,
-                available: 0,
-                reserved: 0,
-                status: "OUT_OF_STOCK",
-            };
+            return { available: false, currentStock: 0, availableStock: 0 };
+        }
+    
+        // Use availableStock (currentStock - reservedStock) — NOT the old quantity - reservedQuantity
+        return {
+            available: inventory.availableStock >= input.requestedQuantity,
+            currentStock: inventory.currentStock,
+            availableStock: inventory.availableStock,
         };
-      
-        const available = inventory.quantity - (inventory.reservedQuantity || 0);
-          
-        let status: string;
-        if (available <= 0) {
-            status = "OUT_OF_STOCK";
-        } else if (inventory.product.lowStockThreshold && available <= inventory.product.lowStockThreshold) {
-            status = "LOW_STOCK";
-        } else {
-            status = "IN_STOCK";
-        };
+    }
+    
+    static async checkBulkAvailability(input: {
+        tenantUuid: string;
+        storeUuid: string;
+        items: Array<{ productUuid: string; quantity: number }>;
+    }) {
+        const unavailable: Array<{
+            productUuid: string;
+            requested: number;
+            available: number;
+        }> = [];
+    
+        for (const item of input.items) {
+            const result = await this.checkStock({
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                productUuid: item.productUuid,
+                requestedQuantity: item.quantity,
+            });
+        
+            if (!result.available) {
+                unavailable.push({
+                    productUuid: item.productUuid,
+                    requested: item.quantity,
+                    available: result.availableStock,
+                });
+            }
+        }
+    
+        return { allAvailable: unavailable.length === 0, unavailable };
+    }
 
+    static async getStatus(input: {
+        tenantUuid: string;
+        storeUuid: string;
+        productUuid: string;
+    }) {
+        const inventory = await prisma.inventoryItem.findFirst({
+            where: {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                productUuid: input.productUuid,
+            },
+            include: { product: { select: { name: true } } },
+        });
+    
+        if (!inventory) {
+            return { exists: false, status: "NOT_TRACKED" as const };
+        }
+    
         return {
             exists: true,
-            quantity: inventory.quantity,
-            available,
-            reserved: inventory.reservedQuantity || 0,
-            lowStockThreshold: inventory.product.lowStockThreshold,
-            status,
+            productName: inventory.product?.name,
+            currentStock: inventory.currentStock,
+            reservedStock: inventory.reservedStock,
+            availableStock: inventory.availableStock,
+            reorderPoint: inventory.reorderPoint,
+            minStock: inventory.minStock,
+            unit: inventory.unit,
+            status: inventory.status,
+            lastRestockedAt: inventory.lastRestockedAt,
+            autoReorder: inventory.autoReorder,
+            averageCost: inventory.averageCost,
         };
+    }
+ 
+    static async getStoreInventory(input: {
+        tenantUuid: string;
+        storeUuid: string;
+        status?: string;
+        limit?: number;
+    }) {
+        return prisma.inventoryItem.findMany({
+            where: {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                ...(input.status && { status: input.status as any }),
+            },
+            include: { product: { select: { name: true, price: true } } },
+            orderBy: { availableStock: "asc" },
+            take: input.limit ?? 100,
+        });
     }
 }

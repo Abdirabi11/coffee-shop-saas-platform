@@ -4,6 +4,7 @@ import { authenticate } from "../../middlewares/auth.middleware.ts";
 import { deviceFingerprintMiddleware } from "../../middlewares/deviceFingerprint.middleware.ts";
 import { burstProtection, rateLimitByUser } from "../../middlewares/rateLimitByTenant.middleware.ts";
 import { sanitizeInput } from "../../middlewares/sanitization.middleware.ts";
+import { loginRateLimit, otpRateLimit, passwordChangeRateLimit, tokenRotateRateLimit } from "../../middlewares/AuthRateLimit.middleware.ts";
 
 
 const router= express.Router();
@@ -119,3 +120,40 @@ router.get("/devices", AuthController.getTrustedDevices);
 router.delete("/devices/:deviceUuid", AuthController.revokeDeviceTrust);
 
 export default router;
+
+router.post("/auth/signup/request-otp", loginRateLimit, AuthController.requestSignupOtp);
+router.post("/auth/signup/verify", otpRateLimit, AuthController.verifySignup);
+ 
+// ── Login: Phone + OTP (public, rate limited) ───────────────────────────
+router.post("/auth/login/request-otp", loginRateLimit, AuthController.requestLoginOtp);
+router.post("/auth/login/verify", otpRateLimit, AuthController.verifyLoginOtp);
+ 
+// ── Login: Admin Password (public, rate limited) ────────────────────────
+router.post("/auth/login/password", loginRateLimit, AuthController.loginWithPassword);
+ 
+// ── Login: 2FA (public — temp token auth) ───────────────────────────────
+router.post("/auth/login/2fa", otpRateLimit, AuthController.verify2FA);
+ 
+// ── Login: Biometric (public, device-authenticated) ─────────────────────
+router.post("/auth/login/biometric", AuthController.loginWithBiometric);
+ 
+// ── Login: Social (public) ──────────────────────────────────────────────
+router.post("/auth/login/google", AuthController.loginWithGoogle);
+router.post("/auth/login/apple", AuthController.loginWithApple);
+ 
+// ── Token Rotation (public — validated by refresh token) ────────────────
+router.post("/auth/token/rotate", tokenRotateRateLimit, AuthController.rotateToken);
+ 
+// ── Logout (works with cookie, no strict auth needed) ───────────────────
+router.post("/auth/logout", AuthController.logout);
+router.post("/auth/logout/all", authenticate, AuthController.logoutAll);
+ 
+// ── Sessions (authenticated) ────────────────────────────────────────────
+router.get("/auth/sessions", authenticate,       AuthController.listSessions);
+router.post("/auth/sessions/:sessionUuid/revoke", authenticate, AuthController.revokeSession);
+ 
+// ── Password (authenticated + rate limited) ─────────────────────────────
+router.post("/auth/password/change", authenticate, passwordChangeRateLimit, AuthController.changePassword);
+ 
+// ── Profile (authenticated) ─────────────────────────────────────────────
+router.get("/auth/me", authenticate, AuthController.me);

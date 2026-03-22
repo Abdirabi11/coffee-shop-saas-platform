@@ -1,10 +1,10 @@
-import prisma from "../../config/prisma.ts"
+import prisma from "../../config/prisma.js"
 import dayjs from "dayjs";
-import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
-import { EventBus } from "../../events/eventBus.ts";
+import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.js";
+import { EventBus } from "../../events/eventBus.js";
 import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/payment-provider.adapter.ts";
 import { OrderStatusService } from "../../services/order/order-status.service.ts";
-import { PaymentReconciliationService } from "../../services/payment/paymentReconciliation.service.js";
+import { PaymentReconciliationService } from "../../services/payment/PaymentReconciliation.service.js";
 
 export class ProviderReportReconciliation{
   static async run(date: Date = new Date()) {

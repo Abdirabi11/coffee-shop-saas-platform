@@ -1,7 +1,7 @@
 import { logWithContext } from "../../infrastructure/observability/logger.js";
 import prisma from "../../config/prisma.js"
 import { InventoryService } from "../../services/inventory/inventory.service.js";
-import { RefundService } from "../../services/payment/refund.service.js";
+import { RefundService } from "../../services/payment/Refund.service.js";
 import { EventBus } from "../../events/eventBus.js";
 import { OrderStatusService } from "../services/order/order-status.service.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.js";

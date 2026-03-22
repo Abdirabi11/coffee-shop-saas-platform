@@ -103,6 +103,12 @@ app.use("/api", [
 //ERROR HANDLER (Last)
 app.use(errorHandler);
 
+//registerPaymentEventHandlers()        → 12 handlers (fraud, alerts, metrics)
+//registerSuperAdminDashboardHandlers() → 12 handlers (super admin cache)
+//registerPaymentDashboardHandlers()    →  6 handlers (Tier 1: revenue metrics, cache, receipts)
+//registerTier2EventHandlers()          →  4 handlers (notifications, settlement)
+//registerInventoryEventHandlers()      →  7 handlers (inventory commit/release/deduct, cache)
+
 app.use("/api/auth", authRoutes);
 app.use("/api/super_admin", superRoutes);
 app.use("/api/admin", adminRoutes);

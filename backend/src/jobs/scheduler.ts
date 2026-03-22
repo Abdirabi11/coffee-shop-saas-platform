@@ -19,16 +19,16 @@ import { StaleOrderMetricsJob } from "./OrderJobs/staleOrderMetrics.job.ts";
 import { PaymentRetryJob } from "./payment/payment-retry.job.ts";
 import { PaymentTimeoutJob } from "./payment/paymentTimeout.job.ts";
 import { ProductPopularityJob } from "./OrderJobs/product-popularity.job.ts";
-import { DailyReconciliationJob } from "./payment/dailyReconciliation.job.ts";
-import { AnomalyReviewJob } from "./payment/anomalyReview.job.ts";
-import { CashDrawerReminderJob } from "./payment/cashDrawerReminder.job.ts";
-import { PaymentPollingReconciliationJob } from "./payment/paymentPollingReconciliation.ts";
-import { ProviderReportReconciliation } from "./payment/providerReportReconciliation.ts";
-import { RiskScoreDecayJob } from "./payment/riskScoreDecay.jobs.ts";
+import { DailyReconciliationJob } from "./Payment/DailyReconciliation.job.ts";
+import { AnomalyReviewJob } from "./Payment/AnomalyReview.job.ts";
+import { CashDrawerReminderJob } from "./Payment/CashDrawerReminder.job.ts";
+import { PaymentPollingReconciliationJob } from "./Payment/PaymentPollingReconciliation.ts";
+import { ProviderReportReconciliation } from "./Payment/ProviderReportReconciliation.ts";
+import { RiskScoreDecayJob } from "./Payment/RiskScoreDecay.jobs.ts";
 import { WebhookRetryJob } from "./webhook/webhookRetry.job.ts";
-import { PaymentExpiryCleanupJob } from "./payment/paymentExpiryCleanup.job.ts";
-import { OrphanedPaymentDetectionJob } from "./payment/orphanedPaymentDetection.job.ts";
-import { IdempotencyKeyCleanupJob } from "./payment/idempotencyKeyCleanup.job.ts";
+import { PaymentExpiryCleanupJob } from "./Payment/PaymentExpiryCleanup.job.js";
+import { OrphanedPaymentDetectionJob } from "./Payment/OrphanedPaymentDetection.job.js";
+import { IdempotencyKeyCleanupJob } from "./Payment/IdempotencyKeyCleanup.job.js";
 import { MenuCacheWarmupJob } from "./Product/menuCacheWarmup.job.ts";
 import { LowStockAlertJob } from "./Product/lowStockAlert.job.ts";
 import { ProductMetricsCalculationJob } from "./Product/productMetricsCalculation.job.ts";
@@ -50,6 +50,20 @@ import { BreakEnforcementMonitorJob } from "./staff/BreakEnforcementMonitor.job.
 import { LaborCostSnapshotJob } from "./staff/LaborCostSnapshot.job.ts";
 import { CommissionCalculationJob } from "./staff/CommissionCalculation.job.ts";
 import { TipPoolCalculationJob } from "./staff/TipPoolCalculation.job.ts";
+import { MenuAnalyticsAggregationJob } from "./menu/MenuAnalyticsAggregation.job.ts";
+import { SnapshotCleanupJob } from "./menu/SnapshotCleanup.job.ts";
+import { MenuSnapshotJob } from "./menu/MenuSnapshot.job.ts";
+import { MenuCacheWarmingJob } from "./menu/MenuCacheWarming.job.ts";
+import { RefundProcessorJob } from "./Payment/refundProcessor.job.js";
+import { ProviderReportReconciliationJob } from "./Payment/ProviderReportReconciliation.job.ts";
+import { DashboardSnapshotJob } from "./dashboard/dashboardSnapshot.job.ts";
+import { DashboardCacheWarmingJob } from "./dashboard/dashboardCacheWarming.Job.ts";
+import { DashboardSnapshotCleanupJob } from "./dashboard/dashboardSnapshotCleanup.job.ts";
+import { AnalyticsAggregationJob } from "./Analytics/AnalyticsAggregation.job.ts";
+import { AnalyticsSnapshotCleanupJob } from "./Analytics/Analyticssnapshotcleanup.job.ts";
+import { ReservationExpiryJob } from "./Inventory/ReservationExpiry.job.js";
+import { LowStockCheckJob } from "./Inventory/LowStockCheck.job.js";
+import { InventoryReconciliationJob } from "./Inventory/InventoryReconciliation.job.js";
 
 
 
@@ -343,6 +357,78 @@ cron.schedule("*/10 * * * *", async () => {
   }
 });
 
+// Dashboard JOBS
+
+cron.schedule(DashboardSnapshotJob.cronSchedule, () => {
+  DashboardSnapshotJob.execute();
+});
+ 
+// Job 19: Cache warming for active tenants — every 5 minutes
+cron.schedule(DashboardCacheWarmingJob.cronSchedule, () => {
+  DashboardCacheWarmingJob.execute();
+});
+ 
+// Job 20: Snapshot cleanup — 1st of month at 02:00
+cron.schedule(DashboardSnapshotCleanupJob.cronSchedule, () => {
+  DashboardSnapshotCleanupJob.execute();
+});
+
+cron.schedule(DashboardSnapshotJob.cronSchedule, () => {
+    DashboardSnapshotJob.execute();
+  });
+ 
+  // Job: Cache warming for active tenants + super admin — every 5 minutes
+  cron.schedule(DashboardCacheWarmingJob.cronSchedule, () => {
+    DashboardCacheWarmingJob.execute();
+  });
+ 
+  // Job: Dashboard snapshot cleanup — 1st of month at 02:00
+  cron.schedule(DashboardSnapshotCleanupJob.cronSchedule, () => {
+    DashboardSnapshotCleanupJob.execute();
+  });
+ 
+  // ── Analytics jobs ──────────────────────────────────────────────────────
+ 
+  // Job: Monthly revenue analytics — 1st of month at 00:30
+  cron.schedule("30 0 1 * *", () => {
+    MonthlyRevenueJob.run();
+  });
+ 
+  // Job: Churn analytics — 2nd of month at 00:00 (needs previous month data)
+  cron.schedule("0 0 2 * *", () => {
+    ChurnAnalyticsJob.run();
+  });
+ 
+  // Job: ARPU & LTV — 2nd of month at 01:00
+  cron.schedule("0 1 2 * *", () => {
+    ArpuLtvJob.run();
+  });
+ 
+  // Job: Billing snapshots — 1st of month at 01:00
+  cron.schedule("0 1 1 * *", () => {
+    GenerateBillingSnapshotsJob.run();
+  });
+ 
+  // Job: Cohort retention — 1st of month at 04:00
+  cron.schedule(CohortRetentionJob.cronSchedule, () => {
+    CohortRetentionJob.run();
+  });
+ 
+  // Job: Tenant cohort growth — 1st of month at 04:30
+  cron.schedule(TenantCohortGrowthJob.cronSchedule, () => {
+    TenantCohortGrowthJob.run();
+  });
+ 
+  // Job: Daily analytics aggregation — every day at 01:00
+  cron.schedule(AnalyticsAggregationJob.cronSchedule, () => {
+    AnalyticsAggregationJob.run();
+  });
+ 
+  // Job: Analytics snapshot cleanup — 1st of month at 03:00 (NEW)
+  cron.schedule(AnalyticsSnapshotCleanupJob.cronSchedule, () => {
+    AnalyticsSnapshotCleanupJob.execute();
+  });
+
   //📦 ORDER JOBS
 
   // Every 5 minutes - Cancel expired orders
@@ -445,6 +531,20 @@ cron.schedule("*/10 * * * *", async () => {
     }
   });
 
+  //RegisterInventoryJobs
+
+  cron.schedule(ReservationExpiryJob.cronSchedule, () => {
+    ReservationExpiryJob.run();
+  });
+ 
+  cron.schedule(LowStockCheckJob.cronSchedule, () => {
+    LowStockCheckJob.run();
+  });
+ 
+  cron.schedule(InventoryReconciliationJob.cronSchedule, () => {
+    InventoryReconciliationJob.run();
+  });
+
   //Subscription & plan Jobs
 
   cron.schedule("0 1 * * *", async () => {
@@ -487,6 +587,9 @@ cron.schedule("*/10 * * * *", async () => {
   });
 
   // 💳 PAYMENT JOBS    
+  cron.schedule(SettlementSyncJob.cronSchedule, () => {
+    SettlementSyncJob.run();
+  });
   cron.schedule("*/30 * * * *", async () => {
     console.log("[CRON] Running PaymentRetryJob");
     try {
@@ -571,6 +674,57 @@ cron.schedule("*/10 * * * *", async () => {
       await LowStockAlertJob.run();
     } catch (error) {
       console.error("[CRON] LowStockAlertJob failed:", error);
+    }
+  });
+
+
+  //Menu jobs
+
+  cron.schedule("*/15 * * * *", async () => {
+    console.log("[CRON] Running MenuCacheWarmingJob");
+    try {
+      await MenuCacheWarmingJob.run();
+    } catch (error: any) {
+      console.error("[CRON] MenuCacheWarmingJob failed:", error.message);
+    }
+  });
+
+  /**
+   * Daily Menu Snapshots
+   * Daily at 2 AM
+   */
+  cron.schedule("0 2 * * *", async () => {
+    console.log("[CRON] Running MenuSnapshotJob");
+    try {
+      await MenuSnapshotJob.run();
+    } catch (error: any) {
+      console.error("[CRON] MenuSnapshotJob failed:", error.message);
+    }
+  });
+
+  /**
+   * Analytics Aggregation
+   * Daily at 3 AM
+   */
+  cron.schedule("0 3 * * *", async () => {
+    console.log("[CRON] Running MenuAnalyticsAggregationJob");
+    try {
+      await MenuAnalyticsAggregationJob.run();
+    } catch (error: any) {
+      console.error("[CRON] MenuAnalyticsAggregationJob failed:", error.message);
+    }
+  });
+
+  /**
+   * Snapshot Cleanup
+   * Weekly on Sunday at 4 AM
+   */
+  cron.schedule("0 4 * * 0", async () => {
+    console.log("[CRON] Running SnapshotCleanupJob");
+    try {
+      await SnapshotCleanupJob.run();
+    } catch (error: any) {
+      console.error("[CRON] SnapshotCleanupJob failed:", error.message);
     }
   });
 
@@ -797,6 +951,73 @@ cron.schedule("*/5 * * * *", async () => {
     
   console.log("✅ All cron jobs scheduled successfully");
 };
+
+export function registerPaymentJobs() {
+  // ── High frequency (real-time operations) ─────────────────────────────
+
+  // Every 2 min: Poll providers for stuck payments
+  cron.schedule(PaymentPollingReconciliationJob.cronSchedule, () => {
+    PaymentPollingReconciliationJob.run();
+  });
+
+  // Every 5 min: Cancel expired payment intents
+  cron.schedule(PaymentExpiryCleanupJob.cronSchedule, () => {
+    PaymentExpiryCleanupJob.run();
+  });
+ 
+  // Every 10 min: Process pending refunds
+  cron.schedule(RefundProcessorJob.cronSchedule, () => {
+    RefundProcessorJob.run();
+  });
+ 
+  // Every 30 min: Retry failed payments
+  cron.schedule(PaymentRetryJob.cronSchedule, () => {
+    PaymentRetryJob.run();
+  });
+ 
+  // ── Medium frequency (monitoring) ─────────────────────────────────────
+ 
+  // Every hour: Check for unreviewed anomalies
+  cron.schedule(AnomalyReviewJob.cronSchedule, () => {
+    AnomalyReviewJob.run();
+  });
+ 
+  // Every hour (offset 30 min): Remind about open drawers
+  cron.schedule(CashDrawerReminderJob.cronSchedule, () => {
+    CashDrawerReminderJob.run();
+  });
+ 
+  // ── Daily ─────────────────────────────────────────────────────────────
+ 
+  // 01:00: Cashier daily reconciliation
+  cron.schedule(DailyReconciliationJob.cronSchedule, () => {
+    DailyReconciliationJob.run();
+  });
+ 
+  // 02:00: Provider report reconciliation (Stripe, EVC)
+  cron.schedule(ProviderReportReconciliationJob.cronSchedule, () => {
+    ProviderReportReconciliationJob.run();
+  });
+ 
+  // 03:00: Decay risk scores
+  cron.schedule(RiskScoreDecayJob.cronSchedule, () => {
+    RiskScoreDecayJob.run();
+  });
+ 
+  // 04:00: Detect orphaned/stuck payments
+  cron.schedule(OrphanedPaymentDetectionJob.cronSchedule, () => {
+    OrphanedPaymentDetectionJob.run();
+  });
+ 
+  // ── Weekly ────────────────────────────────────────────────────────────
+ 
+  // Sunday 03:00: Clean expired idempotency keys
+  cron.schedule(IdempotencyKeyCleanupJob.cronSchedule, () => {
+    IdempotencyKeyCleanupJob.run();
+  });
+ 
+  console.log("✅ Payment jobs registered (10 cron + 1 event-driven)");
+}
 
 export {
   AutoCompleteOrdersJob,

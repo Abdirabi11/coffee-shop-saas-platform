@@ -1,114 +1,118 @@
-import { PaymentEventBus } from "../../../events/eventBus.ts";
+import { EventBus, PaymentEventBus } from "../../../events/eventBus.ts";
+import { logWithContext } from "../../../infrastructure/observability/logger.js";
 import prisma from "../../config/prisma.ts"
 import { PaymentAnomalyDetector } from "../paymentAnomalyDetector.ts";
 
 interface ProcessCashierPaymentInput {
     orderUuid: string;
+    tenantUuid: string;
     paymentMethod: "CASH" | "CARD_TERMINAL";
-    amountTendered?: number;    
-    changeGiven?: number;       
-    processedBy: string;        
-    deviceId: string;         
-    terminalId: string;        
+    amount: number;
+    amountTendered?: number;
+    changeGiven?: number;
+    processedBy: string;
+    deviceId: string;
+    terminalId: string;
     ipAddress?: string;
-    receiptNumber?: string;  
+    receiptNumber?: string;
     notes?: string;
     idempotencyKey: string;
 };
 
 export class CashierPaymentService{
-    static async processPayment(input: ProcessCashierPaymentInput){
-        const existingIdempotency= await prisma.idempotencyKey.findUnique({
+    static async processPayment(input: ProcessCashierPaymentInput) {
+        // Idempotency check
+        const existingIdempotency = await prisma.idempotencyKey.findUnique({
             where: {
                 tenantUuid_key_route: {
                     tenantUuid: input.tenantUuid,
                     key: input.idempotencyKey,
                     route: "POST /payments/cashier/process",
                 },
-            }
+            },
         });
         if (existingIdempotency) {
             return JSON.parse(existingIdempotency.response as string);
         };
-
-        const order= await prisma.order.findUnique({
-            where: { uuid: input.orderUuid},
+ 
+        const order = await prisma.order.findUnique({
+            where: { uuid: input.orderUuid },
             include: { payment: true, items: true },
-        })
-
+        });
+    
         if (!order) {
-            throw new Error("Order not found");
-        };
+            throw new Error("ORDER_NOT_FOUND");
+        }
         if (order.payment) {
-            throw new Error("Payment already declared for this order");
+            throw new Error("PAYMENT_ALREADY_EXISTS");
         }
         if (order.status !== "READY") {
-            throw new Error(`Cannot declare payment for order in status: ${order.status}`);
-        };
-
+            throw new Error(`INVALID_ORDER_STATUS: ${order.status}`);
+        }
+    
+        // Cash-specific validations
         if (input.paymentMethod === "CASH") {
             if (!input.amountTendered) {
-                throw new Error("Amount tendered required for cash payments");
+                throw new Error("AMOUNT_TENDERED_REQUIRED");
             }
-      
+            if (input.amountTendered < order.totalAmount) {
+                throw new Error("INSUFFICIENT_AMOUNT_TENDERED");
+            }
+        
             const expectedChange = input.amountTendered - order.totalAmount;
-            
             if (input.changeGiven !== expectedChange) {
                 throw new Error(
-                    `Change calculation error: Expected ${expectedChange}, got ${input.changeGiven}`
+                    `CHANGE_CALCULATION_ERROR: Expected ${expectedChange}, got ${input.changeGiven}`
                 );
             }
-      
-            if (input.amountTendered < order.totalAmount) {
-                throw new Error("Amount tendered less than order total");
-            }
         };
-
-        //Validate amount matches order total
-        const amountDifference= Math.abs(input.amount - order.totalAmount);
-        const TOLERANCE = 100;
-
+ 
+        // Validate amount matches order total (with tolerance for rounding)
+        const amountDifference = Math.abs(input.amount - order.totalAmount);
+        const TOLERANCE = 100; // 1 dollar tolerance
+    
         if (amountDifference > TOLERANCE) {
             throw new Error(
-              `Payment amount ${input.amount} does not match order total ${order.totalAmount}`
+                `AMOUNT_MISMATCH: Payment ${input.amount} vs order ${order.totalAmount}`
             );
         };
-
+ 
         const drawer = await this.getActiveCashDrawer(
+            order.tenantUuid,
             order.storeUuid,
             input.terminalId
         );
-      
-        //Create payment
-        const payment= await prisma.$transaction(async (tx) => {
-            const payment= await tx.payment.create({
+    
+        // Create payment in transaction
+        const payment = await prisma.$transaction(async (tx) => {
+            const payment = await tx.payment.create({
                 data: {
                     orderUuid: input.orderUuid,
                     tenantUuid: order.tenantUuid,
                     storeUuid: order.storeUuid,
-                    
+            
                     amount: order.totalAmount,
                     currency: order.currency,
                     subtotal: order.subtotal,
                     tax: order.taxAmount,
                     discount: order.discountAmount,
-        
+            
                     paymentFlow: "CASHIER",
                     paymentMethod: input.paymentMethod,
-                    status: "COMPLETED", 
-                    
+                    status: "COMPLETED",
+            
                     amountTendered: input.amountTendered,
                     changeGiven: input.changeGiven,
-                    
+        
                     processedBy: input.processedBy,
                     processedAt: new Date(),
                     deviceId: input.deviceId,
                     terminalId: input.terminalId,
                     ipAddress: input.ipAddress,
-                    
+            
                     receiptNumber: input.receiptNumber,
                     receiptPrinted: false,
-                    
+            
                     snapshot: {
                         notes: input.notes,
                         terminalId: input.terminalId,
@@ -123,10 +127,10 @@ export class CashierPaymentService{
                         tax: order.taxAmount,
                         discount: order.discountAmount,
                     },
-                } 
+                },
             });
-
-            // Update order - MARK AS PAID
+        
+            // Mark order as paid
             await tx.order.update({
                 where: { uuid: input.orderUuid },
                 data: {
@@ -134,20 +138,26 @@ export class CashierPaymentService{
                     paymentStatus: "COMPLETED",
                 },
             });
-
-            if(drawer){
+    
+            // Update cash drawer
+            if (drawer) {
+                // For cash: the net cash added to the drawer is (tendered - change)
+                const netCashAdded =
+                input.paymentMethod === "CASH"
+                    ? (input.amountTendered ?? 0) - (input.changeGiven ?? 0)
+                    : 0;
+        
                 await tx.cashDrawer.update({
-                    where: {uuid: drawer.uuid},
+                    where: { uuid: drawer.uuid },
                     data: {
-                        expectedCash:{
-                            increment: input.paymentMethod === "CASH"
-                              ? input.amountTendered - input.changeGiven
-                              : 0
+                        expectedCash: {
+                            increment: netCashAdded,
                         },
                         expectedCard: {
-                            increment: input.paymentMethod === "CARD_TERMINAL"
-                              ? order.totalAmount
-                              : 0,
+                            increment:
+                                input.paymentMethod === "CARD_TERMINAL"
+                                ? order.totalAmount
+                                : 0,
                         },
                         cashSalesCount: {
                             increment: input.paymentMethod === "CASH" ? 1 : 0,
@@ -156,11 +166,11 @@ export class CashierPaymentService{
                             increment: input.paymentMethod === "CARD_TERMINAL" ? 1 : 0,
                         },
                         totalSales: { increment: order.totalAmount },
-                    }
-                })
-            };
-
-            //audit snapshot
+                    },
+                });
+            }
+    
+            // Audit snapshot
             await tx.paymentAuditSnapshot.create({
                 data: {
                     tenantUuid: order.tenantUuid,
@@ -180,11 +190,11 @@ export class CashierPaymentService{
                     },
                 },
             });
-
+        
             return payment;
         });
-
-        //Storing idempotency key
+        
+        // Store idempotency key
         await prisma.idempotencyKey.create({
             data: {
                 tenantUuid: order.tenantUuid,
@@ -192,11 +202,11 @@ export class CashierPaymentService{
                 route: "POST /payments/cashier/process",
                 response: payment,
                 statusCode: 201,
-                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-
-        PaymentEventBus.emit("CASHIER_PAYMENT_COMPLETED", {
+ 
+        EventBus.emit("CASHIER_PAYMENT_COMPLETED", {
             paymentUuid: payment.uuid,
             orderUuid: payment.orderUuid,
             tenantUuid: payment.tenantUuid,
@@ -204,18 +214,27 @@ export class CashierPaymentService{
             amount: payment.amount,
             paymentMethod: payment.paymentMethod,
             processedBy: input.processedBy,
-            timestamp: payment.declaredAt,
+            timestamp: payment.processedAt, // FIX #2: Was `payment.declaredAt`
             terminalId: input.terminalId,
         });
-  
-        // Run anomaly detection (async - doesn't block response)
+ 
+        // Run anomaly detection (async — doesn't block response)
         setImmediate(() => {
             PaymentAnomalyDetector.analyze(payment.uuid).catch((err) => {
-                console.error("[AnomalyDetection] Failed:", err);
+                logWithContext("error", "[AnomalyDetection] Failed", {
+                    paymentUuid: payment.uuid,
+                    error: err.message,
+                });
             });
         });
-  
-        console.log(`[CashierPayment] Processed: ${payment.uuid}`);
+    
+        logWithContext("info", "[CashierPayment] Processed", {
+            paymentUuid: payment.uuid,
+            orderUuid: order.uuid,
+            method: input.paymentMethod,
+            amount: order.totalAmount,
+        });
+ 
         return payment;
     }
 
@@ -227,27 +246,29 @@ export class CashierPaymentService{
         managerPin?: string;
     }) {
         if (!input.voidReason || input.voidReason.trim().length < 10) {
-            throw new Error("Void reason must be at least 10 characters");
+            throw new Error("VOID_REASON_TOO_SHORT");
         }
-      
+    
         const payment = await prisma.payment.findUnique({
             where: { uuid: input.paymentUuid },
             include: { order: true },
         });
+    
         if (!payment) {
-            throw new Error("Payment not found");
-        };
+            throw new Error("PAYMENT_NOT_FOUND");
+        }
         if (payment.status !== "COMPLETED") {
-            throw new Error(`Cannot void payment in status: ${payment.status}`);
-        };
-        
-        const paymentAge = Date.now() - payment.processedAt.getTime();
-        const MAX_VOID_AGE = 24 * 60 * 60 * 1000; 
-
+            throw new Error(`CANNOT_VOID_STATUS: ${payment.status}`);
+        }
+    
+        // Void window: 24 hours
+        const paymentAge = Date.now() - (payment.processedAt?.getTime() ?? payment.createdAt.getTime());
+        const MAX_VOID_AGE = 24 * 60 * 60 * 1000;
+    
         if (paymentAge > MAX_VOID_AGE) {
-            throw new Error("Payment too old to void - issue refund instead");
-        };
-
+            throw new Error("PAYMENT_TOO_OLD_TO_VOID");
+        }
+ 
         const updated = await prisma.$transaction(async (tx) => {
             const updated = await tx.payment.update({
                 where: { uuid: input.paymentUuid },
@@ -258,8 +279,8 @@ export class CashierPaymentService{
                     voidReason: input.voidReason,
                 },
             });
-
-            // Updating order back to READY
+    
+            // Revert order to READY
             await tx.order.update({
                 where: { uuid: payment.orderUuid },
                 data: {
@@ -267,35 +288,46 @@ export class CashierPaymentService{
                     paymentStatus: "PENDING",
                 },
             });
-
-            // Reverse cash drawer entry
+        
             const drawer = await tx.cashDrawer.findFirst({
                 where: {
                     storeUuid: payment.storeUuid,
                     terminalId: payment.terminalId,
                     status: "OPEN",
+                    tenantUuid: payment.tenantUuid, // FIX #3: tenant isolation
                 },
             });
-
+        
             if (drawer) {
+                // FIX #1: Reverse the EXACT amount that was added to the drawer
+                const cashToReverse =
+                payment.paymentMethod === "CASH"
+                    ? (payment.amountTendered ?? 0) - (payment.changeGiven ?? 0)
+                    : 0;
+        
                 await tx.cashDrawer.update({
                     where: { uuid: drawer.uuid },
                     data: {
                         expectedCash: {
-                        decrement: payment.paymentMethod === "CASH"
-                            ? payment.amount
-                            : 0,
+                            decrement: cashToReverse,
                         },
                         expectedCard: {
-                        decrement: payment.paymentMethod === "CARD_TERMINAL"
-                            ? payment.amount
-                            : 0,
+                            decrement:
+                                payment.paymentMethod === "CARD_TERMINAL"
+                                ? payment.amount
+                                : 0,
+                            },
+                            cashSalesCount: {
+                            decrement: payment.paymentMethod === "CASH" ? 1 : 0,
+                        },
+                        cardSalesCount: {
+                            decrement: payment.paymentMethod === "CARD_TERMINAL" ? 1 : 0,
                         },
                         totalSales: { decrement: payment.amount },
                     },
                 });
-            };
-
+            }
+        
             // Audit snapshot
             await tx.paymentAuditSnapshot.create({
                 data: {
@@ -310,31 +342,41 @@ export class CashierPaymentService{
                     paymentState: updated,
                     orderState: payment.order,
                     metadata: {
-                      voidReason: input.voidReason,
+                        voidReason: input.voidReason,
                     },
                 },
             });
-
+    
             return updated;
         });
-
-        PaymentEventBus.emit("PAYMENT_VOIDED", {
+    
+        EventBus.emit("PAYMENT_VOIDED", {
             paymentUuid: updated.uuid,
             orderUuid: updated.orderUuid,
+            tenantUuid: payment.tenantUuid,
+            storeUuid: payment.storeUuid,
             voidedBy: input.voidedBy,
             voidReason: input.voidReason,
         });
-
+ 
+        logWithContext("warn", "[CashierPayment] Voided", {
+            paymentUuid: updated.uuid,
+            voidedBy: input.voidedBy,
+            reason: input.voidReason,
+        });
+    
         return updated;
     }
 
     //Get active cash drawer for terminal
     private static async getActiveCashDrawer(
         storeUuid: string,
-        terminalId: string
+        terminalId: string,
+        tenantUuid: string,
     ) {
         return prisma.cashDrawer.findFirst({
             where: {
+                tenantUuid,
                 storeUuid,
                 terminalId,
                 status: "OPEN",
@@ -360,19 +402,27 @@ export class CashierPaymentService{
         const updated = await prisma.payment.update({
             where: { uuid: input.paymentUuid },
             data: {
-              originalAmount: payment.amount,
-              amount: input.correctAmount,
-              correctedBy: input.correctedBy,
-              correctedAt: new Date(),
-              correctionReason: input.correctionReason,
+                originalAmount: payment.amount,
+                amount: input.correctAmount,
+                correctedBy: input.correctedBy,
+                correctedAt: new Date(),
+                correctionReason: input.correctionReason,
             },
         });
-      
-        PaymentEventBus.emit("PAYMENT_CORRECTED", {
+ 
+        EventBus.emit("PAYMENT_CORRECTED", {
             paymentUuid: updated.uuid,
+            tenantUuid: payment.tenantUuid,
+            storeUuid: payment.storeUuid,
             originalAmount: payment.amount,
             correctedAmount: input.correctAmount,
             correctedBy: input.correctedBy,
+        });
+    
+        logWithContext("warn", "[CashierPayment] Corrected", {
+            paymentUuid: updated.uuid,
+            originalAmount: payment.amount,
+            correctedAmount: input.correctAmount,
         });
 
         return updated;

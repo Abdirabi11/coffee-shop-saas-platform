@@ -1,7 +1,8 @@
 import prisma from "../../config/prisma.ts"
+import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
-export class PaymentDisputeService{
+export class PaymentDisputeService {
     static async createFromWebhook(input: {
         provider: string;
         providerDisputeId: string;
@@ -16,55 +17,58 @@ export class PaymentDisputeService{
             where: { uuid: input.paymentUuid },
             include: { order: true },
         });
-      
-        if (!payment) {
-            throw new Error("Payment not found");
-        };
     
+        if (!payment) {
+            throw new Error("PAYMENT_NOT_FOUND");
+        }
+    
+        // Idempotency
         const existing = await prisma.paymentDispute.findUnique({
             where: { providerDisputeId: input.providerDisputeId },
         });
     
         if (existing) {
             return existing;
-        };
-
+        }
+    
         const dispute = await prisma.paymentDispute.create({
             data: {
                 tenantUuid: payment.tenantUuid,
                 paymentUuid: payment.uuid,
                 orderUuid: payment.orderUuid,
                 storeUuid: payment.storeUuid,
-                
+        
                 provider: input.provider.toUpperCase(),
                 providerDisputeId: input.providerDisputeId,
-                
+        
                 amount: input.amount,
                 currency: payment.currency,
-                
+        
                 reason: this.normalizeReason(input.reason),
                 reasonCode: input.reasonCode,
-                
+        
                 status: "OPEN",
                 evidenceDueBy: input.evidenceDueBy,
-                
+        
                 snapshot: input.snapshot,
-                
+        
                 notifiedAt: new Date(),
             },
         });
-
+    
         await prisma.adminAlert.create({
             data: {
                 tenantUuid: payment.tenantUuid,
                 storeUuid: payment.storeUuid,
-                alertType: "PAYMENT_DISPUTE",
+                alertType: "PAYMENT_FAILED", 
                 category: "FINANCIAL",
                 level: "CRITICAL",
                 priority: "HIGH",
+                source: "WEBHOOK",
                 title: "Payment Dispute Filed",
-                message: `Dispute filed for payment ${payment.uuid} - Amount: ${input.amount / 100}`,
+                message: `Dispute filed for payment ${payment.uuid} — Amount: ${input.amount / 100} ${payment.currency}`,
                 context: {
+                    subType: "DISPUTE_OPENED", // Distinguish from regular payment failures
                     disputeUuid: dispute.uuid,
                     paymentUuid: payment.uuid,
                     orderUuid: payment.orderUuid,
@@ -74,17 +78,46 @@ export class PaymentDisputeService{
                 },
             },
         });
-      
-        logWithContext("warn", "Payment dispute created", {
+    
+        // FIX #3: Audit trail
+        await prisma.paymentAuditSnapshot.create({
+            data: {
+                tenantUuid: payment.tenantUuid,
+                paymentUuid: payment.uuid,
+                orderUuid: payment.orderUuid,
+                storeUuid: payment.storeUuid,
+                reason: "DISPUTE_OPENED",
+                triggeredBy: "SYSTEM",
+                beforeStatus: payment.status,
+                afterStatus: payment.status, // Payment status doesn't change on dispute
+                paymentState: payment,
+                orderState: payment.order,
+                metadata: {
+                disputeUuid: dispute.uuid,
+                providerDisputeId: input.providerDisputeId,
+                disputeAmount: input.amount,
+                disputeReason: input.reason,
+                },
+            },
+        });
+    
+        EventBus.emit("DISPUTE_CREATED", {
+            disputeUuid: dispute.uuid,
+            paymentUuid: payment.uuid,
+            tenantUuid: payment.tenantUuid,
+            amount: input.amount,
+        });
+    
+        logWithContext("warn", "[Dispute] Created from webhook", {
             disputeUuid: dispute.uuid,
             paymentUuid: payment.uuid,
             amount: input.amount,
             reason: input.reason,
         });
-      
+    
         return dispute;
     }
-
+    
     static async submitEvidence(input: {
         disputeUuid: string;
         evidence: {
@@ -104,22 +137,22 @@ export class PaymentDisputeService{
         const dispute = await prisma.paymentDispute.findUnique({
             where: { uuid: input.disputeUuid },
         });
-      
+    
         if (!dispute) {
-            throw new Error("Dispute not found");
-        };
-      
+            throw new Error("DISPUTE_NOT_FOUND");
+        }
+    
         if (dispute.status !== "OPEN" && dispute.status !== "NEEDS_RESPONSE") {
-            throw new Error(`Cannot submit evidence for dispute in status ${dispute.status}`);
-        };
-      
-          // Submit to provider
+            throw new Error(`INVALID_DISPUTE_STATUS: ${dispute.status}`);
+        }
+    
+        // Submit to provider
         await this.submitEvidenceToProvider(
             dispute.provider,
             dispute.providerDisputeId,
             input.evidence
         );
-
+    
         const updated = await prisma.paymentDispute.update({
             where: { uuid: input.disputeUuid },
             data: {
@@ -127,26 +160,26 @@ export class PaymentDisputeService{
                 evidenceSubmitted: input.evidence,
             },
         });
-      
-        logWithContext("info", "Dispute evidence submitted", {
+    
+        logWithContext("info", "[Dispute] Evidence submitted", {
             disputeUuid: updated.uuid,
             submittedBy: input.submittedBy,
         });
-      
+    
         return updated;
     }
-
+    
     static async acceptDispute(input: {
         disputeUuid: string;
         acceptedBy: string;
         notes?: string;
-    }) { 
+    }) {
         const dispute = await prisma.paymentDispute.findUnique({
             where: { uuid: input.disputeUuid },
         });
     
         if (!dispute) {
-            throw new Error("Dispute not found");
+            throw new Error("DISPUTE_NOT_FOUND");
         }
     
         // Notify provider
@@ -155,7 +188,6 @@ export class PaymentDisputeService{
             dispute.providerDisputeId
         );
     
-        // Update dispute
         const updated = await prisma.paymentDispute.update({
             where: { uuid: input.disputeUuid },
             data: {
@@ -168,70 +200,76 @@ export class PaymentDisputeService{
             },
         });
     
-        logWithContext("warn", "Dispute accepted", {
+        logWithContext("warn", "[Dispute] Accepted (chargeback)", {
             disputeUuid: updated.uuid,
             acceptedBy: input.acceptedBy,
+            amount: dispute.amount,
         });
     
         return updated;
     }
-
+ 
     static async updateFromWebhook(input: {
         providerDisputeId: string;
         status: string;
         resolution?: string;
         snapshot: any;
     }) {
-        
         const dispute = await prisma.paymentDispute.findUnique({
             where: { providerDisputeId: input.providerDisputeId },
         });
     
         if (!dispute) {
-            throw new Error("Dispute not found");
+            throw new Error("DISPUTE_NOT_FOUND");
         }
     
         const status = this.normalizeStatus(input.status);
-        const resolution = input.resolution ? this.normalizeResolution(input.resolution) : null;
+        const resolution = input.resolution
+            ? this.normalizeResolution(input.resolution)
+            : null;
+    
+        const isResolved = status === "WON" || status === "LOST" || status === "ACCEPTED";
     
         const updated = await prisma.paymentDispute.update({
             where: { uuid: dispute.uuid },
             data: {
                 status,
                 ...(resolution && { resolution }),
-                ...(status === "WON" || status === "LOST" || status === "ACCEPTED" ? {
-                    resolvedAt: new Date(),
-                } : {}),
-                ...(status === "LOST" ? {
-                    chargedBackAmount: dispute.amount,
-                    chargedBackAt: new Date(),
-                } : {}),
+                ...(isResolved ? { resolvedAt: new Date() } : {}),
+                ...(status === "LOST"
+                    ? {
+                        chargedBackAmount: dispute.amount,
+                        chargedBackAt: new Date(),
+                        }
+                    : {}),
                 snapshot: input.snapshot,
             },
         });
     
-        // Create notification
         if (status === "WON" || status === "LOST") {
             await prisma.adminAlert.create({
                 data: {
                     tenantUuid: dispute.tenantUuid,
                     storeUuid: dispute.storeUuid,
-                    alertType: status === "WON" ? "DISPUTE_WON" : "DISPUTE_LOST",
+                    alertType: "PAYMENT_FAILED", // FIX #2: Valid AlertType enum
                     category: "FINANCIAL",
                     level: status === "WON" ? "INFO" : "CRITICAL",
-                    priority: "HIGH",
+                    priority: status === "WON" ? "LOW" : "HIGH",
+                    source: "WEBHOOK",
                     title: `Dispute ${status === "WON" ? "Won" : "Lost"}`,
-                    message: `Dispute ${dispute.providerDisputeId} was ${status === "WON" ? "won" : "lost"}`,
+                    message: `Dispute ${dispute.providerDisputeId} was ${status.toLowerCase()} — Amount: ${dispute.amount / 100}`,
                     context: {
+                        subType: `DISPUTE_${status}`, // Distinguish in context
                         disputeUuid: dispute.uuid,
                         paymentUuid: dispute.paymentUuid,
                         amount: dispute.amount,
+                        resolution: status,
                     },
                 },
             });
         }
     
-        logWithContext("info", "Dispute updated from webhook", {
+        logWithContext("info", "[Dispute] Updated from webhook", {
             disputeUuid: updated.uuid,
             status,
             resolution,
@@ -239,14 +277,14 @@ export class PaymentDisputeService{
     
         return updated;
     }
-
+ 
     private static async submitEvidenceToProvider(
         provider: string,
         disputeId: string,
         evidence: any
     ) {
         switch (provider) {
-            case "STRIPE":
+            case "STRIPE": {
                 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
                 await stripe.disputes.update(disputeId, {
                     evidence: {
@@ -262,63 +300,66 @@ export class PaymentDisputeService{
                         customer_communication: evidence.customerCommunication,
                     },
                 });
-            break;
-          
+                break;
+            }
             default:
-                throw new Error(`Evidence submission not supported for ${provider}`);
+                throw new Error(
+                `EVIDENCE_SUBMISSION_NOT_SUPPORTED: ${provider}`
+                );
         }
     }
     
-    private static async acceptDisputeWithProvider(provider: string, disputeId: string) {
-        
+    private static async acceptDisputeWithProvider(
+        provider: string,
+        disputeId: string
+    ) {
         switch (provider) {
-          case "STRIPE":
-            const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-            await stripe.disputes.close(disputeId);
-            break;
-          
-          default:
-            throw new Error(`Dispute acceptance not supported for ${provider}`);
+            case "STRIPE": {
+                const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+                await stripe.disputes.close(disputeId);
+                break;
+            }
+            default:
+                throw new Error(
+                `DISPUTE_ACCEPTANCE_NOT_SUPPORTED: ${provider}`
+                );
         }
     }
     
     private static normalizeReason(reason: string): string {
         const mapping: Record<string, string> = {
-            "fraudulent": "FRAUDULENT",
-            "duplicate": "DUPLICATE",
-            "product_not_received": "PRODUCT_NOT_RECEIVED",
-            "product_unacceptable": "PRODUCT_UNACCEPTABLE",
-            "subscription_canceled": "SUBSCRIPTION_CANCELLED",
-            "credit_not_processed": "CREDIT_NOT_PROCESSED",
-            "general": "GENERAL",
+            fraudulent: "FRAUDULENT",
+            duplicate: "DUPLICATE",
+            product_not_received: "PRODUCT_NOT_RECEIVED",
+            product_unacceptable: "PRODUCT_UNACCEPTABLE",
+            subscription_canceled: "SUBSCRIPTION_CANCELLED",
+            credit_not_processed: "CREDIT_NOT_PROCESSED",
+            general: "GENERAL",
         };
-    
         return mapping[reason.toLowerCase()] || "GENERAL";
     }
     
     private static normalizeStatus(status: string): string {
         const mapping: Record<string, string> = {
-            "warning_needs_response": "NEEDS_RESPONSE",
-            "warning_under_review": "UNDER_REVIEW",
-            "needs_response": "NEEDS_RESPONSE",
-            "under_review": "UNDER_REVIEW",
-            "won": "WON",
-            "lost": "LOST",
-            "accepted": "ACCEPTED",
-            "expired": "EXPIRED",
+            warning_needs_response: "NEEDS_RESPONSE",
+            warning_under_review: "UNDER_REVIEW",
+            needs_response: "NEEDS_RESPONSE",
+            under_review: "UNDER_REVIEW",
+            won: "WON",
+            lost: "LOST",
+            accepted: "ACCEPTED",
+            expired: "EXPIRED",
         };
-    
         return mapping[status.toLowerCase()] || "OPEN";
     }
     
     private static normalizeResolution(resolution: string): string {
         const mapping: Record<string, string> = {
-            "won": "WON",
-            "lost": "LOST",
-            "accepted": "ACCEPTED",
-            "withdrawn": "WITHDRAWN",
+            won: "WON",
+            lost: "LOST",
+            accepted: "ACCEPTED",
+            withdrawn: "WITHDRAWN",
         };
-    
         return mapping[resolution.toLowerCase()] || "LOST";
     }
 }

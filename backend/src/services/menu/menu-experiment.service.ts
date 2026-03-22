@@ -1,4 +1,4 @@
-import { MenuEventService } from "./menu-events.ts";
+import { MenuEventService } from "../../events/menu.events.js";
 
 export class MenuExperimentService{
     static async apply(menu: any,  experiment?: {

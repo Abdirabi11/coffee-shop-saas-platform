@@ -1,8 +1,9 @@
 import prisma from "../../config/prisma.ts"
-import { PaymentStateMachine } from "../../domain/payments/paymentStateMachine.ts";
+import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.js";
 import { EventBus } from "../../events/eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
-export class PaymentCancellationService{
+export class PaymentCancellationService {
     static async cancel(input: {
         paymentUuid: string;
         reason: string;
@@ -13,17 +14,17 @@ export class PaymentCancellationService{
             where: { uuid: input.paymentUuid },
             include: { order: true },
         });
-          
+    
         if (!payment) throw new Error("PAYMENT_NOT_FOUND");
-
-        if (payment.status === "PAID" || payment.status === "REFUNDED") {
+    
+        if (payment.status === "PAID" || payment.status === "COMPLETED" || payment.status === "REFUNDED") {
             throw new Error("CANNOT_CANCEL_COMPLETED_PAYMENT");
-        };
-
-        PaymentStateMachine.assertTransition( payment.status, "CANCELLED" );
-
-        const updated= await prisma.$transaction(async (tx) => {
-            const updated= await tx.payment.update({
+        }
+    
+        PaymentStateMachine.assertTransition(payment.status, "CANCELLED");
+    
+        const updated = await prisma.$transaction(async (tx) => {
+            const updated = await tx.payment.update({
                 where: { uuid: payment.uuid },
                 data: {
                     status: "CANCELLED",
@@ -33,17 +34,15 @@ export class PaymentCancellationService{
                     cancelledByUuid: input.cancelledByUuid,
                 },
             });
-
-            // Update order status
+    
             await tx.order.update({
                 where: { uuid: payment.orderUuid },
                 data: {
-                  status: "CANCELLED",
-                  paymentStatus: "CANCELLED",
+                    status: "CANCELLED",
+                    paymentStatus: "CANCELLED",
                 },
             });
-
-            // Create audit snapshot
+    
             await tx.paymentAuditSnapshot.create({
                 data: {
                     tenantUuid: payment.tenantUuid,
@@ -62,9 +61,10 @@ export class PaymentCancellationService{
                     },
                 },
             });
+        
             return updated;
         });
-
+    
         EventBus.emit("PAYMENT_CANCELLED", {
             paymentUuid: payment.uuid,
             orderUuid: payment.orderUuid,
@@ -73,8 +73,13 @@ export class PaymentCancellationService{
             reason: input.reason,
             cancelledBy: input.cancelledBy,
         });
-      
-        console.log(`[PaymentCancellation] Cancelled: ${payment.uuid} - ${input.reason}`);
+    
+        logWithContext("info", "[PaymentCancellation] Cancelled", {
+            paymentUuid: payment.uuid,
+            reason: input.reason,
+            cancelledBy: input.cancelledBy,
+        });
+    
         return updated;
     }
-};
+}

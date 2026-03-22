@@ -1,48 +1,42 @@
-import { run } from "node:test";
-import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.ts";
-import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
-import { RefundService } from "../../services/payment/refund.service.ts";
+import prisma from "../../config/prisma.js"
+import { RefundService } from "../../services/payment/Refund.service.js";
+import { logWithContext } from "../../infrastructure/observability/logger.js";
 
-export class RefundProcessorJob{
-    static async run(refundUuid: string){
-        const refunds= await prisma.refund.findMany({
-            where: { status: "REQUESTED"},
+export class RefundProcessorJob {
+  static cronSchedule = "*/10 * * * *";
+
+    static async run() {
+        logWithContext("info", "[RefundProcessor] Starting");
+    
+        const pendingRefunds = await prisma.refund.findMany({
+            where: { status: "REQUESTED" },
+            orderBy: { createdAt: "asc" },
             take: 20,
         });
-
-        for (const refund of refunds){
+    
+        if (pendingRefunds.length === 0) {
+            logWithContext("info", "[RefundProcessor] No pending refunds");
+            return { processed: 0, failed: 0 };
+        }
+    
+        let processed = 0;
+        let failed = 0;
+    
+        for (const refund of pendingRefunds) {
             try {
-                EventBus.emit("REFUND_PROCESSING", {
+                await RefundService.processRefund(refund.uuid);    
+                processed++;
+            } catch (error: any) {
+                failed++;
+                logWithContext("error", "[RefundProcessor] Failed", {
                     refundUuid: refund.uuid,
                     orderUuid: refund.orderUuid,
-                    storeUuid: refund.storeUuid,
+                    error: error.message,
                 });
-
-                await RefundService.processRefund(refundUuid);
-
-                EventBus.emit("REFUND_COMPLETED", {
-                    refundUuid: refund.uuid,
-                    orderUuid: refund.orderUuid,
-                    storeUuid: refund.storeUuid,
-                    amount: refund.amount,
-                });
-            } catch (err:any) {
-                await DeadLetterQueue.record("REFUND_PROCESSOR", {
-                    refundUuid: refund.uuid,
-                    orderUuid: refund.orderUuid,
-                    reason: err.message,
-                });
-
-                EventBus.emit("REFUND_FAILED", {
-                    refundUuid: refund.uuid,
-                    orderUuid: refund.orderUuid,
-                    storeUuid: refund.storeUuid,
-                    reason: err.message,
-                });
-
-                console.error("Refund failed", refund.uuid, err);
             }
         }
+    
+        logWithContext("info", "[RefundProcessor] Completed", { processed, failed });
+        return { processed, failed };
     }
-};
+}

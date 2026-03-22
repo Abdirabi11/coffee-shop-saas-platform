@@ -1,45 +1,58 @@
+import { EVCPlusProvider } from "./EVCPlusProvider.ts";
+import { PaymentProvider } from "./paymentProvider.interface.ts";
 import { ProviderMap } from "./provider-map.ts";
+import { StripeProvider } from "./stripe.provider.ts";
 
-// interface PaymentIntentResult {
-//     providerRef: string;
-//     clientSecret?: string;
-//     status: "REQUIRES_ACTION" | "PAID" | "FAILED";
-// };
-
-// You should normalize to:
-// INSUFFICIENT_FUNDS
-// CARD_DECLINED
-// PROVIDER_TIMEOUT
-// PROVIDER_UNAVAILABLE
-// FRAUD_SUSPECTED
-export class PaymentProviderAdapter{
+export const ProviderMap: Record<string, PaymentProvider> = {
+    STRIPE: new StripeProvider(),
+    WALLET: new WalletProvider(),
+    EVC_PLUS: new EVCPlusProvider(),
+};
+ 
+export function getProvider(provider: string): PaymentProvider {
+    const key = provider.toUpperCase();
+    const impl = ProviderMap[key];
+    
+    if (!impl) {
+        throw new Error(`UNSUPPORTED_PROVIDER: ${provider}`);
+    }
+    
+    return impl;
+}
+ 
+export class PaymentProviderAdapter {
     static createPaymentIntent(input: {
         provider: string;
         amount: number;
         currency: string;
         metadata: Record<string, any>;
-    }){
-        const providerImpl = ProviderMap[input.provider];
-        if (!providerImpl) throw new Error("UNSUPPORTED_PROVIDER");
-    
-        return providerImpl.createIntent(input);
+    }) {
+        const provider = getProvider(input.provider);
+        return provider.createIntent(input);
     }
-
+ 
     static refund(input: {
         provider: string;
         providerRef: string;
         amount: number;
     }) {
-        const providerImpl = ProviderMap[input.provider];
-        if (!providerImpl) throw new Error("UNSUPPORTED_PROVIDER");
-    
-        return providerImpl.refund({
-          providerRef: input.providerRef,
-          amount: input.amount,
+        const provider = getProvider(input.provider);
+        return provider.refund({
+            providerRef: input.providerRef,
+            amount: input.amount,
         });
     }
-    
-    static async lookup(payment: any){
-        return ProviderMap[payment.provider].lookup(payment.providerRef);
+ 
+    static async lookup(payment: { provider: string; providerRef: string }) {
+        const provider = getProvider(payment.provider);
+        return provider.lookup(payment.providerRef);
     }
-};
+    
+    static async cancel(input: { provider: string; providerRef: string }) {
+        const provider = getProvider(input.provider);
+        if (provider.cancel) {
+            await provider.cancel({ providerRef: input.providerRef });
+        }
+        // If provider doesn't support cancel, silently ignore
+    }
+}

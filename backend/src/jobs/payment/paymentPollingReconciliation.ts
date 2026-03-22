@@ -1,19 +1,19 @@
-import dayjs from "dayjs";
-import prisma from "../../config/prisma.ts"
-import { PaymentStateMachine } from "../../domain/payments/paymentStateMachine.ts";
-import { PaymentEventBus } from "../../events/eventBus.ts";
-import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.ts";
+import prisma from "../../config/prisma.js"
+import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.js";
+import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.js";
+import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { eventBus } from "../../events/eventBus.js";
 
 
-//* Check stuck payments by polling provider
-//* Runs every 5 minutes
 export class PaymentPollingReconciliationJob {
+    static cronSchedule = "*/2 * * * *";
+ 
     static async run() {
-        console.log("[PaymentPollingReconciliation] Starting...");
-
-        const stuckPayments = await prisma.payment.findMany({
+        logWithContext("info", "[PaymentPolling] Starting");
+    
+            const stuckPayments = await prisma.payment.findMany({
             where: {
-                paymentFlow: "PROVIDER", 
+                paymentFlow: "PROVIDER",
                 status: { in: ["PENDING", "RETRYING"] },
                 updatedAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
             },
@@ -21,24 +21,24 @@ export class PaymentPollingReconciliationJob {
         });
     
         if (stuckPayments.length === 0) {
-            console.log("[PaymentPollingReconciliation] No stuck payments found");
-            return;
+            logWithContext("info", "[PaymentPolling] No stuck payments");
+            return { reconciled: 0, failed: 0 };
         }
     
-        console.log(`[PaymentPollingReconciliation] Found ${stuckPayments.length} stuck payments`);
+        logWithContext("info", "[PaymentPolling] Found stuck payments", {
+            count: stuckPayments.length,
+        });
     
         let reconciled = 0;
         let failed = 0;
-  
+    
         for (const payment of stuckPayments) {
             try {
-                // Poll provider for actual status
                 const providerState = await PaymentProviderAdapter.lookup(payment);
-
-                // If provider says PAID but we have it as PENDING
+        
                 if (providerState.status === "PAID" && payment.status !== "PAID") {
-                    PaymentStateMachine.assertTransition(payment.status, "PAID");
-
+                    if (!PaymentStateMachine.canTransition(payment.status, "PAID")) continue;
+            
                     await prisma.$transaction(async (tx) => {
                         await tx.payment.update({
                             where: { uuid: payment.uuid },
@@ -49,53 +49,54 @@ export class PaymentPollingReconciliationJob {
                                 snapshot: providerState.snapshot,
                             },
                         });
-
+            
                         await tx.order.update({
                             where: { uuid: payment.orderUuid },
-                            data: {
-                                status: "PAID",
-                                paymentStatus: "COMPLETED",
-                            },
+                            data: { status: "PAID", paymentStatus: "COMPLETED" },
                         });
                     });
-
-                    PaymentEventBus.emit("PAYMENT_RECONCILED", {
+            
+                    eventBus.emit("PAYMENT_RECONCILED", {
                         paymentUuid: payment.uuid,
                         orderUuid: payment.orderUuid,
+                        tenantUuid: payment.tenantUuid,
                         storeUuid: payment.storeUuid,
                         reconciledBy: "POLLING",
                     });
-
+            
                     reconciled++;
-                    
-                }
-                // If provider says FAILED but we have it as PENDING
-                else if (providerState.status === "FAILED" && payment.status !== "FAILED") {
-                    PaymentStateMachine.assertTransition(payment.status, "FAILED");
-
+                } else if (providerState.status === "FAILED" && payment.status !== "FAILED") {
+                    if (!PaymentStateMachine.canTransition(payment.status, "FAILED")) continue;
+            
                     await prisma.payment.update({
                         where: { uuid: payment.uuid },
-                        data: { 
+                        data: {
                             status: "FAILED",
                             failedAt: new Date(),
+                            failureCode: "PROVIDER_DECLINED",
+                            failureReason: "Reconciliation: provider reports failed",
                         },
                     });
-
-                    PaymentEventBus.emit("PAYMENT_FAILED", {
+            
+                    eventBus.emit("PAYMENT_FAILED", {
                         paymentUuid: payment.uuid,
                         orderUuid: payment.orderUuid,
+                        tenantUuid: payment.tenantUuid,
                         storeUuid: payment.storeUuid,
-                        reason: "RECONCILIATION_MISMATCH",
                         failureCode: "PROVIDER_DECLINED",
                     });
-
+            
                     failed++;
                 }
             } catch (error: any) {
-                console.error(`[PaymentPollingReconciliation] Failed for payment ${payment.uuid}:`, error.message);
+                logWithContext("error", "[PaymentPolling] Failed for payment", {
+                    paymentUuid: payment.uuid,
+                    error: error.message,
+                    });
             }
         }
-  
-        console.log(`[PaymentPollingReconciliation] Completed: ${reconciled} reconciled, ${failed} failed`);
+    
+        logWithContext("info", "[PaymentPolling] Completed", { reconciled, failed });
+        return { reconciled, failed };
     }
-};
+}
