@@ -4,7 +4,7 @@ import { authenticate, require2FA } from "../../middlewares/auth.middleware.ts";
 import { idempotencyMiddleware } from "../../middlewares/idempotency.middleware.ts";
 import { maintenanceGuard } from "../../middlewares/maintainence.ts";
 import { requirePermission } from "../../middlewares/permission.middleware.ts";
-import { verifyPaymentWebhook } from "../../middlewares/peymetWebhook.middleware.js";
+import { verifyPaymentWebhook } from "../../middlewares/peymetWebhook.middleware.ts";
 import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
 import { preventReplayAttack } from "../../middlewares/replayProtection.middleware.ts";
 import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.middlware.ts";

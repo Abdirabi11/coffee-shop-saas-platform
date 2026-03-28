@@ -1,6 +1,8 @@
+import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { EmailService } from "../email.service.ts";
+import { EmailService } from "../notification/Email.service.ts";
+
 
 export class TenantInvitationService{
     //Invite user to tenant

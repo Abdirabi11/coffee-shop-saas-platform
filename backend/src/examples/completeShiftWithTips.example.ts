@@ -1,7 +1,7 @@
-import { OrderAttributionService } from "../services/staff/OrderAttribution.service.js";
-import { TimeEntryService } from "../services/staff/TimeEntry.service.js";
+import { OrderAttributionService } from "../services/staff/OrderAttribution.service.ts";
+import { TimeEntryService } from "../services/staff/TimeEntry.service.ts";
 import prisma from "../config/prisma.ts"
-import { BreakEnforcementService } from "../services/staff/BreakEnforcement.service.js";
+import { BreakEnforcementService } from "../services/staff/BreakEnforcement.service.ts";
 
 
 async function completeShiftWithTipsExample() {

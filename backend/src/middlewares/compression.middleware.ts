@@ -1,5 +1,5 @@
 import compression from "compression";
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 
 export const compressionMiddleware = compression({
     // Only compress responses larger than 1KB

@@ -3,7 +3,7 @@ import {
     listPlans, createPlan, updatePlan, disablePlan, enablePlan, migratePlan, deactivatePlan, createPlanVersion,
     calculateMonthlyBill, resolveTenantLimits
 } from "../../controllers/super-admin/plans.controller.ts"
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
 

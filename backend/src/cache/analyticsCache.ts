@@ -1,4 +1,4 @@
-import { invalidateCache } from "./cache.js"
+import { invalidateCache } from "./cache.ts"
 
 
 export const invalidateSuperAdminAnalyticsCache= async ()=>{

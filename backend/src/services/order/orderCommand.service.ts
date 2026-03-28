@@ -1,102 +1,101 @@
-import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import prisma from "../../config/prisma.ts"
-import { OrderEventBus, OrderEventEmitter } from "../../events/order.events.ts";
-import { AccountService } from "../account/account.service.ts";
-import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
-import { MenuExperimentService } from "../menu/menu-experiment.service.ts";
-import { MenuSnapshotService } from "../menu/menu-snapshot.service.ts";
-import { MenuPersonalizationService, MenuService } from "../menu/menu.service.ts";
-import { InventoryService } from "../products/inventory.service.ts";
+import { EventBus } from "../../events/eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { InventoryOrderService } from "../inventory/InventoryOrder.service.ts";
+import { MenuService } from "../menu/menu.service.ts";
+import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";
 import { StoreHoursService } from "../store/storeHours.service.ts";
 import { IdempotencyService } from "./idempotency.service.ts";
-import { OrderPricingService } from "./order-pricing.service.ts";
+import { OrderPricingService } from "./orderPricing.service.ts";
 
 interface CreateOrderItemInput {
-    productUuid: string;
-    quantity: number;
-    specialInstructions?: string;
-    modifiers?: {
-      optionUuid: string;
-      quantity?: number;
-    }[];
-};
-
+  productUuid: string;
+  quantity: number;
+  specialInstructions?: string;
+  modifiers?: {
+    optionUuid: string;
+    quantity?: number;
+  }[];
+}
+ 
 interface CreateOrderInput {
-    tenantUuid: string;
-    storeUuid: string;
-    tenantUserUuid: string;
-    orderType: OrderType;
-    tableNumber?: string;
-    deliveryAddress?: any;
-    customerNotes?: string;
-    promoCode?: string;
-    items: CreateOrderItemInput[];
-    idempotencyKey?: string;
-};
-
-export class OrderCommandService{
-    static async createOrder(input: CreateOrderInput){
-        const { tenantUuid,
+  tenantUuid: string;
+  storeUuid: string;
+  tenantUserUuid: string;
+  orderType: string;
+  tableNumber?: string;
+  deliveryAddress?: any;
+  customerNotes?: string;
+  promoCode?: string;
+  items: CreateOrderItemInput[];
+  idempotencyKey?: string;
+}
+ 
+export class OrderCommandService {
+ 
+    static async createOrder(input: CreateOrderInput) {
+        const {
+            tenantUuid,
             storeUuid,
             tenantUserUuid,
             orderType,
             items,
-            idempotencyKey 
+            idempotencyKey,
         } = input;
-
+    
         if (idempotencyKey) {
             const existing = await IdempotencyService.check(
-              tenantUuid,
-              idempotencyKey,
-              "POST /orders"
+                tenantUuid,
+                idempotencyKey,
+                "POST /orders"
             );
             if (existing) {
-              return JSON.parse(existing.response);
+                return JSON.parse(existing.response);
             }
-        };
-
+        }
+    
         const isOpen = await StoreHoursService.isStoreOpen(storeUuid);
         if (!isOpen) {
-            throw new Error("Store is currently closed");
-        }
-
-        const order =await prisma.$transaction(async (tx) => {
-            const baseMenu= await MenuService.getStoreMenu(storeUuid);
-            const menuSnapshot = await MenuSnapshotService.getCurrentSnapshot( storeUuid );
-
-            // const menuVersion = await getCacheVersion(`menu:${storeUuid}`);
-            // const experimentedMenu = MenuExperimentService.apply(personalizedMenu, input.experiment);
-
+            throw new Error("STORE_CLOSED");
+        };
+    
+        const order = await prisma.$transaction(async (tx) => {
+    
             const tenantUser = await tx.tenantUser.findUnique({
                 where: { uuid: tenantUserUuid },
                 include: { user: true },
             });
-            if (!tenantUser) {
-                throw new Error("User not found");
-            };
-
-            const personalizedMenu = MenuPersonalizationService.apply(
-                baseMenu,
-                tenantUser
-            );
-
+            if (!tenantUser) throw new Error("USER_NOT_FOUND");
+        
+            const menu = await MenuService.getStoreMenu({
+                tenantUuid,
+                storeUuid,
+                userUuid: tenantUser.user.uuid,
+            });
+        
+            // Get menu snapshot for price dispute protection
+            const menuSnapshot = await MenuSnapshotService.getCurrentSnapshot(storeUuid);
+        
             const pricing = await OrderPricingService.resolveItems(
                 tenantUuid,
                 storeUuid,
-                personalizedMenu,
+                menu,
                 items,
                 {
-                  promoCode: input.promoCode,
-                  userTier: tenantUser.role,
+                    promoCode: input.promoCode,
+                    userTier: tenantUser.role,
                 }
             );
-
+        
             if (pricing.items.length === 0) {
-                throw new Error("Order must contain at least one item");
-            };
-
+                throw new Error("ORDER_EMPTY");
+            }
+    
+            // Generate order number: ORD-20260328-0001
             const orderNumber = await this.generateOrderNumber(tenantUuid, storeUuid);
-
+        
+            // Create order
             const order = await tx.order.create({
                 data: {
                     tenantUuid,
@@ -125,16 +124,17 @@ export class OrderCommandService{
                     pricingSnapshot: {
                         items: pricing.items,
                         calculations: {
-                        subtotal: pricing.subtotal,
-                        tax: pricing.taxAmount,
-                        discount: pricing.discountAmount,
-                        serviceCharge: pricing.serviceCharge,
-                        total: pricing.totalAmount,
+                            subtotal: pricing.subtotal,
+                            tax: pricing.taxAmount,
+                            discount: pricing.discountAmount,
+                            serviceCharge: pricing.serviceCharge,
+                            total: pricing.totalAmount,
                         },
                     },
                 },
             });
-
+        
+            // Create order items
             await tx.orderItem.createMany({
                 data: pricing.items.map((item) => ({
                     tenantUuid,
@@ -151,57 +151,27 @@ export class OrderCommandService{
                     finalPrice: item.finalPrice,
                     taxAmount: item.taxAmount,
                     selectedOptions: item.selectedOptions,
-                    specialInstructions: items.find(i => i.productUuid === item.productUuid)?.specialInstructions,
+                    specialInstructions: items.find(
+                        (i) => i.productUuid === item.productUuid
+                    )?.specialInstructions,
                     status: "PENDING",
                 })),
             });
-
-            await InventoryService.reserve(tx, {
+        
+            // Reserve inventory (availableStock↓, reservedStock↑)
+            await InventoryOrderService.reserveForOrder({
                 orderUuid: order.uuid,
+                storeUuid,
                 items: pricing.items.map((i) => ({
                     productUuid: i.productUuid,
                     quantity: i.quantity,
                 })),
             });
-
-            await tx.orderItem.updateMany({
-                where: { orderUuid: order.uuid },
-                data: { inventoryReserved: true },
-            });
-
+        
             return order;
-            // await PaymentSnapshotService.create(tx, {
-            //     orderUuid: order.uuid,
-            //     currency: "USD",
-            //     subtotal: pricing.subtotal,
-            //     tax: pricing.tax,
-            //     total: pricing.total,
-            //     provider: "STRIPE",
-            // });
-
-            // await InventoryService.reserveItems(tx, pricing.items);
-
-            // await InventoryService.reserve(tx, {
-            //     orderUuid: order.uuid,
-            //     items: payload.items,
-            // });
-
-            // await OrderItemService.create(tx, {
-            //     orderUuid: order.uuid,
-            //     items: payload.items,
-            // });
-
-            // await tx.orderItem.createMany({
-            //     data: pricing.items.map((item) => ({
-            //         orderUuid: order.uuid,
-            //         productUuid: item.productUuid,
-            //         quantity: item.quantity,
-            //         price: item.price,
-            //     }))
-            // });
-            // return order;
-        })
-
+        });
+    
+        //Post-transaction: idempotency + event
         if (idempotencyKey) {
             await IdempotencyService.store(
                 tenantUuid,
@@ -210,47 +180,43 @@ export class OrderCommandService{
                 JSON.stringify(order),
                 201
             );
-        };
-
-        OrderEventBus.emit("ORDER_CREATED", {
+        }
+    
+        EventBus.emit("ORDER_CREATED", {
             orderUuid: order.uuid,
             tenantUuid: order.tenantUuid,
             storeUuid: order.storeUuid,
             totalAmount: order.totalAmount,
-            items: order.items,
         });
+    
+        logWithContext("info", "[Order] Created", {
+            orderUuid: order.uuid,
+            orderNumber: order.orderNumber,
+            totalAmount: order.totalAmount,
+        });
+    
+        MetricsService.increment("order.created", 1);
+    
         return order;
     }
-
-//     **
-//    * Example usage in order creation
-//    */
-//   static async canUseOfflineOrders(tenantUuid: string): Promise<boolean> {
-//     return this.isEnabled(tenantUuid, "offline_orders");
-//   }
-
-    static async checkout(input) {
-        await RiskPolicyEnforcer.apply(input.tenantUserUuid);
-        
-        if (await AccountService.isPaymentLocked(input.tenantUserUuid)) {
-          throw new Error("CHECKOUT_BLOCKED_FRAUD_RISK");
-        }
-    }
-
+ 
+    // ── Order number generator ───────────────────────────────────────────────
+    // Format: ORD-20260328-0001 (date + daily sequence per store)
+ 
     private static async generateOrderNumber(
         tenantUuid: string,
         storeUuid: string
-    ){
-        const today= new Date().toISOString().split("T")[0].replace(/-/g, "")
-        const count= await prisma.order.count({
+    ): Promise<string> {
+        const today = new Date().toISOString().split("T")[0].replace(/-/g, "");
+        const count = await prisma.order.count({
             where: {
                 tenantUuid,
                 storeUuid,
-                createdAt:{
+                createdAt: {
                     gte: new Date(new Date().setHours(0, 0, 0, 0)),
-                }
-            }
+                },
+            },
         });
         return `ORD-${today}-${String(count + 1).padStart(4, "0")}`;
     }
-};
+}

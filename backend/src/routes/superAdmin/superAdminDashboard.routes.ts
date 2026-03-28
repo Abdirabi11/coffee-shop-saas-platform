@@ -1,16 +1,8 @@
 import express from "express";
-import { 
-    DashboardOverview, 
-    revenueSnapshot, 
-    tenantDashboard,
-    tenantHealth,
-    subscriptionBreakdown,
-    platformHealth,
-    riskOverview
-} from "../../controllers/super-admin/dashboard.controller.ts";
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
-import { cache } from "../../middlewares/cashe.middleware.ts";
-import { rateLimit } from "../../middlewares/rateLimit.middleware.js";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
+import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
+import { SuperAdminDashboardController } from "../../controllers/superAdmin/SuperAdminDashboard.controller.ts";
+import { validateRequest } from "../../middlewares/menu/validateRequest.ts";
 
 
 const router= express.Router();
@@ -25,7 +17,7 @@ router.get(
     limit: 30,
     windowSeconds: 60,
   }),
-  superDashboardController.getDashboard
+  SuperAdminDashboardController.getDashboard
 );
 
 router.get(

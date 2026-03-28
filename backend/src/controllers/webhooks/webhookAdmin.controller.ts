@@ -1,7 +1,7 @@
 import type { Request, Response } from "express"
 import prisma from "../../config/prisma.ts"
-import { WebhookDeadLetterQueue } from "../../services/webhooks/WebhookDeadLetterQueue.service.js";
-import { WebhookReplayService } from "../../services/webhooks/webhookReplay.service.js";
+import { WebhookDeadLetterQueue } from "../../services/webhooks/WebhookDeadLetterQueue.service.ts";
+import { WebhookReplayService } from "../../services/webhooks/webhookReplay.service.ts";
 
 export class WebhookAdminController {
 

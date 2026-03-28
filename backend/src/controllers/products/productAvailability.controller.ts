@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { ProductAvailabilityService } from "../../services/products/productAvailability.service.ts";
-import { createProductAvailabilitySchema } from "../../validators/product.validator.js";
+import { createProductAvailabilitySchema } from "../../validators/product.validator.ts";
 
 export class ProductAvailabilityController{
     static async create(req: Request, res: Response) {

@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 export class MenuAnalyticsService {

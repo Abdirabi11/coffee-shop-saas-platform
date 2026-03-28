@@ -1,9 +1,9 @@
 import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
-import { EventBus, PaymentEventBus } from "../../events/eventBus.ts";
+import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metrics.ts";
-import { PaymentProviderAdapter } from "../../payment/providers/payment-provider.adapter.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.ts";
 import { AccountService } from "../account/account.service.ts";
 import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 import { PaymentRateLimitService } from "./paymentRateLimit.service.ts";

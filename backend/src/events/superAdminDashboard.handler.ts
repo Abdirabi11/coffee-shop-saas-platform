@@ -1,4 +1,4 @@
-import { bumpCacheVersion } from "../cache/cacheVersion.js";
+import { bumpCacheVersion } from "../cache/cacheVersion.ts";
 import { invalidateOnAlertEvent, invalidateOnFraudEvent, invalidateOnPaymentEvent, invalidateOnTenantEvent } from "../cache/superAdmin.cache.ts";
 import { logWithContext } from "../infrastructure/observability/logger.ts";
 import { DomainEvent } from "./event.types.ts";

@@ -1,6 +1,6 @@
-import prisma from "../../config/prisma.js"
-import { RefundService } from "../../services/payment/Refund.service.js";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import prisma from "../../config/prisma.ts"
+import { RefundService } from "../../services/payment/Refund.service.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 export class RefundProcessorJob {
   static cronSchedule = "*/10 * * * *";

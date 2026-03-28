@@ -1,7 +1,7 @@
 import express from "express";
 import { subscribe, getSubs, getSingleSubs, updateSubs, cancelSubs, overrideSubscription, migrateSubscription
 } from "../../controllers/super-admin/subscriptions.controller.ts"
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router()
 

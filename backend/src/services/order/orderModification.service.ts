@@ -1,7 +1,7 @@
-import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.ts"
-import { InventoryService } from "../inventory/inventory.service.ts";
-import { MenuService } from "../menu/menu.service.ts";
+import prisma from "../../config/prisma.js"
+import { EventBus } from "../../events/eventBus.js"
+import { InventoryService } from "../inventory/inventory.service.js";
+import { MenuService } from "../menu/menu.service.js";
 import { OrderPricingService } from "./order-pricing.service.ts";
 
 

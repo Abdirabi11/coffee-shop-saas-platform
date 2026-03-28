@@ -2,7 +2,7 @@ import express from "express";
 import {
     getAnalyticsKPIs, revenueAnalytics, tenantAnalytics, churnAnalytics, cohortRetentionAnalytics, arpuLtvAnalytics
 } from "../../controllers/super-admin/analytics.controller.ts";
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
 

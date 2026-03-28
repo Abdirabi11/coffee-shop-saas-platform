@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { redis } from "../lib/redis.js";
+import { redis } from "../lib/redis.ts";
 
 export const trackTenantUsage = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.tenant?.uuid) {

@@ -1,6 +1,7 @@
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import prisma from "../../config/prisma.ts"
-import Redis from "ioredis";
+import { redis } from "../../lib/redis.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 //if deploying to:
 // - Traditional VPS (DigitalOcean, AWS EC2)
@@ -8,16 +9,6 @@ import Redis from "ioredis";
 // - Docker containers
 // - Long-running Node.js processes
 
-const redis = new Redis({
-    host: process.env.REDIS_HOST || "localhost",
-    port: parseInt(process.env.REDIS_PORT || "6379"),
-    password: process.env.REDIS_PASSWORD,
-    db: parseInt(process.env.REDIS_DB || "0"),
-    retryStrategy: (times) => {
-    const delay = Math.min(times * 50, 2000);
-        return delay;
-    },
-});
   
 export class MenuCacheService {
     private static readonly CACHE_TTL = 3600; // 1 hour

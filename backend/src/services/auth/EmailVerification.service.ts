@@ -2,7 +2,7 @@ import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
-import { EmailService } from "../email.service.ts";
+import { EmailService } from "../notification/Email.service.ts";
 
 
 export class EmailVerificationService {

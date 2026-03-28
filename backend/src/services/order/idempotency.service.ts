@@ -1,4 +1,4 @@
-import prisma from "../config/config.ts"
+import prisma from "../../config/prisma.ts"
 
 export class IdempotencyService{
     static async check(

@@ -1,6 +1,6 @@
 import express from "express"
-import { getOpeningHours, setOpeningHour } from "../../controllers/store/storeOpening.controller.js";
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
+import { getOpeningHours, setOpeningHour } from "../../controllers/store/storeOpening.controller.ts";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 
 const router = express.Router();

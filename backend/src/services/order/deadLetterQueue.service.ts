@@ -1,5 +1,5 @@
-import prisma from "../../config/prisma.jts"
-import { OrderCommandService } from "./order-command.service.ts";
+import prisma from "../../config/prisma.ts"
+import { OrderCommandService } from "./OrderCommand.service.ts";
 
 export class DeadLetterQueue {
   static async record(

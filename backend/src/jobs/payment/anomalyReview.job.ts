@@ -1,5 +1,5 @@
-import prisma from "../../config/prisma.js"
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import prisma from "../../config/prisma.ts"
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 export class AnomalyReviewJob {
     static cronSchedule = "0 * * * *";

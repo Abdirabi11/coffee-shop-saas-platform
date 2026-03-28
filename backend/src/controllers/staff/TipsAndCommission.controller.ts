@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.js";
+import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.ts";
 
 
 export class TipsAndCommissionController{

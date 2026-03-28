@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import prisma from "../../config/prisma.ts"
 
 

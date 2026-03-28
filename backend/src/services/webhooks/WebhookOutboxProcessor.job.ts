@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.js";
-import { WebhookDispatcherService } from "./WebhookDispatcher.service.js";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { WebhookDispatcherService } from "./WebhookDispatcher.service.ts";
 
 export class WebhookOutboxProcessorJob {
   

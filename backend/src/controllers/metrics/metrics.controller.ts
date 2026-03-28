@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { MetricsService } from "../../infrastructure/observability/metricsService.js";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 export class MetricsController {
     //GET /metrics

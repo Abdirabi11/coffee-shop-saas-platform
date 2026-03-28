@@ -1,4 +1,4 @@
-import prisma from "../../config/prisma.js"
+import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";

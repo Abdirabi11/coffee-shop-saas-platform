@@ -1,7 +1,6 @@
 import { Server as SocketIOServer } from "socket.io";
-import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 export class OrderRealtimeService{
     private static io: SocketIOServer;

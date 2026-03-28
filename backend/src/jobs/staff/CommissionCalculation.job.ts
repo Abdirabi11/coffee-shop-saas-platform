@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.js";
+import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.ts";
 
 
 export class CommissionCalculationJob {

@@ -1,13 +1,11 @@
-import { EVCPlusProvider } from "./EVCPlusProvider.ts";
-import { PaymentProvider } from "./paymentProvider.interface.ts";
-import { ProviderMap } from "./provider-map.ts";
-import { StripeProvider } from "./stripe.provider.ts";
+import type { PaymentProvider } from "./paymentProvider.interface.ts";
+import { ProviderMap } from "./provider.map.ts";
 
-export const ProviderMap: Record<string, PaymentProvider> = {
-    STRIPE: new StripeProvider(),
-    WALLET: new WalletProvider(),
-    EVC_PLUS: new EVCPlusProvider(),
-};
+// export const ProviderMap: Record<string, PaymentProvider> = {
+//     STRIPE: new StripeProvider(),
+//     WALLET: new WalletProvider(),
+//     EVC_PLUS: new EVCPlusProvider(), 
+// }; 
  
 export function getProvider(provider: string): PaymentProvider {
     const key = provider.toUpperCase();
@@ -15,7 +13,7 @@ export function getProvider(provider: string): PaymentProvider {
     
     if (!impl) {
         throw new Error(`UNSUPPORTED_PROVIDER: ${provider}`);
-    }
+    } 
     
     return impl;
 }

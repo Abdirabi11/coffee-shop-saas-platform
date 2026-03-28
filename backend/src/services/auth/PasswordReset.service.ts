@@ -2,8 +2,8 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { EmailService } from "../email.service.ts";
 import { SMSService } from "../notification/sms.service.ts";
+import { EmailService } from "../notification/Email.service.ts";
 
 export class PasswordResetService{
     static async requestReset(input: {

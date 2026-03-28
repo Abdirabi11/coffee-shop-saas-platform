@@ -1,6 +1,6 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { LaborCostTrackingService } from "../../services/staff/LaborCostTracking.service.js";
+import { LaborCostTrackingService } from "../../services/staff/LaborCostTracking.service.ts";
 
 
 export class LaborCostSnapshotJob {

@@ -1,5 +1,5 @@
 import express from "express"
-import { SuperAdminDashboardController } from "../../controllers/dashboards/SuperAdminDashboard.controller.js";
+import { SuperAdminDashboardController } from "../../controllers/dashboards/SuperAdminDashboard.controller.ts";
 import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();

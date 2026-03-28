@@ -1,8 +1,8 @@
-import prisma from "../../config/prisma.js"
-import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.js";
-import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.js";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
-import { eventBus } from "../../events/eventBus.js";
+import prisma from "../../config/prisma.ts"
+import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
+import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { eventBus } from "../../events/eventBus.ts";
 
 
 export class PaymentPollingReconciliationJob {

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import { TaxTrackingService } from "../../services/Dashboards/TaxTracking.service.js";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { TaxTrackingService } from "../../services/Dashboards/TaxTracking.service.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 export class TaxTrackingController {
   // GET /api/v1/tax/summary?from=&to=&storeUuid=

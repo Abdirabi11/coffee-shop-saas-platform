@@ -1,6 +1,6 @@
-import prisma from "../../config/prisma.js"
-import { logWithContext } from "../../infrastructure/observability/logger.js";
-import { MetricsService } from "../../infrastructure/observability/metricsService.js";
+import prisma from "../../config/prisma.ts"
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 //Check if device is trusted
 export class DeviceTrustService {

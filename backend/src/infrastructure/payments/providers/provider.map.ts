@@ -1,11 +1,11 @@
 import { EVCPlusProvider } from "./EVCPlusProvider.ts";
-import { PaymentProvider } from "./payment-provider.interface.ts.ts";
+import type { PaymentProvider } from "./paymentProvider.interface.ts";
 import { StripeProvider } from "./stripe.provider.ts";
-import { WalletProvider } from "./wallet.adapter.ts";
+
 
 export const ProviderMap: Record<string, PaymentProvider> = {
     stripe: new StripeProvider(),
-    wallet: new WalletProvider(),
+    // wallet: new WalletProvider(),
     evc_plus: new EVCPlusProvider(),
 };
 

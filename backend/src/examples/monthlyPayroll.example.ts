@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import fs from "fs";
-import { PayrollExportService } from "../services/staff/PayrollExport.service.js";
+import { PayrollExportService } from "../services/staff/PayrollExport.service.ts";
 
 async function monthlyPayrollExport() {
     console.log("💰 Monthly Payroll Export Example\n");

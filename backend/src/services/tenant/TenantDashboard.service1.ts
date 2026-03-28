@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
-import prisma from "../../config/prisma.js"
-import { withCache } from "../../cache/cache.js";
-import { getCacheVersion } from "../../cache/cacheVersion.js";
+import prisma from "../../config/prisma.ts"
+import { withCache } from "../../cache/cache.ts";
+import { getCacheVersion } from "../../cache/cacheVersion.ts";
 
 export class TenantDashboardService {
 

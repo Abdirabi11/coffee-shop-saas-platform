@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import { StaffDashboardService } from "../../services/Dashboards/CashierDashboard.service.js";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { StaffDashboardService } from "../../services/Dashboards/CashierDashboard.service.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 export class StaffDashboardController {
   static async getDashboard(req: Request, res: Response) {

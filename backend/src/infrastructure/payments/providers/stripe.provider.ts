@@ -1,5 +1,7 @@
+import Stripe from "stripe";
 import { logWithContext } from "../../observability/logger.ts";
-import { PaymentProvider } from "./paymentProvider.interface.ts";
+import type  { PaymentProvider } from "./paymentProvider.interface.ts";
+
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-10-16",

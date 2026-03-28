@@ -2,7 +2,7 @@ import express from "express"
 import { ProductController } from "../../controllers/products/product.controller.ts";
 import { ProductAvailabilityController } from "../../controllers/products/productAvailability.controller.ts";
 import { ProductOptionController } from "../../controllers/products/productOption.controller.ts";
-import { cache } from "../../middlewares/cache.middleware.js";
+import { cache } from "../../middlewares/cache.middleware.ts";
 import { rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { requireStoreAccess } from "../middlewares/auth.middleware.ts";

@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 
 
 export class MenuAnalyticsAggregationJob {

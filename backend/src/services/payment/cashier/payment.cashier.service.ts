@@ -1,5 +1,5 @@
 import { EventBus, PaymentEventBus } from "../../../events/eventBus.ts";
-import { logWithContext } from "../../../infrastructure/observability/logger.js";
+import { logWithContext } from "../../../infrastructure/observability/logger.ts";
 import prisma from "../../config/prisma.ts"
 import { PaymentAnomalyDetector } from "../paymentAnomalyDetector.ts";
 

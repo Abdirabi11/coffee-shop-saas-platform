@@ -1,4 +1,4 @@
-import { withCache } from "../../cache/cache.js";
+import { withCache } from "../../cache/cache.ts";
 import prisma from "../../config/prisma.ts"
 
 

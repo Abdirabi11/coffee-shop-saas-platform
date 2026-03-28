@@ -1,6 +1,6 @@
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
-import { EmailService } from "../notification/Email.service.js";
+import { EmailService } from "../notification/Email.service.ts";
 
 
 export class DashboardAlertService {

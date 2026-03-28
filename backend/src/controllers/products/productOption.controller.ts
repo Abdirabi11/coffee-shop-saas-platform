@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express"
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { ProductOptionService } from "../../services/products/product-option.service.ts";
-import { createOptionSchema } from "../../validators/product.validator.js";
+import { createOptionSchema } from "../../validators/product.validator.ts";
 
 export class ProductOptionController{
     static async createGroup(req: Request, res: Response){

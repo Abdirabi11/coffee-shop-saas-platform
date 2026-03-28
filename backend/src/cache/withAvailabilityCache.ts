@@ -1,6 +1,6 @@
 import { getTimeBucket } from "../utils/timeBucket.ts";
-import { getCacheVersion } from "./cacheVersion.ts.js";
-import { withCache } from "./cache.ts.js";
+import { getCacheVersion } from "./cacheVersion.ts.ts";
+import { withCache } from "./cache.ts.ts";
 
 interface AvailabilityCacheOptions<T>{
     prefix: string;          

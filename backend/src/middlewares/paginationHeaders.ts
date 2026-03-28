@@ -1,5 +1,4 @@
 import type { Request, Response, NextFunction } from "express";
-import { ProductService } from "../services/products/product.service.js";
 
 export function addPaginationHeaders(
     res: Response,

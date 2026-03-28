@@ -1,6 +1,5 @@
-import prisma from "../config/prisma.js"
-import { logWithContext } from "../infrastructure/observability/logger.js";
-import { EventBus } from "./eventBus.js";
+import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { EventBus } from "./eventBus.ts";
 
 
 type MenuEventType =

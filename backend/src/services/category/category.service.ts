@@ -1,7 +1,7 @@
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
-import { redis } from "../../lib/redis.js";
+import { redis } from "../../lib/redis.ts";
 import prisma from "../config/prisma.ts"
 
 

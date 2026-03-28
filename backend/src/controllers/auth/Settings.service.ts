@@ -1,5 +1,5 @@
 import { prisma } from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.js";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { redis } from "../../lib/redis.ts";
 
 export class SettingsService {

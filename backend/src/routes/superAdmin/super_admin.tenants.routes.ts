@@ -1,7 +1,7 @@
 import express from "express";
 import { activateTenant, suspendTenant, createTenant, getTenants, getSingleTenant, updateTenant, deleteTenant, updateTenantStatus 
 } from "../../controllers/super-admin/tenant.controller.ts";
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
 

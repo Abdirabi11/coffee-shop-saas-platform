@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { NotificationService } from "../../services/notification.service.ts";
+import { NotificationService } from "../../services/notification/notification.service.ts";
 
 export class OrderNotificationJob{
   static async orderReady(orderUuid: string){

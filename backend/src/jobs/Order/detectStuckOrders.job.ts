@@ -1,7 +1,7 @@
-import { OrderEventBus } from "../../events/order.events.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.js";
-import prisma from "../config/prisma.ts"
+import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import prisma from "../../config/prisma.ts"
+import { EventBus } from "../../events/eventBus.ts";
 
 const STUCK_MINUTES = 60;
 
@@ -39,7 +39,7 @@ export class DetectStuckOrdersJob{
                 );
 
                 // Emit event for monitoring/alerting
-                OrderEventBus.emit("ORDER_STUCK", {
+                EventBus.emit("ORDER_STUCK", {
                     orderUuid: order.uuid,
                     tenantUuid: order.tenantUuid,
                     storeUuid: order.storeUuid,

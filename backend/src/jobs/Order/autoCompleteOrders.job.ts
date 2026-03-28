@@ -1,8 +1,8 @@
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
-import prisma from "../config/prisma.ts"
-import { OrderStatusService } from "../services/order/order-status.service.ts";
+import prisma from "../../config/prisma.ts"
+import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
 
 const AUTO_COMPLETE_MINUTES = 20;
 

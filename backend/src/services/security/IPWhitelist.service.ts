@@ -1,6 +1,6 @@
-import prisma from "../../config/prisma.js"
-import { logWithContext } from "../../infrastructure/observability/logger.js";
-import { redis } from "../../lib/redis.js";
+import prisma from "../../config/prisma.ts"
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { redis } from "../../lib/redis.ts";
 
 export class IPWhitelistService {
   

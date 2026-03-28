@@ -1,5 +1,5 @@
 import type { Request, Response } from "express"
-import { StoreOpeningService } from "../../services/store/store-opening.service.js"
+import { StoreOpeningService } from "../../services/store/store-opening.service.ts"
 
 export const setOpeningHour= async (req: Request, res: Response)=>{
     try {

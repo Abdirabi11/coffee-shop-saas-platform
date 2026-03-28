@@ -4,7 +4,7 @@ import { MetricsService } from "../../infrastructure/observability/metricsServic
 
 
 type Tx = Prisma.TransactionClient;
- 
+  
 export class InventoryOrderService {
  
     static async reserveForOrder(input: {

@@ -3,7 +3,7 @@ import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
 
 
-  const SESSION_EXPIRY_HOURS = 24;
+const SESSION_EXPIRY_HOURS = 24;
 const MOBILE_SESSION_EXPIRY_HOURS = 720; // 30 days for offline-first mobile
  
 export class SessionService {

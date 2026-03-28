@@ -1,6 +1,6 @@
 import { Registry, Counter, Histogram, Gauge } from "prom-client";
 
-interface MetricTags {
+interface MetricTags { 
     [key: string]: string;
 };
   

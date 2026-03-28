@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { logWithContext } from "../infrastructure/observability/logger.ts";
-import { redis } from "../lib/redis.js";
+import { redis } from "../lib/redis.ts";
 
 
 export const cache = (keyGenerator: (req: Request) => string, ttlSeconds = 60) => {

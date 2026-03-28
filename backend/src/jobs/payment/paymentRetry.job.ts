@@ -1,7 +1,7 @@
-import prisma from "../config/prisma.ts"
-import { PaymentService } from "../../services/payment/payment.service.js";
-import { logWithContext } from "../../infrastructure/observability/logger.js";
-import { eventBus } from "../../events/eventBus.js";
+import prisma from "../../config/prisma.ts"
+import { PaymentService } from "../../services/payment/payment.service.ts";
+import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { eventBus } from "../../events/eventBus.ts";
 
 
 export class PaymentRetryJob {

@@ -1,4 +1,3 @@
-import { redisClient } from "../lib/redis.ts";
 import {redis} from "../lib/redis.ts"
 
 export const getCacheVersion = async (key: string) => {

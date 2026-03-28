@@ -1,5 +1,4 @@
-import prisma  from "../config/prisma.ts"
-import { MetricsService } from "./metrics.service.js";
+import { MetricsService } from "./metrics.service.ts";
 
 export class MonitoringService{
     static async track<T>(

@@ -1,4 +1,4 @@
-import { OrderCommandService } from "../services/order/orderCommand.service.ts";
+import { OrderCommandService } from "../services/order/OrderCommand.service.js";
 import { WebhookManagementService } from "../services/webhooks/WebhookManagement.service.ts";
 
 async function webhookIntegrationExample() {

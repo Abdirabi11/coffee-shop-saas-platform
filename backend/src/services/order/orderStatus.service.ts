@@ -1,18 +1,18 @@
 import prisma from "../../config/prisma.ts"
 import { OrderStatus } from "@prisma/client";
-import { OrderEventBus } from "../../events/order.events.ts";
-import { InventoryReleaseService } from "./inventoryRelease.service.ts";
-import { InventoryService } from "../inventory/inventory.service.js";
+import { InventoryService } from "../inventory/inventory.service.ts";
+import { EventBus } from "../../events/eventBus.ts";
+
 
 const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-    PENDING: ["PAYMENT_PENDING", "CANCELLED"],
-    PAYMENT_PENDING: ["PAID", "PAYMENT_FAILED"],
-    PAID: ["PREPARING"],
-    PREPARING: ["READY"],
-    READY: ["COMPLETED"],
-    PAYMENT_FAILED: [],
-    CANCELLED: [],
-    COMPLETED: [],
+  PENDING: ["PAYMENT_PENDING", "CANCELLED"],
+  PAYMENT_PENDING: ["PAID", "PAYMENT_FAILED"],
+  PAID: ["PREPARING"],
+  PREPARING: ["READY"],
+  READY: ["COMPLETED"],
+  PAYMENT_FAILED: [],
+  CANCELLED: [],
+  COMPLETED: [],
 };
 
 export class OrderStatusService{
@@ -73,7 +73,7 @@ export class OrderStatusService{
       return updated;
     })
       
-    OrderEventBus.emit("ORDER_STATUS_CHANGED", {
+    EventBus.emit("ORDER_STATUS_CHANGED", {
       orderUuid,
       tenantUuid: order.tenantUuid,
       storeUuid: order.storeUuid,
@@ -89,7 +89,7 @@ export class OrderStatusService{
   private static async handleStatusChangeEffects(
     order: Order,
     newStatus: OrderStatus
-    ) {
+  ) {
     switch (newStatus) {
       case "CANCELLED":
         await InventoryService.releaseStock({

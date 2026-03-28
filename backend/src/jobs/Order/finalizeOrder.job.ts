@@ -1,8 +1,9 @@
-import prisma from "../../config/prisma.ts"
-import { OrderEventBus } from "../../events/order.events.ts";
+import prisma from "../../config/prisma.ts" 
+import { EventBus } from "../../events/eventBus.ts";
+import { InventoryOrderService } from "../../services/inventory/InventoryOrder.service.ts";
 import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
-import { OrderStatusService } from "../../services/order/order-status.service.ts";
-import { InventoryCommitJob } from "./inventory_commit.job.ts.ts";
+import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
+
 
 export class FinalizeOrderJob{
     static async run(orderUuid: string){
@@ -31,10 +32,10 @@ export class FinalizeOrderJob{
                         reason: "Payment confirmed",
                     }
                 );
-                await InventoryCommitJob.run( order.uuid );
+                await InventoryOrderService.commitForOrder( order.uuid );
             });
 
-            OrderEventBus.emit("ORDER_PAID", { orderUuid,} );
+            EventBus.emit("ORDER_PAID", { orderUuid,} );
             console.log(`[FinalizeOrderJob] Successfully finalized order: ${orderUuid}`);
         } catch (err: any) {
             console.error(`[FinalizeOrderJob] Failed for ${orderUuid}:`, err.message);

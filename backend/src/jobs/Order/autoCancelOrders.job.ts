@@ -1,4 +1,4 @@
-import prisma from "../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
 import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
 import { logWithContext } from "../../infrastructure/observability/logger.ts";
 import { OrderCancellationService } from "../../services/order/orderCancellation.service.ts";

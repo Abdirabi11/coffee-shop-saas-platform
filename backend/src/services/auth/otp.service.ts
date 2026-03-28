@@ -7,7 +7,7 @@ export const hashOtp = async (otp: string) => {
 export const compareOtp = async (otp: string, hash: string) => {
   return bcrypt.compare(otp, hash);
 };
-
+ 
 export const generateOtp = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };

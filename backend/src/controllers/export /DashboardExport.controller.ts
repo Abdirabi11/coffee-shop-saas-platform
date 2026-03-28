@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import dayjs from "dayjs";
-import { DashboardExportService } from "../../services/export/DashboardExport.service.js";
+import { DashboardExportService } from "../../services/export/DashboardExport.service.ts";
 
 export class DashboardExportController {
   

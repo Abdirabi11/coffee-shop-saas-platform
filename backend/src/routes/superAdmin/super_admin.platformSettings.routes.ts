@@ -3,7 +3,7 @@ import {
     getBranding, listEmailTemplates, listFeatureFlags, setGlobalFinanceSettings, 
     setMaintenanceMode, updateBranding, updateEmailTemplate, upsertFeatureFlag 
 } from "../../controllers/super-admin/platformSettings.controller.ts";
-import { authenticate, authorize } from "../../middlewares/auth.middleware.js";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
 

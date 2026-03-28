@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { logWithContext } from "../infrastructure/observability/logger.ts";
-import { IPWhitelistService } from "../services/security/IpWhitelist.service.js";
+import { IPWhitelistService } from "../services/security/IpWhitelist.service.ts";
 
 export const requireIPWhitelist = (operation: string) => {
     return async (req: Request, res: Response, next: NextFunction) => {
