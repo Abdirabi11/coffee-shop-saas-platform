@@ -43,7 +43,7 @@ export class TenantDashboardService {
             ] = await Promise.all([
                 // Stores
                 prisma.store.count({ where: { tenantUuid } }),
-                prisma.store.count({ where: { tenantUuid, isActive: true } }),
+                prisma.store.count({ where: { tenantUuid, active: true } }),
                 
                 // Orders
                 prisma.order.count({
@@ -103,7 +103,7 @@ export class TenantDashboardService {
                     where: {
                         tenantUuid,
                         role: { in: ["MANAGER", "CASHIER"] },
-                        isActive: true,
+                        active: true,
                     },
                 }),
         

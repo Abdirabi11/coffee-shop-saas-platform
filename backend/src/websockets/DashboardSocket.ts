@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from "socket.io";
 import { Server } from "http";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { EventBus } from "../events/eventBus.ts";
 
 export class DashboardSocket {

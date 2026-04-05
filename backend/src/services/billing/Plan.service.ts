@@ -1,6 +1,6 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 export class PlanService{
     static async listActivePlans(filters?: {
@@ -21,7 +21,7 @@ export class PlanService{
                 where,
                 include: {
                     prices: {
-                        where: { isActive: true },
+                        where: { active: true },
                         orderBy: { amount: "asc" },
                     },
                     features: {
@@ -49,7 +49,7 @@ export class PlanService{
             where: { uuid: planUuid },
             include: {
                 prices: {
-                    where: { isActive: true },
+                    where: { active: true },
                     include: {
                         priceTiers: {
                         orderBy: { displayOrder: "asc" },
@@ -61,7 +61,7 @@ export class PlanService{
                 },
                 quotas: true,
                 versions: {
-                    where: { isActive: true },
+                    where: { active: true },
                     orderBy: { version: "desc" },
                     take: 1,
                 },
@@ -81,7 +81,7 @@ export class PlanService{
             where: { slug },
             include: {
                 prices: {
-                    where: { isActive: true },
+                    where: { active: true },
                 },
                 features: {
                     orderBy: { displayOrder: "asc" },

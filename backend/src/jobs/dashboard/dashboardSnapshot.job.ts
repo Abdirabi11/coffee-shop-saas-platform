@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import prisma from "../../config/prisma.ts"
 
 export class DashboardSnapshotJob {
@@ -12,7 +12,7 @@ export class DashboardSnapshotJob {
  
         try {
             const tenants = await prisma.tenant.findMany({
-                where: { isActive: true },
+                where: { active: true },
                 select: { uuid: true },
             });
         

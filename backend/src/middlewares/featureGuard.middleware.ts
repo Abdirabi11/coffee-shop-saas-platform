@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { FeatureService } from "../services/billing/Feature.service.ts";
 
 export const requireFeature = (featureKey: string) => {

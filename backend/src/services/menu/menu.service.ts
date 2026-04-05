@@ -1,9 +1,9 @@
 import dayjs from "dayjs";
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import prisma from "../../config/prisma.ts"
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { redis } from "../../lib/redis.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class MenuService {
     
@@ -317,7 +317,7 @@ export class MenuService {
                             optionGroup: {
                                 include: {
                                     options: {
-                                        where: { isActive: true },
+                                        where: { active: true },
                                         orderBy: { order: "asc" },
                                     },
                                 },

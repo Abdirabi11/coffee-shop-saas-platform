@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { withCache } from "../../cache/cache.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 
 interface DateRange {
@@ -166,27 +166,27 @@ export class SuperAdminDashboardService {
                 avgOrderCompletionTime,
             ] = await Promise.all([
                 prisma.order.count({
-                where: { createdAt: { gte: last24h } },
+                    where: { createdAt: { gte: last24h } },
                 }),
                 prisma.payment.count({
-                where: { status: "COMPLETED", createdAt: { gte: last24h } },
+                    where: { status: "COMPLETED", createdAt: { gte: last24h } },
                 }),
                 prisma.tenant.count({
-                where: { createdAt: { gte: last24h } },
+                    where: { createdAt: { gte: last24h } },
                 }),
         
                 // Issues
                 prisma.payment.count({
-                where: { status: "FAILED", createdAt: { gte: last24h } },
+                    where: { status: "FAILED", createdAt: { gte: last24h } },
                 }),
                 prisma.fraudEvent.count({
-                where: { createdAt: { gte: last7d } },
+                    where: { createdAt: { gte: last7d } },
                 }),
                 prisma.session.count({
-                where: {
-                    riskLevel: { in: ["HIGH", "CRITICAL"] },
-                    createdAt: { gte: last24h },
-                },
+                    where: {
+                        riskLevel: { in: ["HIGH", "CRITICAL"] },
+                        createdAt: { gte: last24h },
+                    },
                 }),
         
                 // Tenant status
@@ -195,23 +195,23 @@ export class SuperAdminDashboardService {
         
                 // Performance
                 prisma.$queryRaw<{ avg_minutes: number }[]>`
-                SELECT AVG(EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60) as avg_minutes
-                FROM "Order"
-                WHERE status = 'COMPLETED'
-                AND "completedAt" IS NOT NULL
-                AND "completedAt" >= ${last24h}
+                    SELECT AVG(EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60) as avg_minutes
+                    FROM "Order"
+                    WHERE status = 'COMPLETED'
+                    AND "actualReadyAt" IS NOT NULL
+                    AND "actualReadyAt" >= ${last24h}
                 `,
             ]);
         
             return {
                 activity: {
-                orders24h: ordersLast24h,
-                payments24h: paymentsLast24h,
-                signups24h: signupsLast24h,
+                    orders24h: ordersLast24h,
+                    payments24h: paymentsLast24h,
+                    signups24h: signupsLast24h,
                 },
                 issues: {
-                failedPayments24h,
-                fraudEvents7d,
+                    failedPayments24h,
+                    fraudEvents7d,
                     suspiciousSessions24h,
                 },
                 tenants: {

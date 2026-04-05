@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { createReadStream } from "fs";
 import { FinancialReportService } from "../../services/Dashboards/FinancialReport.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class FinancialReportController {
     // POST /api/v1/reports/daily-sales

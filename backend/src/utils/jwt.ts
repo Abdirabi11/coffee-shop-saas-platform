@@ -1,3 +1,4 @@
+import "dotenv/config";  
 import jwt from "jsonwebtoken";
 import type { RefreshTokenPayload, AccessTokenPayload } from "../types/auth.types.ts";
 

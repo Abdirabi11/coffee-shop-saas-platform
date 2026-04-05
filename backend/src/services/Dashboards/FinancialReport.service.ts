@@ -2,7 +2,7 @@ import dayjs from "dayjs";
 import * as fs from "fs";
 import * as path from "path";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
  
 interface ReportFilter {

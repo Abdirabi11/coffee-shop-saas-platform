@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { PaymentService } from "../../services/payment/payment.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class PaymentController {
     // POST /api/v1/payments/start

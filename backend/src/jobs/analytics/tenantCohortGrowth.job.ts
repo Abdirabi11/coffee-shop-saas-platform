@@ -1,6 +1,6 @@
 import { prisma } from "../../config/prisma.ts"
 import dayjs from "dayjs";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class TenantCohortGrowthJob {
     static cronSchedule = "30 4 1 * *";

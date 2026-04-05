@@ -9,7 +9,7 @@ import helmet from "helmet";
 import { createServer } from "http";
 import authRoutes from "./routes/auth/auth.routes.ts"
 import { startScheduler } from "./jobs/scheduler.ts"
-import { MetricsService } from "./infrastructure/observability/metricsService.ts";
+import { MetricsService } from "./infrastructure/observability/MetricsService.ts";
 import { compressionMiddleware } from "./middlewares/compression.middleware.ts";
 import { corsMiddleware } from "./middlewares/cors.middleware.ts";
 import { securityHeadersMiddleware } from "./middlewares/securityHeaders.middleware.ts";

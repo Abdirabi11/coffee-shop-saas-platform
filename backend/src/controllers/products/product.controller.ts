@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from "express"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { ProductService } from "../../services/products/product.service.ts";
 import { createProductSchema, updateProductSchema } from "../../validators/product.validator.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 
 export class ProductController {

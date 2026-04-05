@@ -1,5 +1,5 @@
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { WebhookDispatcherService } from "../../services/webhooks/WebhookDispatcher.service.ts";
 
 

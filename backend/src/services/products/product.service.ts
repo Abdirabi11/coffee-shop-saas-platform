@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { MenuCacheService } from "../menu/menuCache.service.ts";
 import { ProductAvailabilityService } from "./product-availability.service.ts";
 
@@ -159,10 +159,10 @@ export class ProductService{
                 include: {
                     category: true,
                     optionGroups: {
-                    where: { isActive: true },
+                    where: { active: true },
                     include: {
                         options: {
-                        where: { isActive: true },
+                        where: { active: true },
                         orderBy: { displayOrder: "asc" },
                         },
                     },
@@ -208,10 +208,10 @@ export class ProductService{
             include: {
                 category: true,
                 optionGroups: {
-                    where: { isActive: true },
+                    where: { active: true },
                     include: {
                         options: {
-                            where: { isActive: true },
+                            where: { active: true },
                             orderBy: { displayOrder: "asc" },
                         },
                     },
@@ -219,7 +219,7 @@ export class ProductService{
                 },
                 inventory: true,
                 availability: {
-                    where: { isActive: true },
+                    where: { active: true },
                 },
             },
         });

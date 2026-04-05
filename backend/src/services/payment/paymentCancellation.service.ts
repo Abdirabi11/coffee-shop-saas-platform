@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class PaymentCancellationService {
     static async cancel(input: {

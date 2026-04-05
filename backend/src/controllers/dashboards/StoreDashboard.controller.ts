@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import dayjs from "dayjs";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { StoreDashboardService } from "../../services/Dashboards/StoreDashboard.service.ts";
 
 

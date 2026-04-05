@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { AuthService } from "../../services/auth/Auth.service.ts";
 import { SessionService } from "../../services/auth/Session.service.ts";
 import { TokenService } from "../../services/auth/Token.service.ts";
@@ -144,17 +144,6 @@ export class AuthController {
         } catch (e: any) { return handleAuthError(e, res, "loginWithPassword"); }
     }
     
-    // POST /auth/login/2fa
-    static async verify2FA(req: Request, res: Response) {
-        try {
-            const { tempToken, code, isBackupCode } = req.body;
-            if (!tempToken || !code) return res.status(400).json({ success: false, error: "TOKEN_AND_CODE_REQUIRED" });
-            const result = await AuthService.verify2FA({ tempToken, code, isBackupCode, req });
-            setRefreshCookie(res, result.refreshToken);
-            return res.status(200).json({ success: true, user: result.user, accessToken: result.accessToken });
-        } catch (e: any) { return handleAuthError(e, res, "verify2FA"); }
-    }
-    
     // POST /auth/login/biometric
     static async loginWithBiometric(req: Request, res: Response) {
         try {
@@ -216,7 +205,7 @@ export class AuthController {
         try {
             const user = (req as any).user;
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
-            await TokenService.revokeAllForUser(user.uuid, "USER_LOGOUT");
+            await TokenService.revokeAllForUser(user.userUuid, "USER_LOGOUT");
             res.clearCookie("refreshToken");
             return res.status(200).json({ success: true, message: "All sessions revoked" });
         } catch (e: any) { return res.status(500).json({ success: false, error: "LOGOUT_FAILED" }); }
@@ -251,7 +240,7 @@ export class AuthController {
         try {
             const user = (req as any).user;
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
-            await EmailVerificationService.sendVerificationEmail(user.uuid);
+            await EmailVerificationService.sendVerificationEmail(user.userUuid);
             return res.status(200).json({ success: true, message: "Verification email sent" });
         } catch (e: any) { return handleAuthError(e, res, "sendEmailVerification"); }
     }
@@ -271,7 +260,7 @@ export class AuthController {
         try {
             const user = (req as any).user;
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
-            await EmailVerificationService.resendVerificationEmail(user.uuid);
+            await EmailVerificationService.resendVerificationEmail(user.userUuid);
             return res.status(200).json({ success: true, message: "Verification email resent" });
         } catch (e: any) { return handleAuthError(e, res, "resendEmailVerification"); }
     }
@@ -338,21 +327,32 @@ export class AuthController {
         try {
             const user = (req as any).user;
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
-            const result = await TwoFactorService.generateSecret(user.uuid);
+            const result = await TwoFactorService.setup(user.userUuid);
             return res.status(200).json({ success: true, data: result });
         } catch (e: any) { return handleAuthError(e, res, "setup2FA"); }
     }
-    
-    // POST /auth/2fa/enable
+
+      // POST /auth/2fa/enable
     static async enable2FA(req: Request, res: Response) {
         try {
             const user = (req as any).user;
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
             const { code } = req.body;
             if (!code) return res.status(400).json({ success: false, error: "CODE_REQUIRED" });
-            const result = await TwoFactorService.enableWithVerification(user.uuid, code);
+            const result = await TwoFactorService.verifySetup({ userUuid: user.userUuid, token: code });
             return res.status(200).json({ success: true, message: "2FA enabled", backupCodes: result.backupCodes });
         } catch (e: any) { return handleAuthError(e, res, "enable2FA"); }
+    }
+
+     // POST /auth/login/2fa
+    static async verify2FA(req: Request, res: Response) {
+        try {
+            const { tempToken, code, isBackupCode } = req.body;
+            if (!tempToken || !code) return res.status(400).json({ success: false, error: "TOKEN_AND_CODE_REQUIRED" });
+            const result = await AuthService.verify2FA({ tempToken, code, isBackupCode, req });
+            setRefreshCookie(res, result.refreshToken);
+            return res.status(200).json({ success: true, user: result.user, accessToken: result.accessToken });
+        } catch (e: any) { return handleAuthError(e, res, "verify2FA"); }
     }
     
     // ── PROFILE ────────────────────────────────────────────────────────────────
@@ -363,7 +363,7 @@ export class AuthController {
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
         
             const dbUser = await prisma.user.findUnique({
-                where: { uuid: user.uuid },
+                where: { uuid: user.userUuid },
                 select: {
                     uuid: true, phoneNumber: true, email: true, name: true, firstName: true, lastName: true,
                     globalRole: true, isVerified: true, emailVerified: true, createdAt: true,

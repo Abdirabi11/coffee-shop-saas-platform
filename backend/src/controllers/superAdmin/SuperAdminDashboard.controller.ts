@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { SuperAdminDashboardService } from "../../services/superAdmin/SuperAdminDashboard.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
  
 export class SuperAdminDashboardController {

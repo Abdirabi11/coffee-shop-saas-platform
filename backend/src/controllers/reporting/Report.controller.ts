@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { createReadStream } from "fs";
 import path from "path";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { ReportGenerationService } from "../../services/reporting/ReportGeneration.service.ts";
 
 export class ReportController {

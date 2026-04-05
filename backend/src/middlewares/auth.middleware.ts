@@ -4,16 +4,16 @@ import { verifyAccessToken } from "../utils/jwt.ts";
 
 export interface AuthRequest extends Request {
     user?: {
-      userUuid: string;
-      role: string;
-      tenantUuid?: string;
-      storeUuid?: string;
-      tokenVersion: number;
+        userUuid: string;
+        role: string;
+        tenantUuid?: string;
+        storeUuid?: string;
+        tokenVersion: number;
     };
 };
 
 export const authenticate= async (
-    req: AuthRequest,
+    req: Request,
     res: Response,
     next: NextFunction
 )=>{
@@ -26,12 +26,14 @@ export const authenticate= async (
 
         const token= authHeader.split(" ")[1];
         const payload = verifyAccessToken(token);
+        console.log("DECODED PAYLOAD:", payload);
+        console.log("USER UUID:", payload?.userUuid);
 
         const user= await prisma.user.findUnique({
             where: { uuid: payload.userUuid },
-            select: { tokenVersion: true, banned: true },
+            select: { tokenVersion: true, isBanned: true },
         });
-        if (!user || user.banned) {
+        if (!user || user.isBanned) {
             return res.status(401).json({ message: "Account blocked" });
         };
 

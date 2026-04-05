@@ -1,7 +1,7 @@
 import type { Request, Response } from "express"
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { CategoryCacheService } from "../../services/cache/CategoryCache.service.ts";
 import { CategoryService } from "../../services/category.service.ts";
 

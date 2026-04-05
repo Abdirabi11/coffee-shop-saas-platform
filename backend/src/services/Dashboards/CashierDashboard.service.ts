@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import dayjs from "dayjs";
 import { withCache } from "../../cache/cache.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 
 export class StaffDashboardService {

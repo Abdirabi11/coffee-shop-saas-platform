@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
 import { WebhookManagementService } from "../../services/webhooks/WebhookManagement.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class WebhookManagementController {
 

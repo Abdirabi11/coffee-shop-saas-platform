@@ -43,7 +43,7 @@ export const dispatchWebhook= async (
     payload: any
 )=>{
     const webhooks= await prisma.webhook.findMany({
-        where: {storeUuid, eventType, active: true}
+        where: {storeUuid, eventType, isActive: true}
     });
 
     for (const hook of webhooks){

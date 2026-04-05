@@ -1,7 +1,7 @@
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import prisma from "../../config/prisma.ts"
 import { redis } from "../../lib/redis.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 //if deploying to:
 // - Traditional VPS (DigitalOcean, AWS EC2)
@@ -85,10 +85,10 @@ export class MenuCacheService {
             include: {
                 category: true,
                 optionGroups: {
-                    where: { isActive: true },
+                    where: { active: true },
                     include: {
                         options: {
-                            where: { isActive: true },
+                            where: { active: true },
                             orderBy: { displayOrder: "asc" },
                         },
                     },
@@ -96,7 +96,7 @@ export class MenuCacheService {
                 },
                 inventory: true,
                 availability: {
-                    where: { isActive: true },
+                    where: { active: true },
                 },
             },
             orderBy: [

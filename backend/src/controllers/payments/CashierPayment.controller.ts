@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { CashierPaymentService } from "../../services/payment/cashier/payment.cashier.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { correctPaymentSchema, processPaymentSchema, voidPaymentSchema } from "../../validators/payment.validator.ts";
 
  

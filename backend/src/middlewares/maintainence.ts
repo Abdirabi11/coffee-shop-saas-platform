@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma.ts"
 
 export const maintenanceGuard = async (_: Request, res: Response, next: NextFunction) => {
-    const setting = await prisma.platformSetting.findUnique({
+    const setting = await prisma.platformSetting.findFirst({
       where: { key: "MAINTENANCE_MODE" },
     });
   

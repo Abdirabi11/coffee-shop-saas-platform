@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MenuSnapshotService } from "../../services/menu/menuSnapshot.service.ts";
 
 
@@ -11,7 +11,7 @@ export class MenuSnapshotJob {
 
         try {
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
                 select: {
                 uuid: true,
                 tenantUuid: true,

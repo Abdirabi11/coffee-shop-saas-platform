@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../observability/logger.ts";
+import { logWithContext } from "../observability/Logger.ts";
 import { MetricsService } from "../observability/metrics.ts";
 
 export class WebhookIdempotencyService{

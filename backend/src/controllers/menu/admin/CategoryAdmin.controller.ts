@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../../../config/prisma.ts"
 import { MenuCacheService } from "../../../services/menu/menuCache.service.ts";
-import { logWithContext } from "../../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
 
 export class CategoryAdminController {
   

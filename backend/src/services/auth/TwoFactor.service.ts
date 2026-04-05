@@ -1,6 +1,8 @@
 import crypto from "crypto";
+import { authenticator } from "@otplib/preset-default";
+import QRCode from "qrcode";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class TwoFactorService {
   
@@ -61,6 +63,14 @@ export class TwoFactorService {
             const qrCode = await QRCode.toDataURL(otpauth);
 
             logWithContext("info", "[2FA] Setup initiated", { userUuid });
+
+            if (process.env.NODE_ENV !== "production") {
+                const currentCode = authenticator.generate(secret);
+                console.log(`\n🔐 [2FA SETUP]`);
+                console.log(`   Secret: ${secret}`);
+                console.log(`   Current TOTP code: ${currentCode}`);
+                console.log(`   (Use within 30 seconds)\n`);
+            };    
 
             return {
                 secret,

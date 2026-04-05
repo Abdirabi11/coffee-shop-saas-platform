@@ -1,6 +1,6 @@
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import prisma from "../../config/prisma.ts"
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import prisma from "../../config/prisma.js"
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 export class PushNotificationService{
     static async send(input: {

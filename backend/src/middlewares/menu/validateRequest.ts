@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import Joi from "joi";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export function validateRequest(schema: Joi.Schema, source: "body" | "query" | "params" = "body") {
     return (req: Request, res: Response, next: NextFunction) => {

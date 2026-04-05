@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { PermissionManagementService } from "../../services/staff/PermissionManagement.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export function checkPermission(permissionSlug: string) {
     return async (req: Request, res: Response, next: NextFunction) => {

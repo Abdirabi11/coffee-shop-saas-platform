@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import prisma from "../config/prisma.ts"
 
 export const deviceFingerprintMiddleware = async (

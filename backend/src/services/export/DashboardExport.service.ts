@@ -1,7 +1,7 @@
 import { Parser } from "json2csv";
 import ExcelJS from "exceljs";
 import { SuperAdminDashboardService } from "../Dashboards/SuperAdminDashboard.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { TenantDashboardService } from "../Dashboards/TenantDashboard.service.ts";
 
 export class DashboardExportService {

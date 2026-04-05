@@ -1,6 +1,6 @@
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { redis } from "../../lib/redis.ts";
 import prisma from "../config/prisma.ts"
 
@@ -134,14 +134,14 @@ export class CategoryService{
                     }
                     : false,
                 products: {
-                    where: { isActive: true },
+                    where: { active: true },
                     select: { uuid: true, name: true, basePrice: true, imageUrls: true },
                     take: 5,
                 },
                 _count: {
                     select: {
                         products: {
-                            where: { isActive: true },
+                            where: { active: true },
                         },
                     },
                 },
@@ -165,17 +165,17 @@ export class CategoryService{
             include: {
                 parent: true,
                 children: {
-                    where: { isActive: true },
+                    where: { active: true },
                     orderBy: { displayOrder: "asc" },
                 },
                 products: {
-                    where: { isActive: true },
+                    where: { active: true },
                     include: {
                         inventory: true,
                     },
                 },
                 availability: {
-                    where: { isActive: true },
+                    where: { active: true },
                 },
                 visibilitySchedules: true,
             },

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { CashDrawerService } from "../../services/staff/CashDrawer.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 
 export class CashDrawerController {

@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.ts";
 
 export class TipPoolCalculationJob {
@@ -17,7 +17,7 @@ export class TipPoolCalculationJob {
 
             // Get all active stores
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
             });
 
             let processed = 0;

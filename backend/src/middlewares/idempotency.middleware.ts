@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma.ts"
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 
 export const idempotencyMiddleware = async (
     req: Request,

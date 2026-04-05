@@ -2,9 +2,9 @@ import dayjs from "dayjs";
 import prisma from "../config/prisma.ts"
 import { eventBus } from "./eventBus.ts";
 import { InventoryOrderService } from "../services/inventory/InventoryOrder.service.ts";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { bumpCacheVersion } from "../cache/cacheVersion.ts";
-import { MetricsService } from "../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../infrastructure/observability/MetricsService.ts";
  
 
 export function registerInventoryEventHandlers() {

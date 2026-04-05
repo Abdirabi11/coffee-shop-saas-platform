@@ -1,6 +1,6 @@
 import { Server as SocketIOServer } from "socket.io";
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class OrderRealtimeService{
     private static io: SocketIOServer;

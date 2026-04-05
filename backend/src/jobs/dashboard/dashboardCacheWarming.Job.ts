@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { SuperAdminDashboardService } from "../../services/superAdmin/SuperAdminDashboard.service.ts";
 
 export class DashboardCacheWarmingJob {

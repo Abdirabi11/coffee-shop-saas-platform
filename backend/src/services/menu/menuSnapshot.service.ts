@@ -1,10 +1,10 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
 import { MenuService } from "./menu.service.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MenuDiffService } from "./menu-diff.service.ts";
 import { MenuEventService } from "../../events/menu.events.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 export class MenuSnapshotService{
   static async createSnapshot(input: {
@@ -198,7 +198,7 @@ export class MenuSnapshotService{
       where: { storeUuid },
       include: {
         options: {
-          where: { isActive: true },
+          where: { active: true },
           orderBy: { order: "asc" },
         },
       },

@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { LaborCostTrackingService } from "../../services/staff/LaborCostTracking.service.ts";
 
 
@@ -14,7 +14,7 @@ export class LaborCostSnapshotJob {
 
             // Get all active stores
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
             });
 
             let processed = 0;

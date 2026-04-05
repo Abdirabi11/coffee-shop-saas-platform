@@ -11,7 +11,7 @@ export const suspendTenant= async (req: Request, res: Response)=>{
         await prisma.$transaction(async (tx: any)=>{
             const tenant= await tx.tenant.update({
                 where: {uuid: tenantUuid},
-                data: {status: TenantStatus.SUSPENDED}
+                data: {status: TenantStatus.REVOKED}
             })
 
             await tx.session.findMany({

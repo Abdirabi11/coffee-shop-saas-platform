@@ -1,9 +1,9 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { invalidateCache, withCache } from "../../cache/cache.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 export class StaffManagementService {
   
@@ -383,7 +383,7 @@ export class StaffManagementService {
                 where: { uuid: userUuid },
                 include: {
                     tenantUsers: {
-                        where: { isActive: true },
+                        where: { active: true },
                         include: {
                             tenant: {
                                 select: {
@@ -394,7 +394,7 @@ export class StaffManagementService {
                         },
                     },
                     userStores: {
-                        where: { isActive: true },
+                        where: { active: true },
                         include: {
                             store: {
                                 select: {

@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class SnapshotCleanupJob {
   
@@ -13,7 +13,7 @@ export class SnapshotCleanupJob {
 
             // Keep at least one snapshot per store
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
                 select: { uuid: true },
             });
 

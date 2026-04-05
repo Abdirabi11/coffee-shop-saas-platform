@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { ReconciliationDashboardService } from "../../services/Dashboards/ReconciliationDashboard.service.ts";
 
 export class ReconciliationDashboardController {

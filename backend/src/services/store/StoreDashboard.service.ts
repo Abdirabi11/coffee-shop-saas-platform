@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import { withCache } from "../../cache/cache.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { getCacheVersion } from "../cache/cacheVersion.ts";
 import prisma from "../config/prisma.ts"
 

@@ -1,5 +1,5 @@
-import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.ts";
+import prisma from "../../config/prisma.js"
+import { EventBus } from "../../events/eventBus.js";
 
 export class ProductNotificationService{
     static async notifyBackInStock(input: {

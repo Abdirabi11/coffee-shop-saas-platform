@@ -1,5 +1,5 @@
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { redis } from "../../lib/redis.ts";
 import { CategoryService } from "../category/category.service.ts";
 

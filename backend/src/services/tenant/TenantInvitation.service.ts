@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { EmailService } from "../notification/Email.service.ts";
 
 

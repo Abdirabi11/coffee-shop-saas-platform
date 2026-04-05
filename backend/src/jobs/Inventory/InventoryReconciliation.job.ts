@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class InventoryReconciliationJob {
     static cronSchedule = "30 2 * * *";

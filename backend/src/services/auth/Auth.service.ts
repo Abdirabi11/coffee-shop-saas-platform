@@ -1,9 +1,8 @@
-import type { Request} from "express";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { generateOtp, hashOtp, otpExpiry, compareOtp } from "./otp.service.ts";
-import { SMSService } from "../notification/sms.service.ts";
+import { SMSService } from "../notification/Sms.service.ts";
 import { EmailService } from "../notification/Email.service.ts";
 import { FraudService } from "../security/Fraud.service.ts";
 import { TokenService } from "./Token.service.ts";

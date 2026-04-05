@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { EmailService } from "../notification/Email.service.ts";
 
 
@@ -43,17 +43,36 @@ export class EmailVerificationService {
             });
     
             // Send email
-            const verificationLink = `${process.env.APP_URL}/verify-email?token=${verificationToken}`;
+            // const verificationLink = `${process.env.APP_URL}/verify-email?token=${verificationToken}`;
     
-            await EmailService.send({
-                to: user.email,
-                subject: "Verify Your Email Address",
-                template: "email-verification",
-                data: {
-                    verificationLink,
-                    expiresIn: "24 hours",
-                },
-            });
+            const verificationLink = `${process.env.APP_URL}/verify-email?token=${verificationToken}`;
+
+            if (process.env.NODE_ENV !== "production") {
+                console.log(`\n📧 [EMAIL VERIFICATION]`);
+                console.log(`   To: ${user.email}`);
+                console.log(`   Token: ${verificationToken}`);
+                console.log(`   Link: ${verificationLink}\n`);
+            } else {
+                await EmailService.send({
+                    to: user.email,
+                    subject: "Verify Your Email Address",
+                    template: "email-verification",
+                    data: {
+                        verificationLink,
+                        expiresIn: "24 hours",
+                    },
+                });
+            }
+            
+            // await EmailService.send({
+            //     to: user.email,
+            //     subject: "Verify Your Email Address",
+            //     template: "email-verification",
+            //     data: {
+            //         verificationLink,
+            //         expiresIn: "24 hours",
+            //     },
+            // });
 
             logWithContext("info", "[EmailVerification] Verification email sent", {
                 userUuid,

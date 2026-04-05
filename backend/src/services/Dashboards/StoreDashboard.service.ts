@@ -47,7 +47,7 @@ export class StoreDashboardService{
                     FROM "Order"
                     WHERE "storeUuid" = ${storeUuid}
                     AND status = 'COMPLETED'
-                    AND "completedAt" >= ${todayStart}
+                    AND "actualReadyAt" >= ${todayStart}
                 `,
                     
                 prisma.payment.count({

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { SubscriptionService } from "../../services/billing/Subscription.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { QuotaService } from "../../services/billing/Quota.service.ts";
 import { FeatureService } from "../../services/billing/Feature.service.ts";
 

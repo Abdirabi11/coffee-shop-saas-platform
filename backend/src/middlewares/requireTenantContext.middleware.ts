@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma.ts"
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 
 //Middleware to ensure tenant context is present
 //Extracts tenant from authenticated user

@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 import { PaymentRiskScoreService } from "./paymentRiskScore.service.ts";
 

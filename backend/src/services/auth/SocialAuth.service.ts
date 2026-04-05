@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken"
 import { OAuth2Client } from "google-auth-library";
 import prisma from "../../config/prisma.ts"
 import { TokenService } from "./Token.service.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 export class SocialAuthService {
     // Google Sign-In

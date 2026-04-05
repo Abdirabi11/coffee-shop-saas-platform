@@ -12,7 +12,7 @@ export class StoreHoursService{
                 gte: new Date(now.setHours(0, 0, 0, 0)),
                 lt: new Date(now.setHours(23, 59, 59, 999)),
               },
-              isActive: true,
+              active: true,
             },
         });
 
@@ -26,7 +26,7 @@ export class StoreHoursService{
             where: {
               storeUuid,
               dayOfWeek: this.mapDayOfWeek(dayOfWeek),
-              isActive: true,
+              active: true,
               scheduleType: "REGULAR",
             },
         });

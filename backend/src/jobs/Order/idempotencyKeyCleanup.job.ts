@@ -1,4 +1,4 @@
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { IdempotencyService } from "../../services/order/idempotency.service.ts";
 
 //Clean up expired idempotency keys

@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 //Calculate daily order metrics
 //Runs daily at 3:00 AM
@@ -16,7 +16,7 @@ export class OrderMetricsCalculationJob {
         try {
             // Get all stores
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
             });
 
             let processed = 0;

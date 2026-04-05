@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { QuotaService } from "../services/billing/Quota.service.ts";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 
 export const checkQuota = (quotaKey: string, amount: number = 1) => {
     return async (req: Request, res: Response, next: NextFunction) => {

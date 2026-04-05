@@ -1,7 +1,7 @@
 import { run } from "node:test";
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts"
+import { logWithContext } from "../../infrastructure/observability/Logger.ts"
 
 export class LowStockAlertJob{
     static async run(){
@@ -9,16 +9,12 @@ export class LowStockAlertJob{
 
         try {
             // Get products with low stock
-            const lowStockProducts = await prisma.product.findMany({
+           const lowStockProducts = await prisma.product.findMany({
                 where: {
                     trackInventory: true,
                     isActive: true,
                     isDeleted: false,
-                    inventory: {
-                    quantity: {
-                        lte: prisma.product.fields.lowStockThreshold,
-                    },
-                    },
+                    lowStockThreshold: { gt: 0 },
                 },
                 include: {
                     inventory: true,

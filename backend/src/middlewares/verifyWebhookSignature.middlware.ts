@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { WebhookVerifier } from "../infrastructure/webhooks/webhookVerifier.ts";
 
 export const webhookSignatureGuard = async (

@@ -2,8 +2,8 @@ import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import { withCache } from "../../cache/cache.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 type TimeRange = "today" | "week" | "month" | "quarter" | "year";
  
@@ -158,7 +158,7 @@ export class TenantDashboardService {
                 where: { tenantUuid, status: "FAILED", createdAt: { gte: since } },
             }),
         
-            prisma.store.count({ where: { tenantUuid, isActive: true } }),
+            prisma.store.count({ where: { tenantUuid, active: true } }),
         ]);
     
         return {
@@ -240,7 +240,7 @@ export class TenantDashboardService {
         since: Date
     ): Promise<StoreSnapshot[]> {
         const stores = await prisma.store.findMany({
-            where: { tenantUuid, isActive: true },
+            where: { tenantUuid, active: true },
             select: { uuid: true, name: true },
         });
     
@@ -334,7 +334,7 @@ export class TenantDashboardService {
     private static async getStaffSummary(tenantUuid: string) {
         const [totalStaff, clockedIn, onBreak] = await Promise.all([
             prisma.tenantUser.count({
-                where: { tenantUuid, isActive: true, role: { not: "CUSTOMER" } },
+                where: { tenantUuid, active: true, role: { not: "CUSTOMER" } },
             }),
         
             prisma.timeEntry.count({

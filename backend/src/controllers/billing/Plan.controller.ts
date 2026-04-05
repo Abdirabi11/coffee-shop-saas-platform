@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { PlanService } from "../../services/billing/Plan.service.ts";
 import { addPlanFeatureSchema, addPlanPriceSchema, addPlanQuotaSchema, createPlanSchema, updatePlanSchema } from "../../validators/plan.validator.ts";
 

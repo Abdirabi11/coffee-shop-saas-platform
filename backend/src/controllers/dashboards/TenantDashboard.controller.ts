@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import dayjs from "dayjs";
-import { TenantDashboardService } from "../../services/tenant/ TenantDashboard.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { TenantDashboardService } from "../../services/Dashboards/ TenantDashboard.service.js";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 
 //Tenant admin dashboard endpoint — Add inventory section

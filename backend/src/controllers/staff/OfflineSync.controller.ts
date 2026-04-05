@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { OfflineSyncService } from "../../services/staff/OfflineSync.service.ts";
 
 

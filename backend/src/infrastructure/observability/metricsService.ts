@@ -127,6 +127,17 @@ export class MetricsService {
             console.error(`[MetricsService] Failed to record timing ${name}:`, error.message);
         }
     }
+
+    static startTimer(name: string, tags?: MetricTags) {
+        const start = Date.now();
+        return {
+            end: () => {
+                const duration = Date.now() - start;
+                MetricsService.timing(name, duration, tags);
+                return duration;
+            },
+        };
+    }
   
     //Set gauge value
     //Use for: active connections, queue size, memory usage

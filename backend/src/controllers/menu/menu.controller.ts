@@ -1,7 +1,7 @@
 import type { Request, Response } from "express"
 import { MenuAnalyticsService } from "../../services/menu/menuAnalytics.service.ts";
 import { MenuService } from "../../services/menu/menu.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { FavoriteService } from "../../services/menu/favorite.service.ts";
 
 

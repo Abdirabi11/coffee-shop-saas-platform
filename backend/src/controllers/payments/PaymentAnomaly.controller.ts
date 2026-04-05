@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
 import { z } from "zod";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
  
 const reviewAnomalySchema = z.object({

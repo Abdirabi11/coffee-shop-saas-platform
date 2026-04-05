@@ -1,6 +1,6 @@
 import prisma from "../../config/prisma.ts"
 import { RefundService } from "../../services/payment/Refund.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class RefundProcessorJob {
   static cronSchedule = "*/10 * * * *";
@@ -10,7 +10,7 @@ export class RefundProcessorJob {
     
         const pendingRefunds = await prisma.refund.findMany({
             where: { status: "REQUESTED" },
-            orderBy: { createdAt: "asc" },
+            orderBy: { requestedAt: "asc" },
             take: 20,
         });
     

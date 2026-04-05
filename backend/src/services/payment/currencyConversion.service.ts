@@ -1,5 +1,5 @@
 import axios from "axios";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class CurrencyConversionService {
     private static rates: Record<string, number> = {};

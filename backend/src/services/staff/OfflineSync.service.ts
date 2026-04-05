@@ -1,8 +1,8 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { TimeEntryService } from "./TimeEntry.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 interface OfflineData {
     userProfile?: any;

@@ -1,10 +1,10 @@
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import prisma from "../../config/prisma.ts"
 import { InventoryService } from "../../services/inventory/inventory.service.ts";
 import { RefundService } from "../../services/payment/Refund.service.ts";
 import { EventBus } from "../../events/eventBus.ts";
 import { OrderStatusService } from "../services/order/order-status.service.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { OrderCacheService } from "../../services/cache/orderCache.service.ts";
 import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
 

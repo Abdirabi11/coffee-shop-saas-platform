@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../../config/prisma.ts"
-import { monitoring } from "../../infrastructure/observability/monitoring.ts";
+import { monitoring } from "../../infrastructure/observability/Monitoring.ts";
 
 export class PaymentHealthController {
 

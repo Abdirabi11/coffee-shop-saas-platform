@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "RevokeReason" ADD VALUE 'SESSION_REVOKED';

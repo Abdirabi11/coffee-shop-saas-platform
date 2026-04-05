@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { ReceiptService } from "../../services/payment/Receipt.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
 export class ReceiptController {
     // GET /api/v1/receipts/order/:orderUuid

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { StaffManagementService } from "../../services/staff/StaffManagement.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class StaffManagementController {
   

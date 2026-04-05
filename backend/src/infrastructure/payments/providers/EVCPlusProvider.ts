@@ -1,5 +1,5 @@
 import axios from "axios";
-import { logWithContext } from "../../observability/logger.ts";
+import { logWithContext } from "../../observability/Logger.ts";
 import { PaymentProviderAdapter } from "./paymentProvider.adapter.ts";
 
 export class EVCPlusProvider implements PaymentProviderAdapter {

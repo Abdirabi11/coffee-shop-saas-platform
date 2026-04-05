@@ -68,7 +68,7 @@ export class AdminDashboardService {
           }),
   
           prisma.store.count({
-            where: { isActive: true },
+            where: { actice: true },
           }),
         ]);
   

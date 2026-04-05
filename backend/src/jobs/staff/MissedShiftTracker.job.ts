@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import prisma from "../../config/prisma.ts"
 import { ShiftManagementService } from "../../services/staff/ShiftManagement.service.ts";
 

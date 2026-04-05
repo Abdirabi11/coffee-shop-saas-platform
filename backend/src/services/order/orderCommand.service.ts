@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { InventoryOrderService } from "../inventory/InventoryOrder.service.ts";
 import { MenuService } from "../menu/menu.service.ts";
 import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";

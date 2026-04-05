@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class SubscriptionService{
     //Create subscription

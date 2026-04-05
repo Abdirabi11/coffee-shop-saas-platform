@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { ProductAvailabilityService } from "../../services/products/productAvailability.service.ts";
 import { createProductAvailabilitySchema } from "../../validators/product.validator.ts";
 

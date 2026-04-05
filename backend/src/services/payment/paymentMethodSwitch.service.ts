@@ -1,6 +1,6 @@
 import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.ts";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { EventBus } from "../../events/eventBus.ts";
 
 export class PaymentMethodSwitchService {

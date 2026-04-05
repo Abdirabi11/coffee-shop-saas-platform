@@ -1,5 +1,6 @@
-import { logWithContext } from "../infrastructure/observability/logger.ts";
-import { MetricsService } from "../infrastructure/observability/metricsService.ts";
+import prisma from "../config/prisma.ts"
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../infrastructure/observability/MetricsService.ts";
 import { PaymentFraudEvaluator } from "../services/payment/paymentFraudEvaluator.service.ts";
 import { eventBus } from "./eventBus.ts";
 

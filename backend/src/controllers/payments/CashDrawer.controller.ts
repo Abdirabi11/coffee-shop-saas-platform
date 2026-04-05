@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
 import { CashDrawerService } from "../../services/staff/CashDrawer.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { closeDrawerSchema, openDrawerSchema } from "../../validators/payment.validator.ts";
  
 export class CashDrawerController {

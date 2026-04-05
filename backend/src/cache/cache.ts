@@ -11,7 +11,7 @@ export async function withCache<T>(
     };
 
     const fresh= await fetcher();
-    await redis.set(key, JSON.stringify(fresh), "EX", ttlSeconds);
+    await redis.set(key, JSON.stringify(fresh), { ex: ttlSeconds });
     return fresh;
 };
 

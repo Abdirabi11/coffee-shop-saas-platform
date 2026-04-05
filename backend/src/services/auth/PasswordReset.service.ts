@@ -1,8 +1,8 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { SMSService } from "../notification/sms.service.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { SMSService } from "../notification/Sms.service.ts";
 import { EmailService } from "../notification/Email.service.ts";
 
 export class PasswordResetService{

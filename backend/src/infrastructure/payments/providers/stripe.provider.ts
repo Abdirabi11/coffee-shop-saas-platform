@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { logWithContext } from "../../observability/logger.ts";
+import { logWithContext } from "../../observability/Logger.ts";
 import type  { PaymentProvider } from "./paymentProvider.interface.ts";
 
 

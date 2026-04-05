@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+
 
 export class SMSService {
     //Send SMS notification
@@ -44,3 +45,33 @@ export class SMSService {
         }
     }
 }
+
+// const client = process.env.TWILIO_SID
+//   ? twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN)
+//   : null;
+
+// export class SMSService {
+//   static async send(input: { to: string; message: string; priority?: string }) {
+//     // Dev mode: log to console
+//     if (!client) {
+//       console.log(`[SMS] 📱 ${input.to}: ${input.message}`);
+//       await prisma.smsOutbox.create({
+//         data: { to: input.to, message: input.message, status: "LOGGED" },
+//       });
+//       return { success: true };
+//     }
+
+//     // Production: send via Twilio
+//     await client.messages.create({
+//       to: input.to,
+//       from: process.env.TWILIO_PHONE_NUMBER!,
+//       body: input.message,
+//     });
+
+//     await prisma.smsOutbox.create({
+//       data: { to: input.to, message: input.message, status: "SENT", sentAt: new Date() },
+//     });
+
+//     return { success: true };
+//   }
+// }

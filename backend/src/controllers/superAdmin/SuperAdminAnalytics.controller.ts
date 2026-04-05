@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { SuperAdminAnalyticsService } from "../../services/superAdmin/SuperAdminAnalytics.service.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
 export class SuperAdminAnalyticsController {
     // GET /api/v1/admin/analytics/kpis

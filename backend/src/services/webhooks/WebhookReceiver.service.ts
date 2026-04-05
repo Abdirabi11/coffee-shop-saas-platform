@@ -1,5 +1,5 @@
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { WebhookIdempotencyService } from "../../infrastructure/webhooks/webhookIdempotency.service.ts";
 import { WebhookVerifier } from "../../infrastructure/webhooks/webhookVerifier.ts";
 import { WebhookDeadLetterQueue } from "./WebhookDeadLetterQueue.service.ts";

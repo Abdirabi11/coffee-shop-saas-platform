@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import { prisma } from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class CategoryMetricsJob {
 
@@ -17,7 +17,7 @@ export class CategoryMetricsJob {
         try {
             // Get all stores
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
                 select: { uuid: true, tenantUuid: true },
             });
     

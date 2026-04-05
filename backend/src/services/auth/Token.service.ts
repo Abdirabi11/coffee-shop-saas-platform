@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../utils/jwt.ts";
 import { SessionService } from "./Session.service.ts";
   
@@ -249,7 +249,6 @@ export class TokenService {
       tokenVersion: storedToken.user.tokenVersion,
     });
  
-    // FIX #1 + #2: Create new token in the SAME family, incrementing version
     const newStoredToken = await prisma.refreshToken.create({
       data: {
         token: newRefreshTokenValue,

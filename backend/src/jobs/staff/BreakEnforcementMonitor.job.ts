@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { BreakEnforcementService } from "../../services/staff/BreakEnforcement.service.ts";
 
 export class BreakEnforcementMonitorJob {
@@ -11,7 +11,7 @@ export class BreakEnforcementMonitorJob {
         try {
             // Get all active stores
             const stores = await prisma.store.findMany({
-                where: { isActive: true },
+                where: { active: true },
             });
 
             let totalMonitored = 0;

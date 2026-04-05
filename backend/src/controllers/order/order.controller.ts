@@ -1,9 +1,9 @@
 import { Request, Response } from "express";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { OrderCommandService } from "../../services/order/order-command.service.ts";
 import { OrderCancellationService } from "../../services/order/orderCancellation.service.ts";
-import { OrderModificationService } from "../../services/order/OrderModification.service.js";
+import { OrderModificationService } from "../../services/order/OrderModification.service.ts";
 import { OrderQueryService } from "../../services/order/orderQuery.service.ts";
 import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
 import { OrderValidationService } from "../../services/order/orderValidation.service.ts";

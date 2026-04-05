@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts"
+import { logWithContext } from "../../infrastructure/observability/Logger.ts"
 
 export class PermissionService {
  
@@ -13,7 +13,7 @@ export class PermissionService {
                         { uuid: roleIdentifier },
                         { slug: roleIdentifier },
                     ],
-                    isActive: true,
+                    active: true,
                 },
                 include: {
                     permissions: {
@@ -93,7 +93,7 @@ export class PermissionService {
             //Check role-based permissions via UserStore
             if (storeUuid) {
                 const userStore = await prisma.userStore.findFirst({
-                    where: { userUuid, storeUuid, isActive: true },
+                    where: { userUuid, storeUuid, active: true },
                 });
                 if (userStore) {
                     return this.hasPermission(userStore.role, permissionKey);

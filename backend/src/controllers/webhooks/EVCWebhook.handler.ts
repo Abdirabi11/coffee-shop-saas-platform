@@ -1,5 +1,5 @@
 import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
 import { PaymentService } from "../../services/payment/payment.service.ts";
 

@@ -114,7 +114,7 @@ export class SuperAdminSubscriptionService {
             if(status === SubscriptionStatus.CANCELED || status === SubscriptionStatus.PAST_DUE){
                 await tx.tenant.update({
                     where: {uuid: tenantUuid},
-                    data: {status: TenantStatus.SUSPENDED}
+                    data: {status: TenantStatus.REVOKED}
                 })
             };
 

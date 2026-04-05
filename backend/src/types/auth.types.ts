@@ -3,7 +3,7 @@
 export type Role = "CUSTOMER" | "STAFF" | "ADMIN";
 
 export interface JwtPayload {
-  userId: string;
+  userUuid: string;
   role: Role;
 };
 

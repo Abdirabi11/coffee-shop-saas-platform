@@ -1,8 +1,24 @@
 import nodemailer from "nodemailer";
 import prisma from "../../config/prisma.ts";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
+//sample
+function renderEmailTemplate(template: string, data: any): string {
+    // Simple template renderer — replace with Handlebars/EJS later
+    switch (template) {
+        case "email-verification":
+            return `<h1>Verify Your Email</h1><p>Click here to verify: <a href="${data.verificationLink}">${data.verificationLink}</a></p><p>Expires in ${data.expiresIn}.</p>`;
+        case "otp-verification":
+            return `<h1>Your Code: ${data.otp}</h1><p>Expires in ${data.expiresIn}.</p>`;
+        case "password-reset":
+            return `<h1>Reset Password</h1><p>Click here: <a href="${data.resetLink}">${data.resetLink}</a></p><p>Expires in ${data.expiresIn}.</p>`;
+        case "password-changed":
+            return `<h1>Password Changed</h1><p>Your password was changed at ${data.timestamp}.</p>`;
+        default:
+            return `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    }
+}
 export class EmailService {
     private static transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST || "smtp.gmail.com",

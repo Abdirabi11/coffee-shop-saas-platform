@@ -49,7 +49,7 @@ export class ProductOptionService{
             },
             include: {
                 options: {
-                    where: { isActive: true },
+                    where: { active: true },
                     orderBy: { displayOrder: "asc" },
                 },
             },
@@ -177,7 +177,7 @@ export class ProductOptionService{
             },
             include: {
                 options: {
-                    where: { isActive: true },
+                    where: { active: true },
                 },
             },
         });

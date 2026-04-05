@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { WebhookReceiverService } from "../../services/webhooks/WebhookReceiver.service.ts";
 import { StripeWebhookHandler } from "../../handlers/webhooks/StripeWebhook.handler.ts";
 

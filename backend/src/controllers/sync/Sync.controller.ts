@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { OrderSyncService } from "../../services/sync/OrderSync.service.ts";
 
 export class SyncController {

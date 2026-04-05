@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/logger.ts";
-import { MetricsService } from "../../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { DeviceTrustService } from "../../services/security/DeviceTrust.service.ts";
 
  

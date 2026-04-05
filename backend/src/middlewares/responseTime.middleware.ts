@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
-import { logWithContext } from "../infrastructure/observability/logger.ts";
-import { MetricsService } from "../infrastructure/observability/metricsService.ts";
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
+import { MetricsService } from "../infrastructure/observability/MetricsService.ts";
 
 export const responseTimeMiddleware = (
     req: Request,
@@ -8,31 +8,32 @@ export const responseTimeMiddleware = (
     next: NextFunction
 ) => {
     const startTime = Date.now();
-  
-    // Capture response finish
+
+    // Hook into response BEFORE it sends (not after)
+    const originalEnd = res.end;
+    res.end = function (...args: any[]) {
+        const duration = Date.now() - startTime;
+        res.setHeader("X-Response-Time", `${duration}ms`);
+        return originalEnd.apply(this, args);
+    } as any;
+
+    // Log after finish (headers already sent, just metrics)
     res.on("finish", () => {
         const duration = Date.now() - startTime;
-    
-        // Set response time header
-        res.setHeader("X-Response-Time", `${duration}ms`);
-    
-        // Track metrics
         MetricsService.timing("http.response_time", duration, {
             method: req.method,
             route: req.route?.path || req.path,
             status: res.statusCode.toString(),
         });
-  
-        // Log slow requests
+
         if (duration > 1000) {
-            logWithContext("warn", "[Performance] Slow request detected", {
+            logWithContext("warn", "[Performance] Slow request", {
                 method: req.method,
                 path: req.path,
                 duration,
-                statusCode: res.statusCode,
             });
         }
     });
-  
-    next();
+
+  next();
 };
