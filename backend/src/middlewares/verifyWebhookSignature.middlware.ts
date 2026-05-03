@@ -34,6 +34,13 @@ export const webhookSignatureGuard = async (
       return res.status(401).json({ error: "Missing webhook signature" });
     };
 
+    // const sig = req.headers["stripe-signature"] as string;
+    // const event = stripe.webhooks.constructEvent(
+    //   req.rawBody!,  // NOT req.body
+    //   sig,
+    //   process.env.STRIPE_WEBHOOK_SECRET!
+    // );
+
     const event = await WebhookVerifier.verify({
       provider,
       signature,

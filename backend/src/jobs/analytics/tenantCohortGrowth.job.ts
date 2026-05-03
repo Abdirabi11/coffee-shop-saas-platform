@@ -1,4 +1,4 @@
-import { prisma } from "../../config/prisma.ts"
+import prisma  from "../../config/prisma.ts"
 import dayjs from "dayjs";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 

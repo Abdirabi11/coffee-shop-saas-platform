@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { StaffManagementService } from "../../services/staff/StaffManagement.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 

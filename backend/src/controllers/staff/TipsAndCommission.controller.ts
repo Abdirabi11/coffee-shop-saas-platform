@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.ts";
 
 

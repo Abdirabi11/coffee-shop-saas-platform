@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { BreakEnforcementService } from "../../services/staff/BreakEnforcement.service.ts";
 
 export class BreakEnforcementController {

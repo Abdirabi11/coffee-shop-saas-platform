@@ -1,117 +1,102 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma.ts"
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 
-//Middleware to ensure tenant context is present
-//Extracts tenant from authenticated user
 export const requireTenantContext = async (
     req: Request,
     res: Response,
     next: NextFunction
 ) => {
     try {
-        // Check if user is authenticated
-        if (!req.user?.uuid) {
-            return res.status(401).json({
-                error: "UNAUTHORIZED",
-                message: "Authentication required",
-            });
+        const user = (req as any).user;
+        if (!user?.userUuid) {
+            return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
         }
-
-        // Get tenant from user's TenantUser relationship
+ 
+        // 1. Try explicit header first
+        const headerTenantUuid = req.headers["x-tenant-uuid"] as string;
+ 
+        if (headerTenantUuid) {
+            // Verify user has access to this tenant
+            const tenantUser = await prisma.tenantUser.findFirst({
+                where: {
+                    userUuid: user.userUuid,
+                    tenantUuid: headerTenantUuid,
+                    isActive: true,
+                },
+                include: { tenant: true },
+            });
+ 
+            if (!tenantUser) {
+                return res.status(403).json({ success: false, error: "NO_TENANT_ACCESS" });
+            }
+ 
+            if (tenantUser.tenant.status !== "ACTIVE") {
+                return res.status(403).json({ success: false, error: "TENANT_SUSPENDED" });
+            }
+ 
+            (req as any).tenant = tenantUser.tenant;
+            (req as any).tenantUser = tenantUser;
+            return next();
+        }
+ 
+        // 2. Fallback: look up user's tenant
         const tenantUser = await prisma.tenantUser.findFirst({
             where: {
-                userUuid: req.user.uuid,
+                userUuid: user.userUuid,
                 isActive: true,
             },
-            include: {
-                tenant: true,
-            },
+            include: { tenant: true },
         });
-
+ 
         if (!tenantUser || !tenantUser.tenant) {
-            logWithContext("warn", "[TenantContext] User has no active tenant", {
-                userUuid: req.user.uuid,
-            });
-
-            return res.status(403).json({
-                error: "NO_TENANT_ACCESS",
-                message: "You don't have access to any tenant",
-            });
-        };
-
-        // Check if tenant is active
-        if (!tenantUser.tenant.isActive) {
-            return res.status(403).json({
-                error: "TENANT_SUSPENDED",
-                message: "Your organization account is suspended",
-            });
-        };
-
-        // Attach tenant and tenantUser to request
-        req.tenant = tenantUser.tenant;
-        req.tenantUser = tenantUser;
-
-        // Also attach for convenience
-        req.user.tenantUserUuid = tenantUser.uuid;
-        req.user.role = tenantUser.role;
-
-        logWithContext("debug", "[TenantContext] Tenant context attached", {
-            userUuid: req.user.uuid,
-            tenantUuid: tenantUser.tenantUuid,
-            role: tenantUser.role,
-        });
-
+            return res.status(403).json({ success: false, error: "NO_TENANT_ACCESS" });
+        }
+ 
+        if (tenantUser.tenant.status !== "ACTIVE") {
+            return res.status(403).json({ success: false, error: "TENANT_SUSPENDED" });
+        }
+ 
+        (req as any).tenant = tenantUser.tenant;
+        (req as any).tenantUser = tenantUser;
         next();
     } catch (error: any) {
-        logWithContext("error", "[TenantContext] Failed to attach tenant context", {
-            error: error.message,
-            userUuid: req.user?.uuid,
-        });
-
-        return res.status(500).json({
-            error: "INTERNAL_SERVER_ERROR",
-            message: "Failed to load tenant context",
-        });
+        logWithContext("error", "[TenantContext] Failed", { error: error.message });
+        return res.status(500).json({ success: false, error: "TENANT_CONTEXT_FAILED" });
     }
 };
-
-//Middleware to allow optional tenant context
-//For public/semi-public endpoints
+ 
+/**
+ * Optional tenant context — for public/semi-public endpoints.
+ * Attaches tenant if user is authenticated and has one, but doesn't fail if not.
+ */
 export const optionalTenantContext = async (
     req: Request,
     res: Response,
     next: NextFunction
 ) => {
     try {
-        if (!req.user?.uuid) {
-            return next();
-        };
-
+        const user = (req as any).user;
+        if (!user?.userUuid) return next();
+ 
+        const headerTenantUuid = req.headers["x-tenant-uuid"] as string;
+ 
         const tenantUser = await prisma.tenantUser.findFirst({
             where: {
-                userUuid: req.user.uuid,
+                userUuid: user.userUuid,
+                ...(headerTenantUuid ? { tenantUuid: headerTenantUuid } : {}),
                 isActive: true,
             },
-            include: {
-                tenant: true,
-            },
+            include: { tenant: true },
         });
-
-        if (tenantUser && tenantUser.tenant) {
-            req.tenant = tenantUser.tenant;
-            req.tenantUser = tenantUser;
-            req.user.tenantUserUuid = tenantUser.uuid;
-            req.user.role = tenantUser.role;
-        };
-
+ 
+        if (tenantUser?.tenant) {
+            (req as any).tenant = tenantUser.tenant;
+            (req as any).tenantUser = tenantUser;
+        }
+ 
         next();
-    } catch (error: any) {
-        logWithContext("error", "[TenantContext] Failed to attach optional context", {
-            error: error.message,
-        });
-
-        // Don't fail, just continue
-        next();
+    } catch {
+        next(); 
     }
 };

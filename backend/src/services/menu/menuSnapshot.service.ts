@@ -1,8 +1,6 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
-import { MenuService } from "./menu.service.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { MenuDiffService } from "./menu-diff.service.ts";
 import { MenuEventService } from "../../events/menu.events.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 

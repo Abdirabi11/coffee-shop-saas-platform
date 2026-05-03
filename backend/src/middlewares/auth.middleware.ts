@@ -19,15 +19,15 @@ export const authenticate= async (
 )=>{
     try {
         const authHeader= req.headers.authorization;
-        console.log("AUTH HEADER:", req.headers.authorization);
+        // console.log("AUTH HEADER:", req.headers.authorization);
         if (!authHeader || !authHeader.startsWith("Bearer ")) {
             return res.status(401).json({ message: "Unauthorized" });
         };
 
         const token= authHeader.split(" ")[1];
         const payload = verifyAccessToken(token);
-        console.log("DECODED PAYLOAD:", payload);
-        console.log("USER UUID:", payload?.userUuid);
+        // console.log("DECODED PAYLOAD:", payload);
+        // // console.log("USER UUID:", payload?.userUuid);
 
         const user= await prisma.user.findUnique({
             where: { uuid: payload.userUuid },
@@ -44,6 +44,7 @@ export const authenticate= async (
         req.user = payload;
         next()
     } catch (err: any) {
+        console.log("JWT ERROR:", err.message);
         return res.status(401).json({ message: "Invalid or expired token" });
     } 
 };
@@ -69,13 +70,13 @@ export const requireStoreContext = (
 };
 
 export const require2FA= async(req: AuthRequest, res: Response, next: NextFunction)=>{
+    if (!req.user) {
+        return res.status(401).json({ message: "Unauthenticated" });
+    };
+
     const record= await prisma.admin2FA.findUnique({
         where: { userUuid: req.user!.userUuid },
     });
-
-    if (!req.user) {
-        return res.status(401).json({ message: "Unauthenticated" });
-    }
 
     if (!record?.enabled) {
         return res.status(403).json({ message: "2FA required" });

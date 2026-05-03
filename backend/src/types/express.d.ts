@@ -12,6 +12,14 @@ declare global {
         tokenVersion: number;
       };
     }
+
+    interface Request {
+      storeRole?: string;
+    }
+
+    interface Request {
+      rawBody?: Buffer;
+    }
     interface Request {
       user?: User & {
         uuid: string;

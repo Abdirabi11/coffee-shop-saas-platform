@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { prisma } from "../../config/prisma.ts"
+import prisma  from "../../config/prisma.ts"
 
 export class ArpuLtvJob {
     static async run() {

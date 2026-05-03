@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { TimeEntryService } from "../../services/staff/TimeEntry.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
@@ -143,7 +143,7 @@ export class TimeEntryController {
     }
 
     //GET /api/time/active/:storeUuid
-    static async getActiveEntries(req: Request, res: Response) {
+    static async getActiveTimeEntries(req: Request, res: Response) {
         try {
             const { storeUuid } = req.params;
 
@@ -201,7 +201,7 @@ export class TimeEntryController {
 
             const timeEntry = await TimeEntryService.approveTimeEntry({
                 timeEntryUuid,
-                approvedBy: req.user!.uuid,
+                approvedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({

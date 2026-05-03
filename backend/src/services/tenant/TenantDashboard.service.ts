@@ -29,7 +29,6 @@ interface StoreSnapshot {
     staffOnShift: number;
     activeOrders: number;
 }
- 
 interface TopProduct {
     menuItemUuid: string;
     name: string;

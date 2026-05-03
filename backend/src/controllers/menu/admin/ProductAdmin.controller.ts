@@ -1,9 +1,7 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import prisma from "../../../config/prisma.ts"
 import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
 import { MenuCacheService } from "../../../services/menu/menuCache.service.ts";
-
-
 
 export class ProductAdminController {
   

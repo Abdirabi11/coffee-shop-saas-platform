@@ -2,6 +2,20 @@ import Joi from "joi";
 
 export class MenuValidators {
 
+    static trackAnalytics = Joi.object({
+        storeUuid: Joi.string().uuid().required(),
+        eventType: Joi.string().required(),
+        eventCategory: Joi.string().required(),
+        entityType: Joi.string().optional(),
+        entityUuid: Joi.string().uuid().optional(),
+        entityName: Joi.string().optional(),
+        productPrice: Joi.number().optional(),
+        quantity: Joi.number().integer().optional(),
+        sessionId: Joi.string().optional(),
+        deviceType: Joi.string().optional(),
+        platform: Joi.string().optional(),
+    });
+
     // MENU RETRIEVAL
     static getMenu = Joi.object({
         storeUuid: Joi.string().uuid().required(),

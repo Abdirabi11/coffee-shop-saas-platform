@@ -13,126 +13,139 @@ import { PaymentWebhookController } from "../../controllers/payments/PaymentWebh
 import { PaymentAnomalyController } from "../../controllers/payments/PaymentAnomaly.controller.ts";
 import { CashDrawerController } from "../../controllers/payments/CashDrawer.controller.ts";
 import { CashierPaymentController } from "../../controllers/payments/CashierPayment.controller.ts";
+import { checkRole } from "../../middlewares/checkRole.middleware.ts";
+import { rawBodyParser } from "../../middlewares/rawBodyParser.middleware.ts";
 
 
 const router = express.Router();
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  WEBHOOK ROUTES — NO AUTH, signature-verified only
+//  These MUST come BEFORE router.use(authenticate)
+// ══════════════════════════════════════════════════════════════════════════════
+
+router.post(
+  "/webhooks/stripe",
+  rawBodyParser,
+  webhookRateLimit,
+  webhookSignatureGuard,
+  preventReplayAttack,
+  idempotencyMiddleware,
+  PaymentWebhookController.handleStripe
+);
+
+router.post(
+  "/webhooks/evc",
+  webhookRateLimit,
+  preventReplayAttack,
+  idempotencyMiddleware,
+  PaymentWebhookController.handleEVC
+);
+
+router.post(
+  "/webhooks/payments",
+  rawBodyParser,
+  webhookSignatureGuard,
+  preventReplayAttack,
+  idempotencyMiddleware,
+  PaymentWebhookController.handle
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  AUTHENTICATED ROUTES — Everything below requires auth
+// ══════════════════════════════════════════════════════════════════════════════
+
 router.use(authenticate);
 
-// 8️⃣ Security Gap in Routes (small but real)
-// Why does a client route need webhook verification?
+// ── Provider Payment Flow ───────────────────────────────────────────────────
 router.post(
-    "/confirm",
-    maintenanceGuard,
-    rateLimit("payment.confirm"),
-    idempotencyMiddleware,
-    PaymentController.confirmPayment
-);
-
-router.post( 
-    "/failed", 
-    maintenanceGuard,
-    rateLimit("payment.failed"),
-    verifyPaymentWebhook,
-    PaymentController.markPaymentFailed 
+  "/payments/start",
+  PaymentController.startPayment
 );
 
 router.post(
-    "/retry/:paymentUuid",
-    authenticate,
-    require2FA,
-    requirePermission("PAYMENT_RETRY"),
-    maintenanceGuard,
-    idempotencyMiddleware,
-    rateLimit("payment.retry"),
-    PaymentController.retryFailedPayment
+  "/payments/confirm",
+  maintenanceGuard,
+  rateLimit("payment.confirm"),
+  idempotencyMiddleware,
+  PaymentController.confirmPayment
 );
 
 router.post(
-    "/webhooks/payments",
-    rawBodyParser,              // must be first
-    webhookSignatureGuard,      // authenticity
-    preventReplayAttack,        // uniqueness
-    idempotencyMiddleware,      // safety
-    PaymentWebhookController.handle
+  "/payments/:paymentUuid/retry",
+  require2FA,
+  requirePermission("PAYMENT_RETRY"),
+  maintenanceGuard,
+  idempotencyMiddleware,
+  rateLimit("payment.retry"),
+  PaymentController.retryPayment
 );
 
-router.post(
-    "/webhooks/stripe",
-    webhookRateLimit,  // ✅ Add rate limiting
-    PaymentWebhookController.handleStripe
+router.get(
+  "/payments/:paymentUuid/status",
+  PaymentController.getStatus
 );
 
-router.post("/payments/start", authenticate, PaymentController.startPayment);
-router.post("/payments/:paymentUuid/retry", authenticate, PaymentController.retryPayment);
-router.get("/payments/:paymentUuid/status", authenticate, PaymentController.getStatus);
- 
 // ── Cashier Payment Flow ────────────────────────────────────────────────────
 router.post(
   "/payments/cashier/process",
-  authenticate,
   checkRole(["CASHIER", "MANAGER", "ADMIN"]),
   CashierPaymentController.processPayment
 );
+
 router.post(
   "/payments/cashier/:paymentUuid/void",
-  authenticate,
   checkRole(["MANAGER", "ADMIN"]),
   CashierPaymentController.voidPayment
 );
+
 router.post(
   "/payments/cashier/:paymentUuid/correct",
-  authenticate,
   checkRole(["ADMIN"]),
   CashierPaymentController.correctPayment
 );
- 
+
 // ── Cash Drawer ─────────────────────────────────────────────────────────────
 router.post(
   "/payments/drawer/open",
-  authenticate,
   checkRole(["CASHIER", "MANAGER", "ADMIN"]),
   CashDrawerController.openDrawer
 );
+
 router.post(
   "/payments/drawer/:drawerUuid/close",
-  authenticate,
   checkRole(["CASHIER", "MANAGER", "ADMIN"]),
   CashDrawerController.closeDrawer
 );
+
 router.get(
   "/payments/drawer/:drawerUuid",
-  authenticate,
   CashDrawerController.getDrawer
 );
+
 router.get(
   "/payments/drawer/active/:terminalId",
-  authenticate,
   CashDrawerController.getActiveDrawer
 );
- 
+
 // ── Anomalies & Review ──────────────────────────────────────────────────────
 router.get(
   "/payments/anomalies",
-  authenticate,
   checkRole(["MANAGER", "ADMIN"]),
   PaymentAnomalyController.list
 );
+
 router.post(
   "/payments/anomalies/:anomalyUuid/review",
-  authenticate,
   checkRole(["MANAGER", "ADMIN"]),
   PaymentAnomalyController.review
 );
+
 router.get(
   "/payments/flagged",
-  authenticate,
   checkRole(["MANAGER", "ADMIN"]),
   PaymentAnomalyController.listFlaggedPayments
 );
- 
-// ── Webhooks (no auth — signature verified internally) ──────────────────────
-router.post("/webhooks/stripe", PaymentWebhookController.handleStripe);
-router.post("/webhooks/evc", PaymentWebhookController.handleEVC);
+
  
 export default router;

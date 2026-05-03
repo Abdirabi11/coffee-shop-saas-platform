@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { LaborCostTrackingService } from "../../services/staff/LaborCostTracking.service.ts";
 
 

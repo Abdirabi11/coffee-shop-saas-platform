@@ -1,21 +1,18 @@
-import prisma from "../../config/prisma.ts"
+import type { Request, Response } from "express";
 import { PayrollExportService } from "../../services/staff/PayrollExport.service.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+export class PayrollExportController {
 
-export class PayrollExportController{
-    //POST /api/payroll/calculate
     static async calculatePayroll(req: Request, res: Response) {
         try {
             const tenantUuid = req.tenant!.uuid;
             const { storeUuid, periodStart, periodEnd, periodType } = req.body;
 
             if (!periodStart || !periodEnd) {
-                return res.status(400).json({
-                    error: "VALIDATION_ERROR",
-                    message: "periodStart and periodEnd are required",
-                });
-            };
+                return res.status(400).json({ success: false, error: "PERIOD_REQUIRED" });
+            }
 
-            const payrollPeriod = await PayrollExportService.calculatePayrollPeriod({
+            const result = await PayrollExportService.calculatePayrollPeriod({
                 tenantUuid,
                 storeUuid,
                 periodStart: new Date(periodStart),
@@ -23,78 +20,57 @@ export class PayrollExportController{
                 periodType,
             });
 
-            return res.status(200).json({
-                success: true,
-                payrollPeriod,
-            });
-
+            return res.status(200).json({ success: true, data: result });
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            logWithContext("error", "[Payroll] Calculate failed", { error: error.message });
+            return res.status(500).json({ success: false, error: "CALCULATION_FAILED" });
         }
     }
 
-    //POST /api/payroll/:payrollPeriodUuid/approve
-    static async approvePayroll(req: Request, res: Response){
+    static async approvePayroll(req: Request, res: Response) {
         try {
-             const { payrollPeriodUuid } = req.params;
+            const { payrollPeriodUuid } = req.params;
+            const user = (req as any).user;
 
-            const period = await PayrollExportService.approvePayrollPeriod({
+            const result = await PayrollExportService.approvePayrollPeriod({
                 payrollPeriodUuid,
-                approvedBy: req.user!.uuid,
+                approvedBy: user.userUuid,
             });
 
-            return res.status(200).json({
-                success: true,
-                period,
-            });
+            return res.status(200).json({ success: true, data: result });
         } catch (error: any) {
-           return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            }); 
+            return res.status(500).json({ success: false, error: "APPROVE_FAILED" });
         }
     }
 
-    //POST /api/payroll/:payrollPeriodUuid/export
     static async exportPayroll(req: Request, res: Response) {
         try {
             const { payrollPeriodUuid } = req.params;
             const { format } = req.body;
+            const user = (req as any).user;
 
             if (!format) {
-                return res.status(400).json({
-                    error: "VALIDATION_ERROR",
-                    message: "format is required",
-                });
+                return res.status(400).json({ success: false, error: "FORMAT_REQUIRED" });
             }
 
             const result = await PayrollExportService.exportPayroll({
                 payrollPeriodUuid,
                 format,
-                exportedBy: req.user!.uuid,
+                exportedBy: user.userUuid,
             });
 
-            // Set appropriate content type and headers
-            let contentType = "text/csv";
             if (format === "EXCEL") {
-                contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-            } else if (format === "QUICKBOOKS_IIF") {
-                contentType = "application/octet-stream";
-            };
+                res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                res.setHeader("Content-Disposition", `attachment; filename="${result.fileName}"`);
+                return res.send(result.fileContent);
+            }
 
-            res.setHeader("Content-Type", contentType);
+            res.setHeader("Content-Type", "text/csv");
             res.setHeader("Content-Disposition", `attachment; filename="${result.fileName}"`);
-
             return res.send(result.fileContent);
-
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            logWithContext("error", "[Payroll] Export failed", { error: error.message });
+            return res.status(500).json({ success: false, error: "EXPORT_FAILED" });
         }
     }
 }

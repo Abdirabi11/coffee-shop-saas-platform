@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { PermissionManagementService } from "../../services/staff/PermissionManagement.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 

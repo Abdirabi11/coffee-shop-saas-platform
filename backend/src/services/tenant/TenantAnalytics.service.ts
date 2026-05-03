@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import prisma from "../../lib/prisma.ts";
+import prisma from "../../config/prisma.ts";
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import { withCache } from "../../cache/cache.ts";
 
@@ -54,18 +54,19 @@ export class TenantAnalyticsService {
                 { period: Date; revenue: number; order_count: number; avg_order: number }[]
             >(
                 `SELECT 
-                ${dateTrunc} as period,
-                COALESCE(SUM(p.amount), 0)::float as revenue,
-                COUNT(*)::int as order_count,
-                COALESCE(AVG(p.amount), 0)::float as avg_order
-                FROM "Payment" p
-                WHERE p."tenantUuid" = $1
-                AND p.status = 'SUCCESS'
-                AND p."createdAt" >= $2
-                AND p."createdAt" <= $3
-                ${storeFilter}
-                GROUP BY period
-                ORDER BY period ASC`,
+                    ${dateTrunc} as period,
+                    COALESCE(SUM(p.amount), 0)::float as revenue,
+                    COUNT(*)::int as order_count,
+                    COALESCE(AVG(p.amount), 0)::float as avg_order
+                    FROM "Payment" p
+                    WHERE p."tenantUuid" = $1
+                    AND p.status = 'SUCCESS'
+                    AND p."createdAt" >= $2
+                    AND p."createdAt" <= $3
+                    ${storeFilter}
+                    GROUP BY period
+                    ORDER BY period ASC
+                `,
                 tenantUuid,
                 from,
                 to
@@ -143,17 +144,18 @@ export class TenantAnalyticsService {
                 { hour: number; order_count: number; revenue: number; avg_order: number }[]
             >(
                 `SELECT 
-                EXTRACT(HOUR FROM o."createdAt")::int as hour,
-                COUNT(*)::int as order_count,
-                COALESCE(SUM(o."totalAmount"), 0)::float as revenue,
-                COALESCE(AVG(o."totalAmount"), 0)::float as avg_order
-                FROM "Order" o
-                WHERE o."tenantUuid" = $1
-                AND o.status = 'COMPLETED'
-                AND o."createdAt" >= $2
-                ${storeFilter}
-                GROUP BY hour
-                ORDER BY hour ASC`,
+                    EXTRACT(HOUR FROM o."createdAt")::int as hour,
+                    COUNT(*)::int as order_count,
+                    COALESCE(SUM(o."totalAmount"), 0)::float as revenue,
+                    COALESCE(AVG(o."totalAmount"), 0)::float as avg_order
+                    FROM "Order" o
+                    WHERE o."tenantUuid" = $1
+                    AND o.status = 'COMPLETED'
+                    AND o."createdAt" >= $2
+                    ${storeFilter}
+                    GROUP BY hour
+                    ORDER BY hour ASC
+                `,
                 tenantUuid,
                 since
             );

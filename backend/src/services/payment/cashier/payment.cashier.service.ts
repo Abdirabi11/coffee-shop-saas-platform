@@ -1,6 +1,7 @@
-import { EventBus, PaymentEventBus } from "../../../events/eventBus.ts";
-import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
+import bcrypt from "bcrypt";
 import prisma from "../../config/prisma.ts"
+import { EventBus } from "../../../events/eventBus.ts";
+import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
 import { PaymentAnomalyDetector } from "../paymentAnomalyDetector.ts";
 
 interface ProcessCashierPaymentInput {
@@ -17,6 +18,7 @@ interface ProcessCashierPaymentInput {
     receiptNumber?: string;
     notes?: string;
     idempotencyKey: string;
+    managerUuid: string;
 };
 
 export class CashierPaymentService{
@@ -78,9 +80,9 @@ export class CashierPaymentService{
         };
  
         const drawer = await this.getActiveCashDrawer(
-            order.tenantUuid,
             order.storeUuid,
-            input.terminalId
+            order.terminalId,
+            input.tenantUuid
         );
     
         // Create payment in transaction
@@ -244,31 +246,76 @@ export class CashierPaymentService{
         voidedBy: string;
         voidReason: string;
         managerPin?: string;
+        managerUuid: string;  
     }) {
         if (!input.voidReason || input.voidReason.trim().length < 10) {
             throw new Error("VOID_REASON_TOO_SHORT");
         }
-    
+
+        if (!input.managerPin || !input.managerUuid) {
+            throw new Error("MANAGER_AUTHORIZATION_REQUIRED");
+        }
+
+        const manager = await prisma.user.findUnique({
+            where: { uuid: input.managerUuid },
+            select: { uuid: true, pinHash: true, globalRole: true },
+        });
+
+        if (!manager || !manager.pinHash) {
+            throw new Error("MANAGER_PIN_NOT_SET");
+        };
+
+        const pinValid = await bcrypt.compare(input.managerPin, manager.pinHash);
+
+        if (!pinValid) {
+            // Log failed attempt for security auditing
+            logWithContext("warn", "[CashierPayment] Void PIN failed", {
+                paymentUuid: input.paymentUuid,
+                attemptedBy: input.voidedBy,
+                managerUuid: input.managerUuid,
+            });
+            throw new Error("INVALID_MANAGER_PIN");
+        }
+
         const payment = await prisma.payment.findUnique({
             where: { uuid: input.paymentUuid },
             include: { order: true },
         });
-    
+
         if (!payment) {
             throw new Error("PAYMENT_NOT_FOUND");
+        };
+
+        if (manager.globalRole !== "SUPER_ADMIN") {
+            const managerStore = await prisma.userStore.findUnique({
+                where: {
+                    userUuid_storeUuid: {
+                        userUuid: input.managerUuid,
+                        storeUuid: payment.storeUuid,
+                    },
+                },
+                select: { role: true, isActive: true },
+            });
+
+            const VOID_AUTHORIZED_ROLES = ["ADMIN", "MANAGER", "STORE_MANAGER"];
+
+            if (!managerStore || !managerStore.isActive || !VOID_AUTHORIZED_ROLES.includes(managerStore.role)) {
+                throw new Error("INSUFFICIENT_ROLE_FOR_VOID");
+            }
         }
+
         if (payment.status !== "COMPLETED") {
             throw new Error(`CANNOT_VOID_STATUS: ${payment.status}`);
         }
-    
+
         // Void window: 24 hours
         const paymentAge = Date.now() - (payment.processedAt?.getTime() ?? payment.createdAt.getTime());
         const MAX_VOID_AGE = 24 * 60 * 60 * 1000;
-    
+
         if (paymentAge > MAX_VOID_AGE) {
             throw new Error("PAYMENT_TOO_OLD_TO_VOID");
         }
- 
+
         const updated = await prisma.$transaction(async (tx) => {
             const updated = await tx.payment.update({
                 where: { uuid: input.paymentUuid },
@@ -279,8 +326,7 @@ export class CashierPaymentService{
                     voidReason: input.voidReason,
                 },
             });
-    
-            // Revert order to READY
+
             await tx.order.update({
                 where: { uuid: payment.orderUuid },
                 data: {
@@ -288,36 +334,30 @@ export class CashierPaymentService{
                     paymentStatus: "PENDING",
                 },
             });
-        
+
             const drawer = await tx.cashDrawer.findFirst({
                 where: {
                     storeUuid: payment.storeUuid,
                     terminalId: payment.terminalId,
                     status: "OPEN",
-                    tenantUuid: payment.tenantUuid, // FIX #3: tenant isolation
+                    tenantUuid: payment.tenantUuid,
                 },
             });
-        
+
             if (drawer) {
-                // FIX #1: Reverse the EXACT amount that was added to the drawer
                 const cashToReverse =
-                payment.paymentMethod === "CASH"
-                    ? (payment.amountTendered ?? 0) - (payment.changeGiven ?? 0)
-                    : 0;
-        
+                    payment.paymentMethod === "CASH"
+                        ? (payment.amountTendered ?? 0) - (payment.changeGiven ?? 0)
+                        : 0;
+
                 await tx.cashDrawer.update({
                     where: { uuid: drawer.uuid },
                     data: {
-                        expectedCash: {
-                            decrement: cashToReverse,
-                        },
+                        expectedCash: { decrement: cashToReverse },
                         expectedCard: {
-                            decrement:
-                                payment.paymentMethod === "CARD_TERMINAL"
-                                ? payment.amount
-                                : 0,
-                            },
-                            cashSalesCount: {
+                            decrement: payment.paymentMethod === "CARD_TERMINAL" ? payment.amount : 0,
+                        },
+                        cashSalesCount: {
                             decrement: payment.paymentMethod === "CASH" ? 1 : 0,
                         },
                         cardSalesCount: {
@@ -327,8 +367,7 @@ export class CashierPaymentService{
                     },
                 });
             }
-        
-            // Audit snapshot
+
             await tx.paymentAuditSnapshot.create({
                 data: {
                     tenantUuid: payment.tenantUuid,
@@ -343,28 +382,31 @@ export class CashierPaymentService{
                     orderState: payment.order,
                     metadata: {
                         voidReason: input.voidReason,
+                        authorizedBy: input.managerUuid,
                     },
                 },
             });
-    
+
             return updated;
         });
-    
+
         EventBus.emit("PAYMENT_VOIDED", {
             paymentUuid: updated.uuid,
             orderUuid: updated.orderUuid,
             tenantUuid: payment.tenantUuid,
             storeUuid: payment.storeUuid,
             voidedBy: input.voidedBy,
+            authorizedBy: input.managerUuid,
             voidReason: input.voidReason,
         });
- 
+
         logWithContext("warn", "[CashierPayment] Voided", {
             paymentUuid: updated.uuid,
             voidedBy: input.voidedBy,
+            authorizedBy: input.managerUuid,
             reason: input.voidReason,
         });
-    
+
         return updated;
     }
 
@@ -392,7 +434,10 @@ export class CashierPaymentService{
         correctionReason: string;
     }) {
         const payment = await prisma.payment.findUnique({
-            where: { uuid: input.paymentUuid },
+            where: { 
+                uuid: input.paymentUuid,
+                tenantUuid: input.tenantUuid
+            },
         });
       
         if (!payment) {

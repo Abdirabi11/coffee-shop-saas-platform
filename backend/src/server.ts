@@ -8,6 +8,11 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { createServer } from "http";
 import authRoutes from "./routes/auth/auth.routes.ts"
+import tenantRoutes from "./routes/tenant/tenant.routes.ts"
+import storeRoutes from "./routes/store/store.routes.ts"
+import menuRoutes from "./routes/menu/menu.routes.ts"
+import menuAdminRoutes from "./routes/menu/menuAdmin.routes.ts";
+import staffRoutes from "./routes/staff/staff.routes.ts";
 import { startScheduler } from "./jobs/scheduler.ts"
 import { MetricsService } from "./infrastructure/observability/MetricsService.ts";
 import { compressionMiddleware } from "./middlewares/compression.middleware.ts";
@@ -21,6 +26,7 @@ import { sanitizeInput } from "./middlewares/sanitization.middleware.ts";
 import { maintenanceGuard } from "./middlewares/maintainence.ts";
 import { deviceFingerprintMiddleware } from "./middlewares/deviceFingerprint.middleware.ts";
 import { DashboardSocket } from "./websockets/DashboardSocket.ts";
+
 
 
 const app = express();
@@ -91,6 +97,12 @@ app.use( "/api/payments", express.raw({ type: "application/json" }) );
 //registerInventoryEventHandlers()      →  7 handlers (inventory commit/release/deduct, cache)
 
 app.use("/api", authRoutes);
+app.use("/api/store", storeRoutes);
+app.use("/api/tenant", tenantRoutes);
+app.use("/api/menu", menuRoutes);
+app.use("/api/admin/menu", menuAdminRoutes);
+app.use("/api/staff", staffRoutes);
+
 // app.use("/api/super_admin", superRoutes);
 // app.use("/api/admin", adminRoutes);
 // app.use("/api/product", productRoutes);

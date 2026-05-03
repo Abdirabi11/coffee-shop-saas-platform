@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import dayjs from "dayjs";
-import { TenantAnalyticsService } from "../../services/tenant/tenantAnalytic.service.ts";
+import { TenantAnalyticsService } from "../../services/tenant/TenantAnalytics.service.js";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 

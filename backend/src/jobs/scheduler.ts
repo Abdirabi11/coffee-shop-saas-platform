@@ -41,6 +41,25 @@ import { MenuSnapshotJob } from "./menu/MenuSnapshot.job.ts";
 import { ProductPopularityJob } from "./Order/productPopularity.job.ts";
 import { ProductMetricsCalculationJob } from "./Product/productMetricsCalculation.job.ts";
 import { AnalyticsSnapshotCleanupJob } from "./Analytics/Analyticssnapshotcleanup.job.ts";
+import { generateMonthlyInvoices } from "./Billing/generateMonthlyInvoices.job.ts";
+import { DailyStoreMetricsJob } from "./Order/dailyStoreMetrics.job.ts";
+import { InventoryReconciliationJob } from "./Inventory/InventoryReconciliation.job.ts";
+import { DashboardSnapshotJob } from "./dashboard/dashboardSnapshot.job.ts";
+import { OrphanedPaymentDetectionJob } from "./Payment/OrphanedPaymentDetection.job.ts";
+import { ArpuLtvJob } from "./Analytics/arpuLtv.job.ts";
+import { IdempotencyService } from "../services/order/idempotency.service.ts";
+import { FraudEventCleanupJob } from "./auth/FraudEventCleanup.job.ts";
+import { RiskScoreDecayJob } from "./Payment/RiskScoreDecay.jobs.ts";
+import { ProviderReportReconciliationJob } from "./Payment/ProviderReportReconciliation.job.ts";
+import { DeviceCleanupJob } from "./auth/DeviceCleanup.job.ts";
+import { OrderMetricsCalculationJob } from "./Order/orderMetricsCalculation.job.ts";
+import { MenuAnalyticsAggregationJob } from "./menu/MenuAnalyticsAggregation.job.ts";
+import { WebhookCleanupJob } from "./webhook/WebhookCleanup.job.ts";
+import { StaleOrderMetricsJob } from "./Order/staleOrderMetrics.job.ts";
+import { TenantCohortGrowthJob } from "./Analytics/tenantCohortGrowth.job.ts";
+import { SnapshotCleanupJob } from "./menu/SnapshotCleanup.job.ts";
+import { ChurnAnalyticsJob } from "./Analytics/churnAnalytics.job.ts";
+import { CohortRetentionJob } from "./Analytics/cohortRetention.job.ts";
 
 
 

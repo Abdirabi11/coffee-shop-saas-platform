@@ -1,144 +1,105 @@
-import express from "express";
-import { getMenuPreview } from "../../controllers/menu/menu-preview.controller.ts";
-import { getStoreMenu, MenuController, prewarmMenu } from "../../controllers/menu/menu.controller.ts";
+import express from "express"
 import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
-import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
-import { validateRequest } from "../../middlewares/menu/validateRequest.ts";
-import { requireTenantHeader } from "../../middlewares/menu/requireTenantHeader.ts";
-import { MenuValidators } from "../../validators/menu.validator.ts";
-import { menuRateLimit, searchRateLimit } from "../../middlewares/menu/rateLimit.ts";
+import { requireTenantHeader } from "../../middlewares/menu/requireTenantHeader.middleware.ts";
+import { menuRateLimit, searchRateLimit } from "../../middlewares/menu/rateLimit.middlware.ts";
 import { menuCacheControl } from "../../middlewares/menu/cache.controller.ts";
+import { MenuController } from "../../controllers/menu/Menu.controller.ts";
+import { MenuValidators } from "../../validators/menu.validator.ts";
+import { validateRequest } from "../../middlewares/menu/validateRequest.ts";
+import { rateLimitByIP } from "../../middlewares/menu/Ratelimitbyip.middleware.ts";
+import { FavoriteController } from "../../controllers/menu/Favorite.controller.ts";
+import { MenuAnalyticsController } from "../../controllers/menu/Menuanalytics.controller.ts";
 
-const router= express.Router()
 
-
-// Public endpoint (customer-facing)
-router.get("/stores/:storeUuid/menu", getStoreMenu);
+const router= express.Router();
 
 
 router.get(
     "/admin/stores/:storeUuid/menu/preview",
     authenticate,
     authorize("ADMIN", "MANAGER"),
-    getMenuPreview
+    MenuController.getMenuPreview
 );
-
+ 
 router.post(
-  "/stores/:storeUuid/menu/prewarm",
-  authenticate,
-  authorize("ADMIN"),
-  prewarmMenu
+    "/stores/:storeUuid/menu/prewarm",
+    authenticate,
+    authorize("ADMIN"),
+    MenuController.prewarmMenu
 );
-
-router.use(rateLimitByIP({ points: 60, duration: 60 })); // 60 req/min per IP
-
-router.get("/menu/:storeUuid", MenuController.getMenu);
-router.get("/products/:productUuid", MenuController.getProduct);
-router.post("/products/validate", MenuController.validateOrder);1
-
-/**
- * GET /api/menu/:storeUuid
- * Get public menu (no auth required)
- */
+ 
+// ─── IP Rate Limit for all public routes below 
+router.use(rateLimitByIP({ points: 60, duration: 60 }));
+ 
+// ─── Public Menu Routes
+router.get(
+    "/stores/:storeUuid/menu",
+    requireTenantHeader,
+    menuRateLimit,
+    menuCacheControl(60),
+    MenuController.getStoreMenu
+);
+ 
 router.get(
     "/:storeUuid",
     requireTenantHeader,
-    rateLimit({ max: 100, windowMs: 60000 }), // 100 req/min
+    menuRateLimit,
+    menuCacheControl(60),
     MenuController.getMenu
 );
-
-/**
- * GET /api/menu/products/:productUuid
- * Get single product details
- */
+ 
 router.get(
     "/products/:productUuid",
     requireTenantHeader,
+    menuRateLimit,
     MenuController.getProduct
 );
-
-/**
- * POST /api/menu/validate
- * Validate product + options before cart
- */
+ 
+router.get(
+    "/search",
+    requireTenantHeader,
+    searchRateLimit,
+    validateRequest(MenuValidators.searchMenu, "query"),
+    MenuController.searchMenu
+);
+ 
 router.post(
     "/validate",
     requireTenantHeader,
     validateRequest(MenuValidators.validateOrder),
     MenuController.validateOrder
 );
-
-/**
- * POST /api/menu/favorites/toggle
- * Toggle product favorite (auth required)
- */
+ 
+// ─── Favorites (Auth Required)
 router.post(
     "/favorites/toggle",
     authenticate,
+    requireTenantHeader,
     validateRequest(MenuValidators.toggleFavorite),
     FavoriteController.toggleFavorite
 );
-
-/**
- * POST /api/menu/analytics
- * Track menu analytics event
- */
+ 
+router.get(
+    "/favorites",
+    authenticate,
+    requireTenantHeader,
+    FavoriteController.getFavorites
+);
+ 
+// ─── Analytics
 router.post(
     "/analytics",
     requireTenantHeader,
     validateRequest(MenuValidators.trackAnalytics),
     MenuAnalyticsController.trackEvent
 );
-
-/////////////////////////////////
-
-
-//GET /api/menu/:storeUuid
+ 
 router.get(
-  "/:storeUuid",
-  requireTenantHeader,
-  menuRateLimit,
-  menuCacheControl(60), // 60s cache
-  MenuController.getMenu
+    "/analytics/:storeUuid/summary",
+    authenticate,
+    authorize("ADMIN", "MANAGER"),
+    MenuAnalyticsController.getSummary
 );
-
-//GET /api/menu/products/:productUuid
-router.get(
-  "/products/:productUuid",
-  requireTenantHeader,
-  menuRateLimit,
-  MenuController.getProduct
-);
-
-//POST /api/menu/validate
-router.post(
-  "/validate",
-  requireTenantHeader,
-  validateRequest(MenuValidators.validateOrder),
-  MenuController.validateOrder
-);
-
-//GET /api/menu/search
-router.get(
-  "/search",
-  requireTenantHeader,
-  searchRateLimit,
-  validateRequest(MenuValidators.searchMenu, "query"),
-  MenuController.searchMenu
-);
-
-//POST /api/menu/favorites/toggle
-router.post(
-  "/favorites/toggle",
-  authenticate,
-  requireTenantHeader,
-  validateRequest(MenuValidators.toggleFavorite),
-  MenuController.toggleFavorite
-);
-
-//GET /api/menu/favorites
-router.get( "/favorites", authenticate, requireTenantHeader, MenuController.getFavorites );
-
+ 
 export default router;
-
-export default router;
+ 

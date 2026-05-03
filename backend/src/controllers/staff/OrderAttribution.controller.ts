@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { OrderAttributionService } from "../../services/staff/OrderAttribution.service.ts";
 
 export class OrderAttributionController {

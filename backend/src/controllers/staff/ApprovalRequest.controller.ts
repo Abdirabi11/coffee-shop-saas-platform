@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { ApprovalRequestService } from "../../services/staff/ApprovalRequest.service.ts";
 
 export class ApprovalRequestController {

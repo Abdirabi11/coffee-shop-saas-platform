@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import prisma from "../../config/prisma.ts"
 
 //Validate geofence (optional, warnings only)

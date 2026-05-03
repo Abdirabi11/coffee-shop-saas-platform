@@ -19,57 +19,15 @@ router.use(rateLimitByTenant({ points: 60, duration: 3600 }))
 //Create order
 router.post(
   "/",
-  authorize(["CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"]),
+  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"),
   OrderController.create
 );
 
 //List orders
 router.get(
   "/",
-  authorize(["CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"]),
+  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"),
   OrderController.list
-);
-
-//Get single order
-router.get(
-  "/:orderUuid",
-  authorize(["CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"]),
-  OrderController.getOne
-);
-
-//Get order timeline
-router.get(
-  "/:orderUuid/timeline",
-  authorize(["CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"]),
-  OrderController.getTimeline
-);
-
-//Update order status
-router.patch(
-  "/:orderUuid/status",
-  authorize(["CASHIER", "MANAGER", "TENANT_ADMIN"]),
-  OrderController.updateStatus
-);
-
-//Cancel order
-router.post(
-  "/:orderUuid/cancel",
-  authorize(["CUSTOMER", "MANAGER", "TENANT_ADMIN"]),
-  OrderController.cancel
-);
-
-//Add item to order (before payment)
-router.post(
-  "/:orderUuid/items",
-  authorize(["CUSTOMER", "CASHIER", "MANAGER"]),
-  OrderController.addItem
-);
-
-//Remove item from order (before payment)
-router.delete(
-  "/:orderUuid/items/:itemUuid",
-  authorize(["CUSTOMER", "CASHIER", "MANAGER"]),
-  OrderController.removeItem
 );
 
 // 📊 ANALYTICS & REPORTING
@@ -77,7 +35,7 @@ router.delete(
 //Get order statistics
 router.get(
   "/stats",
-  authorize(["MANAGER", "TENANT_ADMIN"]),
+  authorize("MANAGER", "TENANT_ADMIN"),
   requireStoreAccess,
   OrderController.getStats
 );
@@ -85,9 +43,53 @@ router.get(
 //Get active orders (kitchen display)
 router.get(
   "/active",
-  authorize(["CASHIER", "MANAGER", "TENANT_ADMIN"]),
+  authorize("CASHIER", "MANAGER", "TENANT_ADMIN"),
   requireStoreAccess,
   OrderController.getActive
 );
+
+//Get single order
+router.get(
+  "/:orderUuid",
+  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"),
+  OrderController.getOne
+);
+
+//Get order timeline
+router.get(
+  "/:orderUuid/timeline",
+  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN"),
+  OrderController.getTimeline
+);
+
+//Update order status
+router.patch(
+  "/:orderUuid/status",
+  authorize("CASHIER", "MANAGER", "TENANT_ADMIN"),
+  OrderController.updateStatus
+);
+
+//Cancel order
+router.post(
+  "/:orderUuid/cancel",
+  authorize("CUSTOMER", "MANAGER", "TENANT_ADMIN"),
+  OrderController.cancel
+);
+
+//Add item to order (before payment)
+router.post(
+  "/:orderUuid/items",
+  authorize("CUSTOMER", "CASHIER", "MANAGER"),
+  OrderController.addItem
+);
+
+//Remove item from order (before payment)
+router.delete(
+  "/:orderUuid/items/:itemUuid",
+  authorize("CUSTOMER", "CASHIER", "MANAGER"),
+  OrderController.removeItem
+);
+
+
 
 export default router;
