@@ -189,8 +189,8 @@ export class PaymentService{
           snapshot: input.snapshot,
         },
       });
- 
-      await tx.order.update({
+
+      const updatedOrder = await tx.order.update({
         where: { uuid: payment.orderUuid },
         data: {
           status: "PAID",
@@ -209,7 +209,7 @@ export class PaymentService{
           beforeStatus: payment.status,
           afterStatus: "PAID",
           paymentState: updated,
-          orderState: payment.order,
+          orderState: updatedOrder,
           metadata: {
             provider: payment.provider,
             providerRef: input.providerRef,

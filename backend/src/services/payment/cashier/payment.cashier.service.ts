@@ -81,7 +81,7 @@ export class CashierPaymentService{
  
         const drawer = await this.getActiveCashDrawer(
             order.storeUuid,
-            order.terminalId,
+            input.terminalId,
             input.tenantUuid
         );
     
@@ -192,22 +192,22 @@ export class CashierPaymentService{
                     },
                 },
             });
+
+            // Store idempotency key
+            await tx.idempotencyKey.create({
+                data: {
+                    tenantUuid: order.tenantUuid,
+                    key: input.idempotencyKey,
+                    route: "POST /payments/cashier/process",
+                    response: payment,
+                    statusCode: 201,
+                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                },
+            });
         
             return payment;
         });
         
-        // Store idempotency key
-        await prisma.idempotencyKey.create({
-            data: {
-                tenantUuid: order.tenantUuid,
-                key: input.idempotencyKey,
-                route: "POST /payments/cashier/process",
-                response: payment,
-                statusCode: 201,
-                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-            },
-        });
- 
         EventBus.emit("CASHIER_PAYMENT_COMPLETED", {
             paymentUuid: payment.uuid,
             orderUuid: payment.orderUuid,
@@ -327,7 +327,7 @@ export class CashierPaymentService{
                 },
             });
 
-            await tx.order.update({
+            const updatedOrder = await tx.order.update({
                 where: { uuid: payment.orderUuid },
                 data: {
                     status: "READY",
@@ -379,7 +379,7 @@ export class CashierPaymentService{
                     beforeStatus: "COMPLETED",
                     afterStatus: "VOIDED",
                     paymentState: updated,
-                    orderState: payment.order,
+                    orderState: updatedOrder, 
                     metadata: {
                         voidReason: input.voidReason,
                         authorizedBy: input.managerUuid,
@@ -432,29 +432,115 @@ export class CashierPaymentService{
         correctAmount: number;
         correctedBy: string;
         correctionReason: string;
+        tenantUuid: string;
     }) {
-        const payment = await prisma.payment.findUnique({
-            where: { 
-                uuid: input.paymentUuid,
-                tenantUuid: input.tenantUuid
-            },
-        });
-      
-        if (!payment) {
-            throw new Error("Payment not found");
-        };
+        if (!input.correctionReason || input.correctionReason.trim().length < 10) {
+            throw new Error("CORRECTION_REASON_TOO_SHORT");
+        }
 
-        const updated = await prisma.payment.update({
-            where: { uuid: input.paymentUuid },
-            data: {
-                originalAmount: payment.amount,
-                amount: input.correctAmount,
-                correctedBy: input.correctedBy,
-                correctedAt: new Date(),
-                correctionReason: input.correctionReason,
+        const payment = await prisma.payment.findUnique({
+            where: {
+                uuid: input.paymentUuid,
+                tenantUuid: input.tenantUuid,
             },
+            include: { order: true },
         });
- 
+
+        if (!payment) {
+            throw new Error("PAYMENT_NOT_FOUND");
+        }
+
+        if (payment.status !== "COMPLETED") {
+            throw new Error(`CANNOT_CORRECT_STATUS: ${payment.status}`);
+        }
+
+        // Don't allow correction to the same amount
+        if (payment.amount === input.correctAmount) {
+            throw new Error("CORRECTION_AMOUNT_UNCHANGED");
+        }
+
+        // Correction must be positive
+        if (input.correctAmount <= 0) {
+            throw new Error("CORRECTION_AMOUNT_INVALID");
+        }
+
+        const updated = await prisma.$transaction(async (tx) => {
+            const updated = await tx.payment.update({
+                where: { uuid: input.paymentUuid },
+                data: {
+                    originalAmount: payment.amount,
+                    amount: input.correctAmount,
+                    correctedBy: input.correctedBy,
+                    correctedAt: new Date(),
+                    correctionReason: input.correctionReason,
+                },
+            });
+
+            // Sync order total if amount changed
+            const updatedOrder = await tx.order.update({
+                where: { uuid: payment.orderUuid },
+                data: {
+                    totalAmount: input.correctAmount,
+                },
+            });
+
+            // Adjust cash drawer if one is open
+            const drawer = await tx.cashDrawer.findFirst({
+                where: {
+                    storeUuid: payment.storeUuid,
+                    terminalId: payment.terminalId,
+                    status: "OPEN",
+                    tenantUuid: payment.tenantUuid,
+                },
+            });
+
+            if (drawer) {
+                const amountDiff = input.correctAmount - payment.amount;
+
+                if (payment.paymentMethod === "CASH") {
+                    await tx.cashDrawer.update({
+                        where: { uuid: drawer.uuid },
+                        data: {
+                            expectedCash: { increment: amountDiff },
+                            totalSales: { increment: amountDiff },
+                        },
+                    });
+                } else if (payment.paymentMethod === "CARD_TERMINAL") {
+                    await tx.cashDrawer.update({
+                        where: { uuid: drawer.uuid },
+                        data: {
+                            expectedCard: { increment: amountDiff },
+                            totalSales: { increment: amountDiff },
+                        },
+                    });
+                }
+            }
+
+            // ✅ Audit snapshot — captures both post-update states
+            await tx.paymentAuditSnapshot.create({
+                data: {
+                    tenantUuid: payment.tenantUuid,
+                    paymentUuid: payment.uuid,
+                    orderUuid: payment.orderUuid,
+                    storeUuid: payment.storeUuid,
+                    reason: "PAYMENT_CORRECTED",
+                    triggeredBy: input.correctedBy,
+                    beforeStatus: payment.status,
+                    afterStatus: updated.status,
+                    paymentState: updated,
+                    orderState: updatedOrder,
+                    metadata: {
+                        originalAmount: payment.amount,
+                        correctedAmount: input.correctAmount,
+                        correctionReason: input.correctionReason,
+                        amountDifference: input.correctAmount - payment.amount,
+                    },
+                },
+            });
+
+            return updated;
+        });
+
         EventBus.emit("PAYMENT_CORRECTED", {
             paymentUuid: updated.uuid,
             tenantUuid: payment.tenantUuid,
@@ -463,11 +549,12 @@ export class CashierPaymentService{
             correctedAmount: input.correctAmount,
             correctedBy: input.correctedBy,
         });
-    
+
         logWithContext("warn", "[CashierPayment] Corrected", {
             paymentUuid: updated.uuid,
             originalAmount: payment.amount,
             correctedAmount: input.correctAmount,
+            correctedBy: input.correctedBy,
         });
 
         return updated;

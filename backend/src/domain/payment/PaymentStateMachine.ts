@@ -19,7 +19,7 @@ const transitions: Record<PaymentState, PaymentState[]> = {
   FAILED: ["RETRYING", "CANCELLED"],
   CANCELLED: [],
   REFUNDED: [],
-  PARTIALLY_REFUNDED: ["REFUNDED"],
+  PARTIALLY_REFUNDED: ["REFUNDED", "PARTIALLY_REFUNDED"],
   VOIDED: [],
 };
 

@@ -48,10 +48,8 @@ EventBus.on("ORDER_STATUS_CHANGED", async ({ orderUuid, tenantUuid, storeUuid, f
   await bumpCacheVersion(`store:${storeUuid}:active-orders`);
 
   if (to === "CANCELLED") {
-    // Release reserved inventory back to available stock
     await InventoryOrderService.releaseForOrder(orderUuid);
 
-    // Create refund record if order was already paid — RefundProcessorJob picks it up
     if (["PAID", "PREPARING"].includes(from)) {
       await prisma.refund.create({
         data: {
@@ -61,15 +59,11 @@ EventBus.on("ORDER_STATUS_CHANGED", async ({ orderUuid, tenantUuid, storeUuid, f
           paymentUuid: (await prisma.payment.findFirst({ where: { orderUuid } }))?.uuid!,
           amount: (await prisma.order.findUnique({ where: { uuid: orderUuid } }))?.totalAmount!,
           reason: "ORDER_CANCELLED",
-          status: "PENDING",
+          status: "REQUESTED",
           requestedBy: "SYSTEM",
         },
       });
     }
-  }
-
-  if (to === "READY") {
-    await OrderNotificationJob.orderReady(orderUuid);
   }
 });
   
@@ -85,9 +79,9 @@ EventBus.on("PAYMENT_FAILED", async ({ orderUuid, tenantUuid, storeUuid }) => {
   await OrderNotificationJob.paymentFailed(orderUuid);
 });
 
-EventBus.on("ORDER_READY", async ({ orderUuid, storeUuid, customerPhone }) => {
+EventBus.on("ORDER_READY", async ({ orderUuid, storeUuid }) => {
   console.log(`[EVENT] ORDER_READY: ${orderUuid}`);
-  // Sending notification
+  await bumpCacheVersion(`store:${storeUuid}:dashboard`);
   await OrderNotificationJob.orderReady(orderUuid);
 });
 

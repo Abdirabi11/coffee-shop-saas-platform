@@ -270,7 +270,7 @@ export class RefundService{
     
             return refund;
         } catch (error: any) {
-            RefundStateMachine.assertTransition(refund.status, "FAILED");
+            RefundStateMachine.assertTransition("PROCESSING", "FAILED");
         
             await prisma.refund.update({
                 where: { uuid: refund.uuid },

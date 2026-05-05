@@ -235,7 +235,7 @@ export function registerPaymentEventHandlers() {
         MetricsService.increment("refund.requested", 1, { storeUuid });
     
         // Fraud signal
-        await PaymentFraudEvaluator.evaluate("REFUND_COMPLETED", {
+        await PaymentFraudEvaluator.evaluate("REFUND_REQUESTED", {
             orderUuid,
             amount,
         });

@@ -1,3 +1,4 @@
+import prisma from "../config/prisma.ts"
 type EventPayload = Record<string, any>;
 type EventHandler = (payload: EventPayload) => Promise<void> | void;
 
@@ -49,8 +50,6 @@ class EventBus {
   //Persist audit trail to database
   private async persistAudit(event: string, payload: EventPayload) {
     try {
-      const { prisma } = require("@/lib/prisma");
-      
       await prisma.auditLog.create({
         data: {
           tenantUuid: payload.tenantUuid || "SYSTEM",

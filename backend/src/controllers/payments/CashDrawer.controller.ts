@@ -131,7 +131,7 @@ export class CashDrawerController {
             const { drawerUuid } = req.params;
         
             const drawer = await prisma.cashDrawer.findUnique({
-                where: { uuid: drawerUuid },
+                where: { uuid: drawerUuid, tenantUuid: staff.tenantUuid },
             });
         
             if (!drawer) {
