@@ -129,7 +129,12 @@ export class CashDrawerController {
     static async getDrawer(req: Request, res: Response) {
         try {
             const { drawerUuid } = req.params;
-        
+            const staff = (req as any).user;
+
+            if (!staff) {
+                return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
+            };
+            
             const drawer = await prisma.cashDrawer.findUnique({
                 where: { uuid: drawerUuid, tenantUuid: staff.tenantUuid },
             });

@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.ts"
+
 type EventPayload = Record<string, any>;
 type EventHandler = (payload: EventPayload) => Promise<void> | void;
 
@@ -70,9 +71,7 @@ class EventBus {
 
   //Log failed event handler
   private async logFailedHandler(event: string, payload: EventPayload, error: Error) {
-    try {
-      const { prisma } = require("@/lib/prisma");
-      
+    try {  
       await prisma.eventFailureLog.create({
         data: {
           event,

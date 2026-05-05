@@ -40,18 +40,6 @@ export class PaymentRetryJob {
                     retries: payment.retries,
                     error: error.message,
                 });
-        
-                if (payment.retries + 1 >= payment.maxRetries) {
-                // FIX #2: eventBus instead of OrderEventBus
-                    eventBus.emit("PAYMENT_FAILED", {
-                        paymentUuid: payment.uuid,
-                        orderUuid: payment.orderUuid,
-                        tenantUuid: payment.tenantUuid,
-                        storeUuid: payment.storeUuid,
-                        failureCode: "MAX_RETRIES_EXCEEDED",
-                        failureReason: "Payment failed after all retry attempts",
-                    });
-                }
             }
         }
     
