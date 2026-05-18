@@ -53,18 +53,43 @@ export class StoreHoursService {
     }
  
     // Set opening hours for a day
-    static async setHours(storeUuid: string, data: {
-        dayOfWeek: string;
-        openTime: string;
-        closeTime: string;
-        isClosed?: boolean;
-        is24Hours?: boolean;
-    }) {
+    static async setBulkHours(
+        tenantUuid: string,
+        storeUuid: string,
+        schedule: Array<{
+            dayOfWeek: string;
+            openTime: string;
+            closeTime: string;
+            isClosed?: boolean;
+            is24Hours?: boolean;
+        }>
+    ) {
+        const results = [];
+        for (const day of schedule) {
+            const hours = await this.setHours(tenantUuid, storeUuid, day);
+            results.push(hours);
+        }
+        return results;
+    }
+
+    static async setHours(
+        tenantUuid: string,
+        storeUuid: string,
+        data: {
+            dayOfWeek: string;
+            openTime: string;
+            closeTime: string;
+            isClosed?: boolean;
+            is24Hours?: boolean;
+        }
+    ) {
         const hours = await prisma.storeOpeningHour.upsert({
             where: {
-                storeUuid_dayOfWeek: {
+                tenantUuid_storeUuid_dayOfWeek_scheduleType: {
+                    tenantUuid,
                     storeUuid,
-                    dayOfWeek: data.dayOfWeek,
+                    dayOfWeek: data.dayOfWeek as any,
+                    scheduleType: "REGULAR",
                 },
             },
             update: {
@@ -74,40 +99,27 @@ export class StoreHoursService {
                 is24Hours: data.is24Hours ?? false,
             },
             create: {
+                tenantUuid,
                 storeUuid,
-                dayOfWeek: data.dayOfWeek,
+                dayOfWeek: data.dayOfWeek as any,
+                scheduleType: "REGULAR",
+                periods: [],
                 openTime: data.openTime,
                 closeTime: data.closeTime,
                 isClosed: data.isClosed ?? false,
                 is24Hours: data.is24Hours ?? false,
-                active: true,
+                isActive: true,
             },
         });
- 
+
         logWithContext("info", "[StoreHours] Hours set", {
             storeUuid,
             dayOfWeek: data.dayOfWeek,
             openTime: data.openTime,
             closeTime: data.closeTime,
         });
- 
+
         return hours;
-    }
- 
-    // Set hours for all 7 days at once
-    static async setBulkHours(storeUuid: string, schedule: Array<{
-        dayOfWeek: string;
-        openTime: string;
-        closeTime: string;
-        isClosed?: boolean;
-        is24Hours?: boolean;
-    }>) {
-        const results = [];
-        for (const day of schedule) {
-            const hours = await this.setHours(storeUuid, day);
-            results.push(hours);
-        }
-        return results;
     }
  
     // Get all hours for a store
@@ -157,7 +169,7 @@ export class StoreHoursService {
         return prisma.storeHourException.findMany({
             where: {
                 storeUuid,
-                active: true,
+                isActive: true,
                 exceptionDate: { gte: new Date() },
             },
             orderBy: { exceptionDate: "asc" },

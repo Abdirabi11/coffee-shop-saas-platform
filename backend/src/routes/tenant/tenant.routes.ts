@@ -52,5 +52,7 @@ router.get( "/security/fraud-events", authorize("OWNER", "ADMIN"), TenantSecurit
 router.get( "/security/audit-logs", authorize("OWNER", "ADMIN"), TenantSecurityController.getAuditLogs);
 router.post("/security/sessions/:sessionUuid/revoke", authorize("OWNER", "ADMIN"), TenantSecurityController.revokeSession);
 router.post("/security/users/:userUuid/force-logout", authorize("OWNER", "ADMIN"), TenantSecurityController.forceLogoutUser);
- 
+
+
+
 export default router;

@@ -4,7 +4,7 @@ import { invalidateCache } from "./cache.ts";
 
 export async function invalidateSuperAdminDashboard() {
     await invalidateCache("sa:dashboard:*");
-    logWithContext("info", "[Cache] SuperAdmin dashboard invalidated");
+    await logWithContext("info", "[Cache] SuperAdmin dashboard invalidated");
 }
  
 export async function invalidateSuperAdminOverview() {

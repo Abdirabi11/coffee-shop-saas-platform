@@ -9,9 +9,16 @@ type Granularity = "hour" | "day" | "week" | "month";
 interface AnalyticsFilters {
     tenantUuid: string;
     storeUuid?: string;
-    from: Date;
-    to: Date;
+    from?: Date;
+    to?: Date;
     granularity?: Granularity;
+}
+
+function resolveAnalyticsDates(from?: Date, to?: Date) {
+    return {
+        from: from ?? dayjs().subtract(30, "day").toDate(),
+        to: to ?? new Date(),
+    };
 }
  
 function inferGranularity(from: Date, to: Date): Granularity {
@@ -38,7 +45,8 @@ function buildDateTrunc(granularity: Granularity): string {
 export class TenantAnalyticsService {
     //Revenue trend — aggregated at DB level with configurable granularity
     static async getRevenueTrend(filters: AnalyticsFilters) {
-        const { tenantUuid, storeUuid, from, to } = filters;
+        const { tenantUuid, storeUuid } = filters;
+        const { from, to } = resolveAnalyticsDates(filters.from, filters.to);
         const granularity = filters.granularity ?? inferGranularity(from, to);
     
         const version = await getCacheVersion(`tenant:${tenantUuid}:analytics`);
@@ -60,7 +68,7 @@ export class TenantAnalyticsService {
                     COALESCE(AVG(p.amount), 0)::float as avg_order
                     FROM "Payment" p
                     WHERE p."tenantUuid" = $1
-                    AND p.status = 'SUCCESS'
+                    AND p.status = 'COMPLETED'
                     AND p."createdAt" >= $2
                     AND p."createdAt" <= $3
                     ${storeFilter}
@@ -93,26 +101,27 @@ export class TenantAnalyticsService {
  
     //Payment method breakdown over time
     static async getPaymentMethodBreakdown(filters: AnalyticsFilters) {
-        const { tenantUuid, storeUuid, from, to } = filters;
-        const cacheKey = `analytics:payment-methods:${tenantUuid}:${storeUuid ?? "all"}:${from.toISOString()}:${to.toISOString()}`;
-    
+        const { tenantUuid, storeUuid } = filters;
+        const { from, to } = resolveAnalyticsDates(filters.from, filters.to);
+        const cacheKey = `analytics:payment-methods:${tenantUuid}:${storeUuid ?? "all"}:${from.getTime()}:${to.getTime()}`;
+
         return withCache(cacheKey, 600, async () => {
             const storeWhere = storeUuid ? { storeUuid } : {};
-        
+
             const grouped = await prisma.payment.groupBy({
                 by: ["paymentMethod"],
                 where: {
                     tenantUuid,
-                    status: "SUCCESS",
+                    status: "COMPLETED",
                     createdAt: { gte: from, lte: to },
                     ...storeWhere,
                 },
                 _sum: { amount: true },
                 _count: true,
             });
-    
+
             const total = grouped.reduce((s, g) => s + (g._sum.amount ?? 0), 0);
-    
+
             return grouped
                 .map((g) => ({
                     method: g.paymentMethod,
@@ -234,11 +243,15 @@ export class TenantAnalyticsService {
     
         return withCache(cacheKey, 600, async () => {
             const stores = await prisma.store.findMany({
-                where: { tenantUuid, isActive: true },
+                where: { tenantUuid, active: true },
                 select: { uuid: true, name: true },
             });
     
             const storeUuids = stores.map((s) => s.uuid);
+
+            if (storeUuids.length === 0) {
+                return [];
+            }
     
             const [revenueByStore, ordersByStore, ratingsByStore] = await Promise.all([
                 prisma.payment.groupBy({
@@ -246,7 +259,7 @@ export class TenantAnalyticsService {
                     where: {
                         tenantUuid,
                         storeUuid: { in: storeUuids },
-                        status: "SUCCESS",
+                        status: "COMPLETED",
                         createdAt: { gte: since },
                     },
                     _sum: { amount: true },
@@ -263,18 +276,7 @@ export class TenantAnalyticsService {
                     },
                     _count: true,
                     _avg: { totalAmount: true },
-                }),
-        
-                // Average customer rating per store (if you have reviews)
-                prisma.review.groupBy({
-                    by: ["storeUuid"],
-                    where: {
-                        storeUuid: { in: storeUuids },
-                        createdAt: { gte: since },
-                    },
-                    _avg: { rating: true },
-                    _count: true,
-                }),
+                })
             ]);
     
             const revenueMap = new Map(
@@ -283,111 +285,162 @@ export class TenantAnalyticsService {
             const ordersMap = new Map(
                 ordersByStore.map((o) => [o.storeUuid, { count: o._count, avgOrder: o._avg.totalAmount ?? 0 }])
             );
-            const ratingsMap = new Map(
-                ratingsByStore.map((r) => [r.storeUuid, { avg: r._avg.rating ?? 0, count: r._count }])
-            );
     
             return stores
                 .map((store) => ({
-                storeUuid: store.uuid,
-                storeName: store.name,
-                revenue: revenueMap.get(store.uuid)?.amount ?? 0,
-                transactions: revenueMap.get(store.uuid)?.txCount ?? 0,
-                orders: ordersMap.get(store.uuid)?.count ?? 0,
-                averageOrder: Math.round((ordersMap.get(store.uuid)?.avgOrder ?? 0) * 100) / 100,
-                rating: Math.round((ratingsMap.get(store.uuid)?.avg ?? 0) * 10) / 10,
-                reviewCount: ratingsMap.get(store.uuid)?.count ?? 0,
+                    storeUuid: store.uuid,
+                    storeName: store.name,
+                    revenue: revenueMap.get(store.uuid)?.amount ?? 0,
+                    transactions: revenueMap.get(store.uuid)?.txCount ?? 0,
+                    orders: ordersMap.get(store.uuid)?.count ?? 0,
+                    averageOrder: Math.round((ordersMap.get(store.uuid)?.avgOrder ?? 0) * 100) / 100,
                 }))
                 .sort((a, b) => b.revenue - a.revenue);
         });
     }
  
     //Customer analytics — new vs returning, top customers
+    // static async getCustomerAnalytics(tenantUuid: string, days: number = 30) {
+    //     const since = dayjs().subtract(days, "day").toDate();
+    //     const cacheKey = `analytics:customers:${tenantUuid}:${days}d`;
+    
+    //     return withCache(cacheKey, 600, async () => {
+    //         const [
+    //             totalCustomers,
+    //             newCustomers,
+    //             topCustomers,
+    //             repeatRate,
+    //         ] = await Promise.all([
+    //             // Total unique customers who ordered
+    //             prisma.order.findMany({
+    //                 where: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
+    //                 select: { customerUuid: true },
+    //                 distinct: ["customerUuid"],
+    //             }),
+        
+    //             // New customers (first order in this period)
+    //             prisma.$queryRawUnsafe<{ count: number }[]>(
+    //                 `SELECT COUNT(DISTINCT o."customerUuid")::int as count
+    //                 FROM "Order" o
+    //                 WHERE o."tenantUuid" = $1
+    //                     AND o.status = 'COMPLETED'
+    //                     AND o."createdAt" >= $2
+    //                     AND NOT EXISTS (
+    //                     SELECT 1 FROM "Order" prev
+    //                     WHERE prev."customerUuid" = o."customerUuid"
+    //                         AND prev."tenantUuid" = $1
+    //                         AND prev."createdAt" < $2
+    //                         AND prev.status = 'COMPLETED'
+    //                     )`,
+    //                 tenantUuid,
+    //                 since
+    //             ),
+        
+    //             // Top 10 customers by spend
+    //             prisma.order.groupBy({
+    //                 by: ["customerUuid"],
+    //                 where: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
+    //                 _sum: { totalAmount: true },
+    //                 _count: true,
+    //                 orderBy: { _sum: { totalAmount: "desc" } },
+    //                 take: 10,
+    //             }),
+        
+    //             // Repeat order rate
+    //             prisma.$queryRawUnsafe<{ repeaters: number }[]>(
+    //                 `SELECT COUNT(*)::int as repeaters FROM (
+    //                     SELECT o."customerUuid"
+    //                     FROM "Order" o
+    //                     WHERE o."tenantUuid" = $1
+    //                     AND o.status = 'COMPLETED'
+    //                     AND o."createdAt" >= $2
+    //                     GROUP BY o."customerUuid"
+    //                     HAVING COUNT(*) > 1
+    //                 ) sub`,
+    //                 tenantUuid,
+    //                 since
+    //             ),
+    //         ]);
+    
+    //         const uniqueCount = totalCustomers.length;
+    //         const newCount = newCustomers[0]?.count ?? 0;
+    //         const repeatCount = repeatRate[0]?.repeaters ?? 0;
+        
+    //         // Hydrate top customer names
+    //         const customerUuids = topCustomers.map((c) => c.customerUuid);
+    //         const customers = await prisma.user.findMany({
+    //             where: { uuid: { in: customerUuids } },
+    //             select: { uuid: true, name: true },
+    //         });
+    //         const nameMap = new Map(customers.map((c) => [c.uuid, c.name]));
+        
+    //         return {
+    //             period: `last ${days} days`,
+    //             uniqueCustomers: uniqueCount,
+    //             newCustomers: newCount,
+    //             returningCustomers: uniqueCount - newCount,
+    //             repeatRate: uniqueCount > 0
+    //             ? Math.round((repeatCount / uniqueCount) * 100 * 100) / 100
+    //             : 0,
+    //             topCustomers: topCustomers.map((c) => ({
+    //                 customerUuid: c.customerUuid,
+    //                 name: nameMap.get(c.customerUuid) ?? "Guest",
+    //                 totalSpent: c._sum.totalAmount ?? 0,
+    //                 orderCount: c._count,
+    //             })),
+    //         };
+    //     });
+    // }
     static async getCustomerAnalytics(tenantUuid: string, days: number = 30) {
         const since = dayjs().subtract(days, "day").toDate();
         const cacheKey = `analytics:customers:${tenantUuid}:${days}d`;
-    
+
         return withCache(cacheKey, 600, async () => {
-            const [
-                totalCustomers,
-                newCustomers,
-                topCustomers,
-                repeatRate,
-            ] = await Promise.all([
-                // Total unique customers who ordered
-                prisma.order.findMany({
-                    where: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
-                    select: { customerUuid: true },
-                    distinct: ["customerUuid"],
-                }),
-        
-                // New customers (first order in this period)
-                prisma.$queryRawUnsafe<{ count: number }[]>(
-                    `SELECT COUNT(DISTINCT o."customerUuid")::int as count
-                    FROM "Order" o
-                    WHERE o."tenantUuid" = $1
-                        AND o.status = 'COMPLETED'
-                        AND o."createdAt" >= $2
-                        AND NOT EXISTS (
-                        SELECT 1 FROM "Order" prev
-                        WHERE prev."customerUuid" = o."customerUuid"
-                            AND prev."tenantUuid" = $1
-                            AND prev."createdAt" < $2
-                            AND prev.status = 'COMPLETED'
-                        )`,
-                    tenantUuid,
-                    since
-                ),
-        
-                // Top 10 customers by spend
+            const [totalCustomers, topCustomers] = await Promise.all([
+                // Unique customers who ordered (using tenantUserUuid)
                 prisma.order.groupBy({
-                    by: ["customerUuid"],
-                    where: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
+                    by: ["tenantUserUuid"],
+                    where: {
+                        tenantUuid,
+                        status: "COMPLETED",
+                        createdAt: { gte: since },
+                    },
+                }),
+
+                // Top 10 by spend
+                prisma.order.groupBy({
+                    by: ["tenantUserUuid"],
+                    where: {
+                        tenantUuid,
+                        status: "COMPLETED",
+                        createdAt: { gte: since }
+                    },
                     _sum: { totalAmount: true },
                     _count: true,
                     orderBy: { _sum: { totalAmount: "desc" } },
                     take: 10,
                 }),
-        
-                // Repeat order rate
-                prisma.$queryRawUnsafe<{ repeaters: number }[]>(
-                    `SELECT COUNT(*)::int as repeaters FROM (
-                        SELECT o."customerUuid"
-                        FROM "Order" o
-                        WHERE o."tenantUuid" = $1
-                        AND o.status = 'COMPLETED'
-                        AND o."createdAt" >= $2
-                        GROUP BY o."customerUuid"
-                        HAVING COUNT(*) > 1
-                    ) sub`,
-                    tenantUuid,
-                    since
-                ),
             ]);
-    
+
             const uniqueCount = totalCustomers.length;
-            const newCount = newCustomers[0]?.count ?? 0;
-            const repeatCount = repeatRate[0]?.repeaters ?? 0;
-        
+
             // Hydrate top customer names
-            const customerUuids = topCustomers.map((c) => c.customerUuid);
-            const customers = await prisma.user.findMany({
-                where: { uuid: { in: customerUuids } },
-                select: { uuid: true, name: true },
+            const tuUuids = topCustomers
+                .map((c) => c.tenantUserUuid)
+                .filter(Boolean) as string[];
+
+            const tenantUsers = await prisma.tenantUser.findMany({
+                where: { uuid: { in: tuUuids } },
+                select: { uuid: true, displayName: true },
             });
-            const nameMap = new Map(customers.map((c) => [c.uuid, c.name]));
-        
+            const nameMap = new Map(tenantUsers.map((u) => [u.uuid, u.displayName]));
+
             return {
                 period: `last ${days} days`,
                 uniqueCustomers: uniqueCount,
-                newCustomers: newCount,
-                returningCustomers: uniqueCount - newCount,
-                repeatRate: uniqueCount > 0
-                ? Math.round((repeatCount / uniqueCount) * 100 * 100) / 100
-                : 0,
                 topCustomers: topCustomers.map((c) => ({
-                    customerUuid: c.customerUuid,
-                    name: nameMap.get(c.customerUuid) ?? "Guest",
+                    tenantUserUuid: c.tenantUserUuid,
+                    name: nameMap.get(c.tenantUserUuid!) ?? "Guest",
                     totalSpent: c._sum.totalAmount ?? 0,
                     orderCount: c._count,
                 })),

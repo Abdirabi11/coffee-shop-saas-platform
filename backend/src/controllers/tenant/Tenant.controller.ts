@@ -6,9 +6,6 @@ import { TenantAnalyticsService } from "../../services/tenant/TenantAnalytics.se
 
 
 export class TenantController {
- 
-    // ─── Dashboard ──────────────────────────────────────────
- 
     // GET /tenant/dashboard?timeRange=today|week|month|quarter|year
     static async getDashboard(req: Request, res: Response) {
         try {
@@ -44,14 +41,15 @@ export class TenantController {
             const tenantUuid = req.tenant!.uuid;
             const { dateFrom, dateTo } = req.query;
  
-            if (!dateFrom || !dateTo) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
+            // if (!dateFrom || !dateTo) {
+            //     return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
+            // }
  
             const data = await TenantDashboardService.getStorePerformance(tenantUuid, {
-                dateFrom: new Date(dateFrom as string),
-                dateTo: new Date(dateTo as string),
+                dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+                dateTo: dateTo ? new Date(dateTo as string) : undefined,
             });
+
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
             logWithContext("error", "[Tenant] Store performance failed", { error: error.message });
@@ -65,13 +63,13 @@ export class TenantController {
             const tenantUuid = req.tenant!.uuid;
             const { dateFrom, dateTo, limit } = req.query;
  
-            if (!dateFrom || !dateTo) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
+            // if (!dateFrom || !dateTo) {
+            //     return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
+            // }
  
             const data = await TenantDashboardService.getTopProducts(tenantUuid, {
-                dateFrom: new Date(dateFrom as string),
-                dateTo: new Date(dateTo as string),
+                dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+                dateTo: dateTo ? new Date(dateTo as string) : undefined,
                 limit: limit ? parseInt(limit as string) : 10,
             });
             return res.status(200).json({ success: true, data });
@@ -87,13 +85,13 @@ export class TenantController {
             const tenantUuid = req.tenant!.uuid;
             const { dateFrom, dateTo, groupBy } = req.query;
  
-            if (!dateFrom || !dateTo) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
+            // if (!dateFrom || !dateTo) {
+            //     return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
+            // }
  
             const data = await TenantDashboardService.getRevenueTrend(tenantUuid, {
-                dateFrom: new Date(dateFrom as string),
-                dateTo: new Date(dateTo as string),
+                dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+                dateTo: dateTo ? new Date(dateTo as string) : undefined,
                 groupBy: (groupBy as string) || "day",
             });
             return res.status(200).json({ success: true, data });
@@ -109,14 +107,15 @@ export class TenantController {
             const tenantUuid = req.tenant!.uuid;
             const { dateFrom, dateTo } = req.query;
  
-            if (!dateFrom || !dateTo) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
+            // if (!dateFrom || !dateTo) {
+            //     return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
+            // }
  
             const data = await TenantDashboardService.getCustomerInsights(tenantUuid, {
-                dateFrom: new Date(dateFrom as string),
-                dateTo: new Date(dateTo as string),
+                dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+                dateTo: dateTo ? new Date(dateTo as string) : undefined,
             });
+
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
             logWithContext("error", "[Tenant] Customer insights failed", { error: error.message });
@@ -132,15 +131,15 @@ export class TenantController {
             const tenantUuid = req.tenant!.uuid;
             const { from, to, storeUuid, granularity } = req.query;
  
-            if (!from || !to) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
+            // if (!from || !to) {
+            //     return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
+            // }
  
             const data = await TenantAnalyticsService.getRevenueTrend({
                 tenantUuid,
                 storeUuid: storeUuid as string,
-                from: new Date(from as string),
-                to: new Date(to as string),
+                from: from ? new Date(from as string) : undefined,
+                to: to ? new Date(to as string) : undefined,
                 granularity: granularity as any,
             });
             return res.status(200).json({ success: true, data });
@@ -156,15 +155,15 @@ export class TenantController {
             const tenantUuid = req.tenant!.uuid;
             const { from, to, storeUuid } = req.query;
  
-            if (!from || !to) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
+            // if (!from || !to) {
+            //     return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
+            // }
  
             const data = await TenantAnalyticsService.getPaymentMethodBreakdown({
                 tenantUuid,
                 storeUuid: storeUuid as string,
-                from: new Date(from as string),
-                to: new Date(to as string),
+                from: from ? new Date(from as string) : undefined,
+                to: to ? new Date(to as string) : undefined,
             });
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
@@ -185,6 +184,7 @@ export class TenantController {
             );
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
+            logWithContext("error", "[Tenant] Day of week failed", { error: error.message });
             return res.status(500).json({ success: false, error: "ANALYTICS_FAILED" });
         }
     }
@@ -202,6 +202,7 @@ export class TenantController {
             );
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
+            logWithContext("error", "[Tenant] Peak hours failed", { error: error.message });
             return res.status(500).json({ success: false, error: "ANALYTICS_FAILED" });
         }
     }
@@ -238,7 +239,7 @@ export class TenantController {
         }
     }
  
-    // ─── Billing & Subscription ─────────────────────────────
+    // ─── Billing & Subscription
  
     // GET /tenant/subscription
     static async getSubscription(req: Request, res: Response) {
@@ -291,7 +292,7 @@ export class TenantController {
         }
     }
  
-    // ─── Active Orders (quick view) ─────────────────────────
+    // ─── Active Orders (quick view)
  
     // GET /tenant/orders/active
     static async getActiveOrders(req: Request, res: Response) {

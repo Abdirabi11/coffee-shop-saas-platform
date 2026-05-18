@@ -43,7 +43,7 @@ export class StoreDashboardService{
                 }),
 
                 prisma.$queryRaw<{ avg_minutes: number }[]>`
-                    SELECT AVG(EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60) as avg_minutes
+                    SELECT AVG(EXTRACT(EPOCH FROM ("actualReadyAt" - "createdAt")) / 60) as avg_minutes
                     FROM "Order"
                     WHERE "storeUuid" = ${storeUuid}
                     AND status = 'COMPLETED'
@@ -74,6 +74,31 @@ export class StoreDashboardService{
                 },
             };
         })
+    }
+
+    static async getDashboard(tenantUuid: string, storeUuid: string) {
+        const store = await prisma.store.findFirst({
+            where: { uuid: storeUuid, tenantUuid, active: true },
+            select: { uuid: true, name: true, city: true, currency: true },
+        });
+
+        if (!store) {
+            throw new Error("STORE_NOT_FOUND");
+        }
+
+        const [overview, activeOrders, peakHours] = await Promise.all([
+            StoreDashboardService.getOverview(storeUuid),
+            StoreDashboardService.getActiveOrders(storeUuid, { limit: 10 }),
+            StoreDashboardService.getPeakHours(storeUuid),
+        ]);
+
+        return {
+            store,
+            ...overview,
+            activeOrders: activeOrders.data,
+            peakHours: peakHours.slice(0, 5),
+            generatedAt: new Date().toISOString(),
+        };
     }
 
     static async getActiveOrders(storeUuid: string, input: {

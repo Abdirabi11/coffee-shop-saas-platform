@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { StoreDashboardService } from "../../services/Dashboards/StoreDashboard.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
@@ -43,13 +44,11 @@ export class StoreController {
             const tenantUuid = req.tenant!.uuid;
             const { from, to } = req.query;
  
-            if (!from || !to) {
-                return res.status(400).json({ success: false, error: "DATE_RANGE_REQUIRED" });
-            }
- 
             const data = await StoreDailyMetricsService.getRange(
-                tenantUuid, storeUuid,
-                new Date(from as string), new Date(to as string)
+                tenantUuid,
+                storeUuid,
+                from ? new Date(from as string) : dayjs().subtract(30, "day").toDate(),
+                to ? new Date(to as string) : new Date()
             );
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
@@ -130,7 +129,11 @@ export class StoreController {
                 return res.status(400).json({ success: false, error: "SCHEDULE_ARRAY_REQUIRED" });
             }
  
-            const results = await StoreHoursService.setBulkHours(storeUuid, schedule);
+            const results = await StoreHoursService.setBulkHours(
+                req.tenant!.uuid,
+                storeUuid,
+                schedule
+            );
             return res.status(200).json({ success: true, data: results });
         } catch (error: any) {
             return res.status(500).json({ success: false, error: "SET_HOURS_FAILED" });

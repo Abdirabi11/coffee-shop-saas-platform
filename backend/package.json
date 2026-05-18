@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "seed": "ts-node src/config/seed.ts"
+  },
+  "prisma": {
+    "seed": "ts-node src/config/seed.ts"
   },
   "keywords": [],
   "type": "module",

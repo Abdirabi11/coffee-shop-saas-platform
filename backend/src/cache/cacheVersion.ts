@@ -7,4 +7,4 @@ export const getCacheVersion = async (key: string) => {
   
 export const bumpCacheVersion = async (key: string) => {
     await redis.incr(`v:${key}`);
-};
+}; 

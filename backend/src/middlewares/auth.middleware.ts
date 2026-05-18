@@ -7,6 +7,7 @@ export interface AuthRequest extends Request {
         userUuid: string;
         role: string;
         tenantUuid?: string;
+        globalRole?: string;
         storeUuid?: string;
         tokenVersion: number;
     };
@@ -52,8 +53,17 @@ export const authenticate= async (
 export const authorize =
   (...allowedRoles: string[]) =>
   (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
+    if (!req.user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    // Check both role (from JWT) and globalRole (if present)
+    if (req.user.role === "SUPER_ADMIN" || req.user.globalRole === "SUPER_ADMIN") {
+        return next();
+    }
+    
+    if (!allowedRoles.includes(req.user.role)) {
+        return res.status(403).json({ message: "Forbidden" });
     }
     next();
 };

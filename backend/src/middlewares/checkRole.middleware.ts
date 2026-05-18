@@ -1,14 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import prisma from "../config/prisma.ts"
 
-
-/**
- * Checks the user's store-specific role from UserStore.
- * Expects `authenticate` middleware to have run first (req.user.userUuid).
- * Pulls storeUuid from req.params.storeUuid || req.body.storeUuid.
- *
- * Usage: checkRole(["CASHIER", "MANAGER", "ADMIN"])
- */
 export const checkRole = (allowedRoles: string[]) => {
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
@@ -44,7 +36,7 @@ export const checkRole = (allowedRoles: string[]) => {
                 });
             }
 
-            if (user.globalRole === "SUPER_ADMIN") {
+            if (req.user?.role === "SUPER_ADMIN") {
                 return next();
             }
 
