@@ -2,8 +2,8 @@ import dayjs from "dayjs";
 import { getCacheVersion } from "../../cache/cacheVersion.ts";
 import prisma from "../../config/prisma.ts"
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { redis } from "../../lib/redis.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { withCache } from "../../cache/cache.ts";
 
 export class MenuService {
  
@@ -20,26 +20,21 @@ export class MenuService {
             const version = await getCacheVersion(`menu:${input.storeUuid}`);
             const cacheKey = `menu:${input.storeUuid}:v${version}:${input.includeUnavailable ? "all" : "available"}`;
  
-            const cached = await redis.get(cacheKey);
-            if (cached) {
-                MetricsService.increment("menu.cache.hit");
-                const menu = JSON.parse(cached);
-                return input.userUuid ? this.applyPersonalization(menu, input.userUuid) : menu;
-            }
- 
-            MetricsService.increment("menu.cache.miss");
- 
-            const menu = await this.buildMenu({
-                tenantUuid: input.tenantUuid,
-                storeUuid: input.storeUuid,
-                includeUnavailable: input.includeUnavailable,
+            const menu = await withCache(cacheKey, 300, async () => {
+                MetricsService.increment("menu.cache.miss");
+
+                const built = await this.buildMenu({
+                    tenantUuid: input.tenantUuid,
+                    storeUuid: input.storeUuid,
+                    includeUnavailable: input.includeUnavailable,
+                });
+
+                const duration = Date.now() - startTime;
+                MetricsService.timing("menu.load.duration", duration);
+
+                return built;
             });
- 
-            await redis.set(cacheKey, JSON.stringify(menu), { ex: 300 });
- 
-            const duration = Date.now() - startTime;
-            MetricsService.histogram("menu.load.duration", duration);
- 
+
             return input.userUuid ? this.applyPersonalization(menu, input.userUuid) : menu;
         } catch (error: any) {
             logWithContext("error", "[Menu] Failed to get menu", {
@@ -93,7 +88,7 @@ export class MenuService {
                     include: {
                         optionGroups: {
                             where: { optionGroup: { isActive: true } },
-                            orderBy: { order: "asc" },
+                            orderBy: { displayOrder: "asc" },
                             include: {
                                 optionGroup: {
                                     include: {
@@ -241,7 +236,7 @@ export class MenuService {
                 include: {
                     category: { select: { uuid: true, name: true } },
                     optionGroups: {
-                        orderBy: { order: "asc" },
+                        orderBy: { displayOrder: "asc" },
                         include: {
                             optionGroup: {
                                 include: {

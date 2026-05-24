@@ -1,12 +1,14 @@
 import express from "express";
 import { checkPermission } from "../../middlewares/staff/checkPermission.middleware.ts";
-import { OptionGroupAdminController } from "../../controllers/menu/admin/OptionGroupAdmin.controller.ts";
 import { validateRequest } from "../../middlewares/menu/validateRequest.ts";
 import { MenuValidators } from "../../validators/menu.validator.ts";
 import { ProductAdminController } from "../../controllers/menu/admin/ProductAdmin.controller.ts";
 import { CategoryAdminController } from "../../controllers/menu/admin/CategoryAdmin.controller.ts";
 import { authenticate } from "../../middlewares/auth.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
+import { MenuController } from "../../controllers/menu/Menu.controller.ts";
+import { MenuAnalyticsController } from "../../controllers/menu/Menuanalytics.controller.ts";
+import { OptionGroupAdminController } from "../../controllers/menu/admin/OptionGroupAdmin.controller.ts";
 
 
 const router= express.Router();
@@ -14,105 +16,109 @@ const router= express.Router();
 router.use(authenticate);
 router.use(requireTenantContext);
 
-// CATEGORIES
-
-//GET /api/admin/menu/categories/:storeUuid
+// ─── Menu Preview & Cache ───────────────────────────────────
 router.get(
-  "/categories/:storeUuid",
-  checkPermission("menu.read"),
-  CategoryAdminController.getCategories
+    "/stores/:storeUuid/preview",
+    checkPermission("menu.read"),
+    MenuController.getMenuPreview
 );
 
-//POST /api/admin/menu/categories
 router.post(
-  "/categories",
-  checkPermission("menu.create"),
-  validateRequest(MenuValidators.createCategory),
-  CategoryAdminController.createCategory
+    "/stores/:storeUuid/prewarm",
+    checkPermission("menu.update"),
+    MenuController.prewarmMenu
 );
 
-//PATCH /api/admin/menu/categories/:categoryUuid
+// ─── Analytics Summary ──────────────────────────────────────
+router.get(
+    "/analytics/:storeUuid/summary",
+    checkPermission("menu.read"),
+    MenuAnalyticsController.getSummary
+);
+
+// ─── Categories ─────────────────────────────────────────────
+router.get(
+    "/categories/:storeUuid",
+    checkPermission("menu.read"),
+    CategoryAdminController.getCategories
+);
+
+router.post(
+    "/categories",
+    checkPermission("menu.create"),
+    validateRequest(MenuValidators.createCategory),
+    CategoryAdminController.createCategory
+);
+
 router.patch(
-  "/categories/:categoryUuid",
-  checkPermission("menu.update"),
-  validateRequest(MenuValidators.updateCategory),
-  CategoryAdminController.updateCategory
+    "/categories/:categoryUuid",
+    checkPermission("menu.update"),
+    validateRequest(MenuValidators.updateCategory),
+    CategoryAdminController.updateCategory
 );
 
-//DELETE /api/admin/menu/categories/:categoryUuid
 router.delete(
-  "/categories/:categoryUuid",
-  checkPermission("menu.delete"),
-  CategoryAdminController.deleteCategory
+    "/categories/:categoryUuid",
+    checkPermission("menu.delete"),
+    CategoryAdminController.deleteCategory
 );
 
-// PRODUCTS
-
-//POST /api/admin/menu/products
+// ─── Products ───────────────────────────────────────────────
 router.post(
-  "/products",
-  checkPermission("menu.create"),
-  validateRequest(MenuValidators.createProduct),
-  ProductAdminController.createProduct
+    "/products",
+    checkPermission("menu.create"),
+    validateRequest(MenuValidators.createProduct),
+    ProductAdminController.createProduct
 );
 
-//PATCH /api/admin/menu/products/:productUuid
 router.patch(
-  "/products/:productUuid",
-  checkPermission("menu.update"),
-  validateRequest(MenuValidators.updateProduct),
-  ProductAdminController.updateProduct
+    "/products/:productUuid",
+    checkPermission("menu.update"),
+    validateRequest(MenuValidators.updateProduct),
+    ProductAdminController.updateProduct
 );
 
-//DELETE /api/admin/menu/products/:productUuid
 router.delete(
-  "/products/:productUuid",
-  checkPermission("menu.delete"),
-  ProductAdminController.deleteProduct
+    "/products/:productUuid",
+    checkPermission("menu.delete"),
+    ProductAdminController.deleteProduct
 );
 
-//POST /api/admin/menu/products/bulk/prices
 router.post(
-  "/products/bulk/prices",
-  checkPermission("menu.update"),
-  validateRequest(MenuValidators.bulkUpdatePrices),
-  ProductAdminController.bulkUpdatePrices
+    "/products/bulk/prices",
+    checkPermission("menu.update"),
+    validateRequest(MenuValidators.bulkUpdatePrices),
+    ProductAdminController.bulkUpdatePrices
 );
 
-//POST /api/admin/menu/products/bulk/availability
 router.post(
-  "/products/bulk/availability",
-  checkPermission("menu.update"),
-  validateRequest(MenuValidators.bulkUpdateAvailability),
-  ProductAdminController.bulkUpdateAvailability
+    "/products/bulk/availability",
+    checkPermission("menu.update"),
+    validateRequest(MenuValidators.bulkUpdateAvailability),
+    ProductAdminController.bulkUpdateAvailability
 );
 
-// OPTION GROUPS
-
-//POST /api/admin/menu/option-groups
+// ─── Option Groups ──────────────────────────────────────────
 router.post(
-  "/option-groups",
-  checkPermission("menu.create"),
-  validateRequest(MenuValidators.createOptionGroup),
-  OptionGroupAdminController.createOptionGroup
+    "/option-groups",
+    checkPermission("menu.create"),
+    validateRequest(MenuValidators.createOptionGroup),
+    OptionGroupAdminController.createOptionGroup
 );
 
-//POST /api/admin/menu/option-groups/:groupUuid/options
 router.post(
-  "/option-groups/:groupUuid/options",
-  checkPermission("menu.create"),
-  validateRequest(MenuValidators.createOption),
-  OptionGroupAdminController.addOption
+    "/option-groups/:groupUuid/options",
+    checkPermission("menu.create"),
+    validateRequest(MenuValidators.createOption),
+    OptionGroupAdminController.addOption
 );
 
-//POST /api/admin/menu/products/:productUuid/option-groups/:groupUuid
 router.post(
-  "/products/:productUuid/option-groups/:groupUuid",
-  checkPermission("menu.update"),
-  OptionGroupAdminController.linkToProduct
+    "/products/:productUuid/option-groups/:groupUuid",
+    checkPermission("menu.update"),
+    OptionGroupAdminController.linkToProduct
 );
 
-//DELETE /api/admin/menu/products/:productUuid/option-groups/:groupUuid
 router.delete(
   "/products/:productUuid/option-groups/:groupUuid",
   checkPermission("menu.delete"),

@@ -57,7 +57,7 @@ export class MenuCacheService {
             });
 
             const duration = Date.now() - startTime;
-            MetricsService.histogram("menu.cache.invalidate.duration", duration);
+            MetricsService.timing("menu.cache.invalidate.duration", duration);
 
             return { success: true };
 

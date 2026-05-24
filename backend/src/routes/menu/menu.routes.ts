@@ -1,5 +1,5 @@
 import express from "express"
-import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
+import { authenticate,  } from "../../middlewares/auth.middleware.ts";
 import { requireTenantHeader } from "../../middlewares/menu/requireTenantHeader.middleware.ts";
 import { menuRateLimit, searchRateLimit } from "../../middlewares/menu/rateLimit.middlware.ts";
 import { menuCacheControl } from "../../middlewares/menu/cache.controller.ts";
@@ -13,24 +13,9 @@ import { MenuAnalyticsController } from "../../controllers/menu/Menuanalytics.co
 
 const router= express.Router();
 
-
-router.get(
-    "/admin/stores/:storeUuid/menu/preview",
-    authenticate,
-    authorize("ADMIN", "MANAGER"),
-    MenuController.getMenuPreview
-);
- 
-router.post(
-    "/stores/:storeUuid/menu/prewarm",
-    authenticate,
-    authorize("ADMIN"),
-    MenuController.prewarmMenu
-);
- 
-// ─── IP Rate Limit for all public routes below 
+// ─── IP Rate Limit for all public routes
 router.use(rateLimitByIP({ points: 60, duration: 60 }));
- 
+
 // ─── Public Menu Routes
 router.get(
     "/stores/:storeUuid/menu",
@@ -39,7 +24,7 @@ router.get(
     menuCacheControl(60),
     MenuController.getStoreMenu
 );
- 
+
 router.get(
     "/:storeUuid",
     requireTenantHeader,
@@ -47,14 +32,14 @@ router.get(
     menuCacheControl(60),
     MenuController.getMenu
 );
- 
+
 router.get(
     "/products/:productUuid",
     requireTenantHeader,
     menuRateLimit,
     MenuController.getProduct
 );
- 
+
 router.get(
     "/search",
     requireTenantHeader,
@@ -62,14 +47,14 @@ router.get(
     validateRequest(MenuValidators.searchMenu, "query"),
     MenuController.searchMenu
 );
- 
+
 router.post(
     "/validate",
     requireTenantHeader,
     validateRequest(MenuValidators.validateOrder),
     MenuController.validateOrder
 );
- 
+
 // ─── Favorites (Auth Required)
 router.post(
     "/favorites/toggle",
@@ -78,27 +63,20 @@ router.post(
     validateRequest(MenuValidators.toggleFavorite),
     FavoriteController.toggleFavorite
 );
- 
+
 router.get(
     "/favorites",
     authenticate,
     requireTenantHeader,
     FavoriteController.getFavorites
 );
- 
-// ─── Analytics
+
+// ─── Analytics (public track, admin summary)
 router.post(
     "/analytics",
     requireTenantHeader,
     validateRequest(MenuValidators.trackAnalytics),
     MenuAnalyticsController.trackEvent
-);
- 
-router.get(
-    "/analytics/:storeUuid/summary",
-    authenticate,
-    authorize("ADMIN", "MANAGER"),
-    MenuAnalyticsController.getSummary
 );
  
 export default router;

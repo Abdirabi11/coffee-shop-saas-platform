@@ -6,6 +6,8 @@ export function validateRequest(schema: Joi.Schema, source: "body" | "query" | "
     return (req: Request, res: Response, next: NextFunction) => {
         const data = req[source];
 
+        console.log("RAW BODY:", JSON.stringify(data)); 
+
         const { error, value } = schema.validate(data, {
             abortEarly: false,
             stripUnknown: true,

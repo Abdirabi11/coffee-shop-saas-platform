@@ -1,7 +1,7 @@
-import prisma from "../../config/prisma.ts"
-import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { redis } from "../../lib/redis.ts";
+import prisma from "../../config/prisma.js"
+import { logWithContext } from "../../infrastructure/observability/Logger.js";
+import { MetricsService } from "../../infrastructure/observability/MetricsService.js";
+import { redis } from "../../lib/redis.js";
 
 export class OrderCacheService{
     private static readonly TTL = {

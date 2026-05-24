@@ -33,6 +33,19 @@ export const sanitizeInput = (
   next();
 };
 
+const SKIP_ESCAPE_FIELDS = new Set([
+  "imageUrl",
+  "imageUrls",
+  "logoUrl",
+  "avatarUrl",
+  "websiteUrl",
+  "callbackUrl",
+  "webhookUrl",
+  "returnUrl",
+  "cancelUrl",
+  "redirectUrl",
+]);
+
 function sanitizeObject(obj: any): any {
   if (Array.isArray(obj)) {
     return obj.map((item) => sanitizeObject(item));
@@ -43,7 +56,12 @@ function sanitizeObject(obj: any): any {
     for (const [key, value] of Object.entries(obj)) {
       if (key.startsWith("__") || key.startsWith("$")) continue;
       if (typeof value === "string") {
-        sanitized[key] = validator.escape(value).trim();
+        if (SKIP_ESCAPE_FIELDS.has(key)) {
+          // For URL fields: trim but don't HTML-escape
+          sanitized[key] = value.trim();
+        } else {
+          sanitized[key] = validator.escape(value).trim();
+        }
       } else {
         sanitized[key] = sanitizeObject(value);
       }

@@ -5,12 +5,12 @@ export function requireTenantHeader(
     res: Response,
     next: NextFunction
 ) {
-    const tenantUuid = req.headers["x-tenant-id"] as string;
+    const tenantUuid = req.headers["x-tenant-uuid"] as string;
 
     if (!tenantUuid) {
         return res.status(400).json({
             error: "TENANT_REQUIRED",
-            message: "x-tenant-id header is required",
+            message: "x-tenant-uuid header is required",
         });
     }
 
@@ -19,7 +19,7 @@ export function requireTenantHeader(
     
     if (!uuidRegex.test(tenantUuid)) {
         return res.status(400).json({
-            error: "INVALID_TENANT_ID",
+            error: "INVALID_TENANT_UUID",
             message: "x-tenant-id must be a valid UUID",
         });
     }

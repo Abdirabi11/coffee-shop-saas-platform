@@ -107,6 +107,7 @@ export class MenuValidators {
     static createCategory = Joi.object({
         storeUuid: Joi.string().uuid().required(),
         name: Joi.string().min(1).max(100).required(),
+        slug: Joi.string().min(1).max(120).optional(),
         description: Joi.string().max(500).optional().allow(null),
         imageUrl: Joi.string().uri().optional().allow(null),
         order: Joi.number().integer().min(0).default(0),
@@ -220,12 +221,12 @@ export class MenuValidators {
 
     // ADMIN - OPTION
     static createOption = Joi.object({
-        optionGroupUuid: Joi.string().uuid().required(),
+        // optionGroupUuid: Joi.string().uuid().required(),
         name: Joi.string().min(1).max(100).required(),
         description: Joi.string().max(500).optional().allow(null),
         extraCost: Joi.number().integer().min(0).default(0),
-        trackInventory: Joi.boolean().default(false),
-        currentStock: Joi.number().integer().min(0).optional(),
+        trackStock: Joi.boolean().default(false),          // renamed
+        stockQuantity: Joi.number().integer().min(0).optional(),
     });
 
     static updateOption = Joi.object({

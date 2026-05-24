@@ -5,22 +5,28 @@ import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 export function checkPermission(permissionSlug: string) {
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
-            const userUuid = req.user?.uuid;
-            const storeUuid = req.body.storeUuid || req.query.storeUuid || req.params.storeUuid;
+            const userUuid = req.user?.userUuid;  // ← was req.user?.uuid
+            const storeUuid = req.body?.storeUuid || req.query?.storeUuid || req.params?.storeUuid;
+
 
             if (!userUuid) {
                 return res.status(401).json({
                     error: "UNAUTHORIZED",
                     message: "Authentication required",
                 });
-            };
+            }
+
+            // SUPER_ADMIN bypasses all permission checks
+            if (req.user?.role === "SUPER_ADMIN") {
+                return next();
+            }
 
             if (!storeUuid) {
                 return res.status(400).json({
                     error: "VALIDATION_ERROR",
                     message: "storeUuid is required",
                 });
-            };
+            }
 
             const hasPermission = await PermissionManagementService.hasPermission({
                 userUuid,
@@ -40,10 +46,8 @@ export function checkPermission(permissionSlug: string) {
                     message: `You do not have permission: ${permissionSlug}`,
                 });
             }
-        
 
             next();
-
         } catch (error: any) {
             logWithContext("error", "[Permission] Check failed", {
                 error: error.message,
@@ -57,21 +61,31 @@ export function checkPermission(permissionSlug: string) {
     };
 }
 
-//Check if user has ANY of the specified permissions
 export function checkAnyPermission(permissionSlugs: string[]) {
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
-            const userUuid = req.user?.uuid;
-            const storeUuid = req.body.storeUuid || req.query.storeUuid || req.params.storeUuid;
+            const userUuid = req.user?.userUuid;  // ← was req.user?.uuid
+            const storeUuid = req.body?.storeUuid || req.query?.storeUuid || req.params?.storeUuid;
 
-            if (!userUuid || !storeUuid) {
+            if (!userUuid) {
                 return res.status(401).json({
                     error: "UNAUTHORIZED",
                     message: "Authentication required",
                 });
             }
 
-            // Check each permission
+            // SUPER_ADMIN bypasses all permission checks
+            if (req.user?.role === "SUPER_ADMIN") {
+                return next();
+            }
+
+            if (!storeUuid) {
+                return res.status(400).json({
+                    error: "VALIDATION_ERROR",
+                    message: "storeUuid is required",
+                });
+            }
+
             for (const permissionSlug of permissionSlugs) {
                 const hasPermission = await PermissionManagementService.hasPermission({
                     userUuid,
@@ -88,7 +102,6 @@ export function checkAnyPermission(permissionSlugs: string[]) {
                 error: "FORBIDDEN",
                 message: "Insufficient permissions",
             });
-
         } catch (error: any) {
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",

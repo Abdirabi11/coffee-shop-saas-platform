@@ -3,6 +3,7 @@ import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MenuEventService } from "../../events/menu.events.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+import { MenuDiffService } from "./MenuDiff.service.ts";
 
 export class MenuSnapshotService{
   static async createSnapshot(input: {
@@ -196,7 +197,7 @@ export class MenuSnapshotService{
       where: { storeUuid },
       include: {
         options: {
-          where: { active: true },
+          where: { isActive: true },
           orderBy: { order: "asc" },
         },
       },

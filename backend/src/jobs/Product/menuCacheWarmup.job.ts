@@ -1,6 +1,6 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { MenuCacheService } from "../../services/cache/menuCache.service.ts";
+import { MenuCacheService } from "../../services/menu/menuCache.service.ts";
 
 
 //Warm up menu cache for all active stores
