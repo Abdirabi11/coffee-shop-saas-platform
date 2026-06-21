@@ -1,4 +1,4 @@
-import {redis} from "../lib/redis.ts"
+import {redis} from "../../lib/redis.ts"
 
 export async function withCache<T>(
     key: string,

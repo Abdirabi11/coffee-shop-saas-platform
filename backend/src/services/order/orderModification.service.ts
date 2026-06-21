@@ -1,8 +1,8 @@
-import prisma from "../../config/prisma.js"
-import { EventBus } from "../../events/eventBus.js"
-import { InventoryService } from "../inventory/inventory.service.js";
-import { MenuService } from "../menu/menu.service.js";
-import { OrderPricingService } from "./order-pricing.service.ts";
+import prisma from "../../config/prisma.ts"
+import { EventBus } from "../../events/eventBus.ts"
+import { InventoryService } from "../inventory/inventory.service.ts";
+import { MenuService } from "../menu/menu.service.ts";
+import { OrderPricingService } from "./orderPricing.service.ts"
 
 
 export class OrderModificationService{
@@ -159,16 +159,16 @@ export class OrderModificationService{
             // Simplified here - in production, track item-level reservations
 
             // Recalculate order total
-            const newSubtotal = order.subtotal - item.subtotal;
-            const newTax = Math.round(newSubtotal * 0.1);
-            const newTotal = newSubtotal + newTax;
+            const updatedSubtotal = order.subtotal - item.subtotal;
+            const updatedTax = Math.round(updatedSubtotal * 0.1);
+            const updatedTotal = updatedSubtotal + updatedTax;
 
             await tx.order.update({
                 where: { uuid: order.uuid },
                 data: {
-                    subtotal: newSubtotal,
-                    taxAmount: newTax,
-                    totalAmount: newTotal,
+                    subtotal: updatedSubtotal,
+                    taxAmount: updatedTax,
+                    totalAmount: updatedTotal,
                 },
             });
         });
@@ -220,15 +220,15 @@ export class OrderModificationService{
       
         await prisma.$transaction(async (tx) => {
             // Update item
-            const newSubtotal = item.unitPrice * input.newQuantity;
-            const newFinalPrice = newSubtotal - item.discountAmount;
+            const itemSubtotal = item.unitPrice * input.newQuantity;
+            const itemFinalPrice = itemSubtotal - item.discountAmount;
       
             await tx.orderItem.update({
                 where: { uuid: item.uuid },
                 data: {
                     quantity: input.newQuantity,
-                    subtotal: newSubtotal,
-                    finalPrice: newFinalPrice,
+                    subtotal: itemSubtotal,
+                    finalPrice: itemFinalPrice,
                 },
             });
       
@@ -254,16 +254,16 @@ export class OrderModificationService{
       
             // Recalculate order total
             const subtotalDiff = item.unitPrice * quantityDiff;
-            const newSubtotal = order.subtotal + subtotalDiff;
-            const newTax = Math.round(newSubtotal * 0.1);
-            const newTotal = newSubtotal + newTax;
+            const orderSubtotal = order.subtotal + subtotalDiff;
+            const orderTax = Math.round(orderSubtotal * 0.1);
+            const orderTotal = orderSubtotal + orderTax;
       
             await tx.order.update({
                 where: { uuid: order.uuid },
                 data: {
-                    subtotal: newSubtotal,
-                    taxAmount: newTax,
-                    totalAmount: newTotal,
+                    subtotal: orderSubtotal,
+                    taxAmount: orderTax,
+                    totalAmount: orderTotal,
                 },
             });
         });

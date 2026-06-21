@@ -47,7 +47,7 @@ import { InventoryReconciliationJob } from "./Inventory/InventoryReconciliation.
 import { DashboardSnapshotJob } from "./dashboard/dashboardSnapshot.job.ts";
 import { OrphanedPaymentDetectionJob } from "./Payment/OrphanedPaymentDetection.job.ts";
 import { ArpuLtvJob } from "./Analytics/arpuLtv.job.ts";
-import { IdempotencyService } from "../services/order/idempotency.service.ts";
+import { IdempotencyService } from "../services/order/Idempotency.service.ts";
 import { FraudEventCleanupJob } from "./auth/FraudEventCleanup.job.ts";
 import { RiskScoreDecayJob } from "./Payment/RiskScoreDecay.jobs.ts";
 import { ProviderReportReconciliationJob } from "./Payment/ProviderReportReconciliation.job.ts";

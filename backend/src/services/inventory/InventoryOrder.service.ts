@@ -25,19 +25,20 @@ export class InventoryOrderService {
                 });
         
                 if (!inventory) {
+                    const product = await client.product.findUnique({
+                        where: { uuid: item.productUuid },
+                        select: { trackInventory: true },
+                    });
+                    if (!product?.trackInventory) continue;  // ← skip, don't throw
                     throw new Error(`INVENTORY_NOT_FOUND: ${item.productUuid}`);
                 }
         
                 if (inventory.availableStock < item.quantity) {
-                    const product = await client.product.findUnique({
-                        where: { uuid: item.productUuid },
-                        select: { name: true },
-                    });
                     throw new Error(
-                        `INSUFFICIENT_STOCK: ${product?.name ?? item.productUuid} — available: ${inventory.availableStock}, requested: ${item.quantity}`
+                        `INSUFFICIENT_STOCK: ${item.productUuid} — available: ${inventory.availableStock}, requested: ${item.quantity}`
                     );
-                }
-        
+                };
+                
                 await client.inventoryItem.update({
                     where: { uuid: inventory.uuid },
                     data: {

@@ -21,7 +21,7 @@ export class StoreHoursService {
                 where: {
                     storeUuid,
                     exceptionDate: { gte: todayStart, lt: todayEnd },
-                    active: true,
+                    isActive: true,
                 },
             });
  
@@ -38,7 +38,7 @@ export class StoreHoursService {
                 where: {
                     storeUuid,
                     dayOfWeek: DAY_NAMES[dayOfWeek],
-                    active: true,
+                    isActive: true,
                 },
             });
  
@@ -138,7 +138,7 @@ export class StoreHoursService {
                 closeTime: null,
                 isClosed: true,
                 is24Hours: false,
-                active: false,
+                isActive: false,
             };
         });
     }
@@ -159,7 +159,7 @@ export class StoreHoursService {
                 isClosed: data.isClosed,
                 openTime: data.openTime,
                 closeTime: data.closeTime,
-                active: true,
+                isActive: true,
             },
         });
     }
@@ -180,7 +180,7 @@ export class StoreHoursService {
     static async removeException(exceptionUuid: string) {
         return prisma.storeHourException.update({
             where: { uuid: exceptionUuid },
-            data: { active: false },
+            data:  { isActive: false },
         });
     }
 }

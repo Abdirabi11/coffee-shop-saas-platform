@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { redis } from "../lib/redis.ts";
 

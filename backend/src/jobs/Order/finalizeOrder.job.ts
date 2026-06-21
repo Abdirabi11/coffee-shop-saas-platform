@@ -1,8 +1,8 @@
 import prisma from "../../config/prisma.ts" 
 import { EventBus } from "../../events/eventBus.ts";
 import { InventoryOrderService } from "../../services/inventory/InventoryOrder.service.ts";
-import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
-import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
+import { DeadLetterQueue } from "../../services/order/DeadLetterQueue.service.js";
+import { OrderStatusService } from "../../services/order/OrderStatus.service.js";
 
 
 export class FinalizeOrderJob{

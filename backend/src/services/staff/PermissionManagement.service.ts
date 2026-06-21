@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { invalidateCache, withCache } from "../../cache/cache.ts";
+import { invalidateCache, withCache } from "../../infrastructure/cache/cache.ts";
 
 
 export class PermissionManagementService{

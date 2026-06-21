@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { InventoryService } from "../inventory/inventory.service.ts";
+import { InventoryOrderService } from "../inventory/InventoryOrder.service.ts";
 
 export class OrderCancellationService{
     static async cancelBeforePayment(input: {
@@ -45,7 +45,7 @@ export class OrderCancellationService{
             });
       
             // Release inventory
-            await InventoryService.releaseStock({
+            await InventoryOrderService.releaseForOrder({
                 orderUuid: order.uuid,
                 tx,
             });
@@ -133,7 +133,7 @@ export class OrderCancellationService{
             // Release inventory if committed
             if (order.inventoryCommitted) {
                 // Return items to stock
-                await InventoryService.releaseStock({
+                await InventoryOrderService.releaseForOrder({
                     orderUuid: order.uuid,
                     tx,
                 });

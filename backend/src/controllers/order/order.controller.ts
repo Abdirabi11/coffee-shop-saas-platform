@@ -1,12 +1,13 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
+import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { OrderCommandService } from "../../services/order/order-command.service.ts";
+import { OrderCommandService } from "../../services/order/orderCommand.service.ts";
 import { OrderCancellationService } from "../../services/order/orderCancellation.service.ts";
 import { OrderModificationService } from "../../services/order/OrderModification.service.ts";
-import { OrderQueryService } from "../../services/order/orderQuery.service.ts";
-import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
-import { OrderValidationService } from "../../services/order/orderValidation.service.ts";
+import { OrderQueryService } from "../../services/order/OrderQuery.service.ts";
+import { OrderStatusService } from "../../services/order/OrderStatus.service.ts";
+import { OrderValidationService } from "../../services/order/OrderValidation.service.ts";
 import { createOrderSchema } from "../../validators/order.validator.ts";
 
 export class OrderController {
@@ -16,9 +17,31 @@ export class OrderController {
     const traceId = req.headers["x-trace-id"] as string || `order_${Date.now()}`;
     
     try {
+      console.log("ORDER BODY:", JSON.stringify(req.body));
+      console.log("ORDER USER:", JSON.stringify(req.user));
+
       const tenantUuid = req.tenant!.uuid;
-      const storeUuid = req.store!.uuid;
-      const tenantUserUuid = req.user!.tenantUserUuid;
+      const storeUuid = req.body.storeUuid;  
+
+      let tenantUserUuid = req.user!.tenantUserUuid || (req as any).tenantUser?.uuid;
+
+      if (!tenantUserUuid) {
+        const tenantUser = await prisma.tenantUser.findFirst({
+          where: {
+            userUuid: req.user!.userUuid,
+            tenantUuid,
+            isActive: true,
+          },
+          select: { uuid: true },
+        });
+        if (!tenantUser) {
+          return res.status(403).json({
+            error: "FORBIDDEN",
+            message: "User is not linked to this tenant",
+          });
+        }
+        tenantUserUuid = tenantUser.uuid;
+      }
   
       // Validate input
       const validationResult = createOrderSchema.safeParse(req.body);
@@ -26,7 +49,7 @@ export class OrderController {
         return res.status(400).json({
           error: "VALIDATION_ERROR",
           message: "Invalid order data",
-          details: validationResult.error.errors.map((e) => ({
+          details: validationResult.error.issues.map((e) => ({
             field: e.path.join("."),
             message: e.message,
           })),
@@ -119,7 +142,7 @@ export class OrderController {
   
     try {
       const tenantUuid = req.tenant!.uuid;
-      const storeUuid = req.store?.uuid;
+      const storeUuid = req.query.storeUuid as string;
       const tenantUserUuid = req.user!.tenantUserUuid;
       const userRole = req.user!.role;
 
@@ -288,7 +311,7 @@ export class OrderController {
       const tenantUuid = req.tenant!.uuid;
       const { orderUuid } = req.params;
       const { reason } = req.body;
-      const cancelledBy = req.user!.uuid;
+      const cancelledBy = req.user!.userUuid;
       const userRole = req.user!.role;
 
       if (!reason) {
@@ -296,7 +319,16 @@ export class OrderController {
           error: "VALIDATION_ERROR",
           message: "Cancellation reason is required",
         });
-      }
+      };
+
+      let tenantUserUuid = req.user!.tenantUserUuid;
+      if (!tenantUserUuid) {
+        const tenantUser = await prisma.tenantUser.findFirst({
+          where: { userUuid: req.user!.userUuid, tenantUuid, isActive: true },
+          select: { uuid: true },
+        });
+        tenantUserUuid = tenantUser?.uuid;
+      };
 
       // Get order
       const order = await OrderQueryService.getByUuid({
@@ -305,7 +337,7 @@ export class OrderController {
       });
 
       // Check permissions
-      if (userRole === "CUSTOMER" && order.tenantUserUuid !== req.user!.tenantUserUuid) {
+      if (userRole === "CUSTOMER" && order.tenantUserUuid !== tenantUserUuid) {
         return res.status(403).json({
           error: "FORBIDDEN",
           message: "You don't have permission to cancel this order",
@@ -350,7 +382,7 @@ export class OrderController {
         error: error.message,
       });
 
-      if (error.message.includes("CANNOT_CANCEL")) {
+      if (error.message.includes("CANNOT_CANCEL") || error.message.includes("NOT_CANCELLABLE")) {
         return res.status(400).json({
           error: "CANNOT_CANCEL_ORDER",
           message: error.message,
@@ -454,7 +486,7 @@ export class OrderController {
     
     try {
       const tenantUuid = req.tenant!.uuid;
-      const storeUuid = req.store?.uuid;
+      const storeUuid = req.query.storeUuid as string;
 
       const startDate = req.query.startDate
         ? new Date(req.query.startDate as string)
@@ -495,7 +527,14 @@ export class OrderController {
     
     try {
       const tenantUuid = req.tenant!.uuid;
-      const storeUuid = req.store!.uuid;
+      const storeUuid = (req.query?.storeUuid as string) || undefined;
+
+      if (!storeUuid) {
+        return res.status(400).json({
+          error: "VALIDATION_ERROR",
+          message: "storeUuid query parameter is required",
+        });
+        }
 
       const orders = await OrderQueryService.getActiveOrders({
         tenantUuid,

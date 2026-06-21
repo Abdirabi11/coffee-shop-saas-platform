@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { withCache } from "../../cache/cache.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 

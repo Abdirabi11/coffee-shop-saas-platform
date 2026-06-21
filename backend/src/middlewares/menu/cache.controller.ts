@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { getCacheVersion } from "../../cache/cacheVersion.ts";
+import { getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
 
 
 export function menuCacheControl(maxAge: number = 60) {

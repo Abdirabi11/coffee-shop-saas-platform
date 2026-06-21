@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { createReadStream } from "fs";
 import { FinancialReportService } from "../../services/Dashboards/FinancialReport.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";

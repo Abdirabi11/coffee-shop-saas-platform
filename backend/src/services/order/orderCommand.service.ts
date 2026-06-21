@@ -6,8 +6,8 @@ import { InventoryOrderService } from "../inventory/InventoryOrder.service.ts";
 import { MenuService } from "../menu/menu.service.ts";
 import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";
 import { StoreHoursService } from "../store/storeHours.service.ts";
-import { IdempotencyService } from "./idempotency.service.ts";
-import { OrderPricingService } from "./orderPricing.service.ts";
+import { IdempotencyService } from "./Idempotency.service.ts";
+import { OrderPricingService } from "./OrderPricing.service.ts";
 
 interface CreateOrderItemInput {
   productUuid: string;

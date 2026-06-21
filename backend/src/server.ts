@@ -13,6 +13,10 @@ import storeRoutes from "./routes/store/store.routes.ts"
 import menuRoutes from "./routes/menu/menu.routes.ts"
 import menuAdminRoutes from "./routes/menu/menuAdmin.routes.ts";
 import staffRoutes from "./routes/staff/staff.routes.ts";
+import orderRoutes from "./routes/order/order.routes.ts"
+import paymentRoutes from "./routes/payment/Payment.routes.ts";
+import cashierPaymentRoutes from "./routes/payment/CashierPayment.routes.ts";
+import financialRoutes from "./routes/payment/Financial.routes.ts";
 import { startScheduler } from "./jobs/scheduler.ts"
 import { MetricsService } from "./infrastructure/observability/MetricsService.ts";
 import { compressionMiddleware } from "./middlewares/compression.middleware.ts";
@@ -102,6 +106,10 @@ app.use("/api/tenant", tenantRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/admin/menu", menuAdminRoutes);
 app.use("/api/staff", staffRoutes);
+app.use("/api/order", orderRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/cashier", cashierPaymentRoutes);
+app.use("/api/financial", financialRoutes);
 
 // app.use("/api/super_admin", superRoutes);
 // app.use("/api/admin", adminRoutes);

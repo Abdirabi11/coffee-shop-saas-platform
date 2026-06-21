@@ -1,6 +1,6 @@
-import prisma from "../../config/prisma.ts"
-import { EventBus } from "../../events/eventBus.ts";
-import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import prisma from "../../config/prisma.js"
+import { EventBus } from "../../events/eventBus.js";
+import { logWithContext } from "../../infrastructure/observability/Logger.js";
 import { EmailService } from "../email.service.ts";
 
 

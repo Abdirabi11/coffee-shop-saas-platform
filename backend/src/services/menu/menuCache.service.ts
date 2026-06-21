@@ -1,4 +1,4 @@
-import { bumpCacheVersion, getCacheVersion } from "../../cache/cacheVersion.ts";
+import { bumpCacheVersion, getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { MenuEventService } from "../../events/menu.events.ts";

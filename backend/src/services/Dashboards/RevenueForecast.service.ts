@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
-import { withCache } from "../../infrastructure/cache/redis.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
  
  
 export class RevenueForecastService {

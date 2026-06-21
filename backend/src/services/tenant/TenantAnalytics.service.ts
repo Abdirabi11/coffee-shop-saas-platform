@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts";
-import { getCacheVersion } from "../../cache/cacheVersion.ts";
-import { withCache } from "../../cache/cache.ts";
+import { getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
 
 
 type Granularity = "hour" | "day" | "week" | "month";

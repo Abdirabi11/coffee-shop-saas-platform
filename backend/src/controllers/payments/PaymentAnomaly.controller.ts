@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
 import { z } from "zod";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";

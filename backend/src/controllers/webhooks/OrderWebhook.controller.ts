@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { OrderStatusService } from "../../services/order/orderStatus.service.ts";
+import { OrderStatusService } from "../../services/order/OrderStatus.service.js";
 
 
 export class OrderWebhookController{

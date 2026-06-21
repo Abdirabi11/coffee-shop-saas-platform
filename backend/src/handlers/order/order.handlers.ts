@@ -5,8 +5,8 @@ import { RefundService } from "../../services/payment/Refund.service.ts";
 import { EventBus } from "../../events/eventBus.ts";
 import { OrderStatusService } from "../services/order/order-status.service.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { OrderCacheService } from "../../services/order/orderCache.service.js";
-import { DeadLetterQueue } from "../../services/order/deadLetterQueue.service.ts";
+import { OrderCacheService } from "../../services/order/OrderCache.service.js";
+import { DeadLetterQueue } from "../../services/order/DeadLetterQueue.service.js";
 
 
 //Order Created → Start payment flow

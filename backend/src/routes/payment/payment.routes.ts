@@ -17,13 +17,9 @@ import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 import { rawBodyParser } from "../../middlewares/rawBodyParser.middleware.ts";
 
 
-const router = express.Router();
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  WEBHOOK ROUTES — NO AUTH, signature-verified only
-//  These MUST come BEFORE router.use(authenticate)
-// ══════════════════════════════════════════════════════════════════════════════
-
+const router = express.Router(); 
+ 
+// Stripe webhook — raw body required for signature verification
 router.post(
   "/webhooks/stripe",
   rawBodyParser,
@@ -33,44 +29,50 @@ router.post(
   idempotencyMiddleware,
   PaymentWebhookController.handleStripe
 );
-
+ 
+// EVC Plus webhook — JSON body, HMAC signature in x-evc-signature header
 router.post(
-  "/webhooks/evc",
-  webhookRateLimit,
-  preventReplayAttack,
-  idempotencyMiddleware,
-  PaymentWebhookController.handleEVC
+"/webhooks/evc",
+webhookRateLimit,
+preventReplayAttack,
+idempotencyMiddleware,
+PaymentWebhookController.handleEVC
 );
-
-router.post(
-  "/webhooks/payments",
-  rawBodyParser,
-  webhookSignatureGuard,
-  preventReplayAttack,
-  idempotencyMiddleware,
-  PaymentWebhookController.handle
-);
-
+ 
+// Generic provider webhook (future providers)
+// router.post(
+//   "/webhooks/payments",
+//   rawBodyParser,
+//   webhookSignatureGuard,
+//   preventReplayAttack,
+//   idempotencyMiddleware,
+//   PaymentWebhookController.handle
+// );
+ 
 // ══════════════════════════════════════════════════════════════════════════════
-//  AUTHENTICATED ROUTES — Everything below requires auth
+//  AUTHENTICATED ROUTES — Provider Payment Flow
+//  Mobile app / customer-facing payment initiation
 // ══════════════════════════════════════════════════════════════════════════════
-
+ 
 router.use(authenticate);
-
-// ── Provider Payment Flow ───────────────────────────────────────────────────
+ 
+// Start a provider payment (creates Stripe PaymentIntent or EVC session)
+// Body: { orderUuid: string, provider: "STRIPE" | "EVC_PLUS" }
 router.post(
-  "/payments/start",
-  PaymentController.startPayment
+    "/payments/start",
+    PaymentController.startPayment
 );
-
-router.post(
-  "/payments/confirm",
-  maintenanceGuard,
-  rateLimit("payment.confirm"),
-  idempotencyMiddleware,
-  PaymentController.confirmPayment
-);
-
+ 
+// Confirm payment (client-side confirmation callback)
+// router.post(
+//     "/payments/confirm",
+//     maintenanceGuard,
+//     rateLimit("payment.confirm"),
+//     idempotencyMiddleware,
+//     PaymentController.confirmPayment
+// );
+ 
+// Retry a failed payment (requires 2FA + PAYMENT_RETRY permission)
 router.post(
   "/payments/:paymentUuid/retry",
   require2FA,
@@ -80,72 +82,11 @@ router.post(
   rateLimit("payment.retry"),
   PaymentController.retryPayment
 );
-
+ 
+// Poll provider for current payment status
 router.get(
   "/payments/:paymentUuid/status",
   PaymentController.getStatus
 );
-
-// ── Cashier Payment Flow ────────────────────────────────────────────────────
-router.post(
-  "/payments/cashier/process",
-  checkRole(["CASHIER", "MANAGER", "ADMIN"]),
-  CashierPaymentController.processPayment
-);
-
-router.post(
-  "/payments/cashier/:paymentUuid/void",
-  checkRole(["MANAGER", "ADMIN"]),
-  CashierPaymentController.voidPayment
-);
-
-router.post(
-  "/payments/cashier/:paymentUuid/correct",
-  checkRole(["ADMIN"]),
-  CashierPaymentController.correctPayment
-);
-
-// ── Cash Drawer ─────────────────────────────────────────────────────────────
-router.post(
-  "/payments/drawer/open",
-  checkRole(["CASHIER", "MANAGER", "ADMIN"]),
-  CashDrawerController.openDrawer
-);
-
-router.post(
-  "/payments/drawer/:drawerUuid/close",
-  checkRole(["CASHIER", "MANAGER", "ADMIN"]),
-  CashDrawerController.closeDrawer
-);
-
-router.get(
-  "/payments/drawer/:drawerUuid",
-  CashDrawerController.getDrawer
-);
-
-router.get(
-  "/payments/drawer/active/:terminalId",
-  CashDrawerController.getActiveDrawer
-);
-
-// ── Anomalies & Review ──────────────────────────────────────────────────────
-router.get(
-  "/payments/anomalies",
-  checkRole(["MANAGER", "ADMIN"]),
-  PaymentAnomalyController.list
-);
-
-router.post(
-  "/payments/anomalies/:anomalyUuid/review",
-  checkRole(["MANAGER", "ADMIN"]),
-  PaymentAnomalyController.review
-);
-
-router.get(
-  "/payments/flagged",
-  checkRole(["MANAGER", "ADMIN"]),
-  PaymentAnomalyController.listFlaggedPayments
-);
-
  
 export default router;

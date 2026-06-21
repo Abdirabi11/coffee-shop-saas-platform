@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { SettlementService } from "../../services/payment/Settlement.service.ts";
 
 export class SettlementController {

@@ -1,9 +1,8 @@
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { withCache } from "../../cache/cache.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
  
-const prisma = new PrismaClient();
  
 export class SettlementService {
     //RECORD PENDING SETTLEMENT

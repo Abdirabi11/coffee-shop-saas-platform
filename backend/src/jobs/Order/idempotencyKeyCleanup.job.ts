@@ -1,5 +1,5 @@
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { IdempotencyService } from "../../services/order/idempotency.service.ts";
+import { IdempotencyService } from "../../services/order/Idempotency.service.js";
 
 //Clean up expired idempotency keys
 //Runs daily at 4:00 AM

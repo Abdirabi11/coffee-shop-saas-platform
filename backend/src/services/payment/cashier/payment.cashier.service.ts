@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import prisma from "../../config/prisma.ts"
+import prisma from "../../../config/prisma.ts"
 import { EventBus } from "../../../events/eventBus.ts";
 import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
 import { PaymentAnomalyDetector } from "../paymentAnomalyDetector.ts";
