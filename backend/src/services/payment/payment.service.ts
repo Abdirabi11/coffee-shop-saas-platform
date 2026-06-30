@@ -39,9 +39,9 @@ export class PaymentService{
  
     if (!order) throw new Error("ORDER_NOT_FOUND");
  
-    if (order.status !== "PAYMENT_PENDING") {
-      throw new Error("INVALID_ORDER_STATE");
-    }
+    // if (order.status !== "PAYMENT_PENDING") {
+    //   throw new Error("INVALID_ORDER_STATE");
+    // }
  
     // Check if payment already exists
     if (order.payment) {

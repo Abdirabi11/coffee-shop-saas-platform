@@ -25,7 +25,6 @@ export const createOrderSchema = z.object({
 export const updateOrderStatusSchema = z.object({
   status: z.enum([
     "PENDING",
-    "PAYMENT_PENDING",
     "PAID",
     "PREPARING",
     "READY",

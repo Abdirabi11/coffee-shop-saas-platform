@@ -27,7 +27,7 @@ export class OrderHealthController {
             // Check pending orders count
             checks.pendingOrders = await prisma.order.count({
                 where: {
-                    status: { in: ["PENDING", "PAYMENT_PENDING"] },
+                    status: { in: ["PENDING"] },
                 },
             });
 

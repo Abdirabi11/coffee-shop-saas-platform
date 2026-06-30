@@ -27,7 +27,7 @@ export class OrderCancellationService{
         };
       
         // Can only cancel if in cancellable status
-        const cancellableStatuses = ["PENDING", "PAYMENT_PENDING"];
+        const cancellableStatuses = ["PENDING"];
         if (!cancellableStatuses.includes(order.status)) {
             throw new Error("ORDER_NOT_CANCELLABLE");
         }
@@ -177,7 +177,7 @@ export class OrderCancellationService{
  
         const expiredOrders = await prisma.order.findMany({
             where: {
-                status: { in: ["PENDING", "PAYMENT_PENDING"] },
+                status: { in: ["PENDING"] },
                 paymentStatus: "PENDING",
                 createdAt: { lt: expirationTime },
             },

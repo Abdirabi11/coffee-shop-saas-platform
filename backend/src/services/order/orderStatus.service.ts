@@ -5,8 +5,7 @@ import { EventBus } from "../../events/eventBus.ts";
 
 
 const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  PENDING: ["PAYMENT_PENDING", "CANCELLED"],
-  PAYMENT_PENDING: ["PAID", "PAYMENT_FAILED"],
+  PENDING: ["PAID", "CANCELLED"],
   PAID: ["PREPARING"],
   PREPARING: ["READY"],
   READY: ["COMPLETED"],

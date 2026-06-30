@@ -20,11 +20,11 @@ export class FinalizeOrderJob{
                     return;
                 };
 
-                if (order.status !== "PAYMENT_PENDING") {
-                    throw new Error(
-                      `Cannot finalize order in status ${order.status}`
-                    );
-                };
+                // if (order.status !== "PAYMENT_PENDING") {
+                //     throw new Error(
+                //       `Cannot finalize order in status ${order.status}`
+                //     );
+                // };
 
                 await OrderStatusService.transition(
                     order.uuid, "PAID", {

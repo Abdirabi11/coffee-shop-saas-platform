@@ -39,18 +39,18 @@ export class CashierPaymentService{
  
         const order = await prisma.order.findUnique({
             where: { uuid: input.orderUuid },
-            include: { payment: true, items: true },
+            include: { payments: true, items: true },
         });
     
         if (!order) {
             throw new Error("ORDER_NOT_FOUND");
         }
-        if (order.payment) {
+        if (order.payments.length > 0) {
             throw new Error("PAYMENT_ALREADY_EXISTS");
         }
-        if (order.status !== "READY") {
-            throw new Error(`INVALID_ORDER_STATUS: ${order.status}`);
-        }
+        // if (order.status !== "READY") {
+        //     throw new Error(`INVALID_ORDER_STATUS: ${order.status}`);
+        // }
     
         // Cash-specific validations
         if (input.paymentMethod === "CASH") {
@@ -179,7 +179,7 @@ export class CashierPaymentService{
                     paymentUuid: payment.uuid,
                     orderUuid: order.uuid,
                     storeUuid: order.storeUuid,
-                    reason: "PAYMENT_PROCESSED",
+                    reason: "PAYMENT_CAPTURED",
                     triggeredBy: input.processedBy,
                     beforeStatus: null,
                     afterStatus: "COMPLETED",

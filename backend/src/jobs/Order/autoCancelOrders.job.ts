@@ -18,7 +18,7 @@ export class AutoCancelOrdersJob{
         try {
             const orders = await prisma.order.findMany({
                 where: {
-                    status: { in: ["PENDING", "PAYMENT_PENDING"] },
+                    status: { in: ["PENDING"] },
                     paymentStatus: "PENDING",
                     createdAt: { lt: cutoff },
                 },

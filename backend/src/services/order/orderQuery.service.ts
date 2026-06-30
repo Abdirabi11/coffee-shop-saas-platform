@@ -214,13 +214,13 @@ export class OrderQueryService{
         const [order, statusHistory] = await Promise.all([
             prisma.order.findFirst({
                 where: {
-                uuid: input.orderUuid,
-                tenantUuid: input.tenantUuid,
+                    uuid: input.orderUuid,
+                    tenantUuid: input.tenantUuid,
                 },
             }),
             prisma.orderStatusHistory.findMany({
                 where: {
-                orderUuid: input.orderUuid,
+                    orderUuid: input.orderUuid,
                 },
                 orderBy: { createdAt: "asc" },
             }),

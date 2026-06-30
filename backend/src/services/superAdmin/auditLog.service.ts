@@ -30,6 +30,7 @@ export class AuditLogService{
         entityUuid,
         actorUuid,
         metadata,
+        category,
     }: {
         storeUuid?: string;
         action: string;
@@ -43,6 +44,7 @@ export class AuditLogService{
                 action,
                 entityUuid,
                 actorUuid,
+                category,
                 metadata,
             },
         })

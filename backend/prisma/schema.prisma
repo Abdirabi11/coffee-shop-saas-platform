@@ -236,6 +236,7 @@ enum AuditCategory {
   SECURITY
   CONFIGURATION
   COMPLIANCE
+  ORDER
 }
 
 enum BillingInterval {
@@ -860,7 +861,7 @@ enum OrderItemStatus {
 
 enum OrderStatus {
   PENDING
-  PAYMENT_PENDING
+  // PAYMENT_PENDING
   PAID
   PREPARING
   READY
