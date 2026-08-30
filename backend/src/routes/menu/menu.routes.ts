@@ -1,7 +1,7 @@
 import express from "express"
 import { authenticate,  } from "../../middlewares/auth.middleware.ts";
 import { requireTenantHeader } from "../../middlewares/menu/requireTenantHeader.middleware.ts";
-import { menuRateLimit, searchRateLimit } from "../../middlewares/menu/rateLimit.middlware.ts";
+import { menuRateLimit, searchRateLimit } from "../../middlewares/menu/rateLimit.middleware.ts";
 import { menuCacheControl } from "../../middlewares/menu/cache.controller.ts";
 import { MenuController } from "../../controllers/menu/Menu.controller.ts";
 import { MenuValidators } from "../../validators/menu.validator.ts";

@@ -7,7 +7,7 @@ import { requirePermission } from "../../middlewares/permission.middleware.ts";
 import { verifyPaymentWebhook } from "../../middlewares/peymetWebhook.middleware.ts";
 import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
 import { preventReplayAttack } from "../../middlewares/replayProtection.middleware.ts";
-import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.middlware.ts";
+import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.middleware.ts";
 import { webhookRateLimit } from "../../middlewares/webhookRateLimit.middleware.ts";
 import { PaymentWebhookController } from "../../controllers/payments/PaymentWebhook.controller.ts";
 import { PaymentAnomalyController } from "../../controllers/payments/PaymentAnomaly.controller.ts";

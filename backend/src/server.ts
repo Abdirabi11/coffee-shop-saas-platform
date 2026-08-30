@@ -25,10 +25,13 @@ import { securityHeadersMiddleware } from "./middlewares/securityHeaders.middlew
 import { requestIdMiddleware } from "./middlewares/requestId.middleware.ts";
 import { traceContext } from "./middlewares/traceContext.ts";
 import { responseTimeMiddleware } from "./middlewares/responseTime.middleware.ts";
-import { rawBodyMiddleware } from "./middlewares/rawBody.middleware.ts";
+import { rawBodyParser } from "./middlewares/rawBodyParser.middleware.ts";
 import { sanitizeInput } from "./middlewares/sanitization.middleware.ts";
 import { maintenanceGuard } from "./middlewares/maintainence.ts";
 import { deviceFingerprintMiddleware } from "./middlewares/deviceFingerprint.middleware.ts";
+import { notFoundHandler, errorHandler } from "./middlewares/errorHandler.middleware.ts";
+import webhookRoutes from "./routes/webhooks/webhook.routes.ts";
+import webhookAdminRoutes from "./routes/webhooks/webhookAdmin.routes.ts";
 import { DashboardSocket } from "./websockets/DashboardSocket.ts";
 
 
@@ -46,10 +49,14 @@ app.use(cors({
 
 app.use(compressionMiddleware);
 
+// Stripe requires the exact, unparsed request bytes to verify its signature.
+// This must run BEFORE the global JSON body parser below — once express.json()
+// consumes the stream for this path, the raw bytes are gone for good.
+app.use("/api/payments/webhooks/stripe", rawBodyParser);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
-app.use(rawBodyMiddleware);
 
 app.use(requestIdMiddleware);
 app.use(traceContext);
@@ -61,25 +68,11 @@ app.use(maintenanceGuard);
  
 app.use(deviceFingerprintMiddleware);
 
-// const httpServer = createServer(app);
-// const dashboardSocket = new DashboardSocket(httpServer);
-
 //SECURITY & INFRASTRUCTURE
 app.use(corsMiddleware);
 
-app.use( "/api/payments", express.raw({ type: "application/json" }) );
-
 //PUBLIC ROUTES (No auth)
 // app.use("/api/public", publicRoutes);
-
-// WEBHOOK ROUTES (Special handling)
-// app.use(
-//   "/api/webhooks",
-//   webhookRateLimit,
-//   preventReplayAttack,
-//   webhookSignatureGuard,
-//   webhookRoutes
-// );
 
 // AUTHENTICATED ROUTES
 // app.use("/api", [
@@ -90,9 +83,6 @@ app.use( "/api/payments", express.raw({ type: "application/json" }) );
 //   auditLogMiddleware,
 //   protectedRoutes,
 // ]);
-
-//ERROR HANDLER (Last)
-// app.use(errorHandler);
 
 //registerPaymentEventHandlers()        → 12 handlers (fraud, alerts, metrics)
 //registerSuperAdminDashboardHandlers() → 12 handlers (super admin cache)
@@ -110,12 +100,20 @@ app.use("/api/order", orderRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/cashier", cashierPaymentRoutes);
 app.use("/api/financial", financialRoutes);
+app.use("/api/webhooks", webhookRoutes);
+app.use("/api/admin/webhooks", webhookAdminRoutes);
 
 // app.use("/api/super_admin", superRoutes);
 // app.use("/api/admin", adminRoutes);
 // app.use("/api/product", productRoutes);
 
- 
+//UNMATCHED ROUTES
+app.use(notFoundHandler);
+
+//ERROR HANDLER (must be registered last)
+app.use(errorHandler);
+
+
 startScheduler();
 MetricsService.initialize();
  

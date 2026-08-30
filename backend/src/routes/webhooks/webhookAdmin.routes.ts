@@ -8,7 +8,7 @@ import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 const router = express.Router();
 
 router.use(authenticate);
-router.use(authorize(["SUPER_ADMIN"]));
+router.use(authorize("SUPER_ADMIN"));
 
 //GET /api/admin/webhooks/dlq
 router.get("/dlq", WebhookAdminController.getDLQ);

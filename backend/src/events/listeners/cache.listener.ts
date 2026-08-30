@@ -1,6 +1,6 @@
 import { eventBus } from "../eventBus.ts"
 import { DomainEvent } from "../event.types.ts"
-import { invalidateAdminDashboards, invalidateTenantCaches } "../../utils/cache.ts"
+import { invalidateAdminDashboards, invalidateTenantCaches } from "../../utils/cache.ts"
 
 /**
  * Billing snapshot created
