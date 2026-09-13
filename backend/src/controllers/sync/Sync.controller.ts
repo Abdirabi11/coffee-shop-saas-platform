@@ -12,7 +12,7 @@ export class SyncController {
 
         try {
             const tenantUuid = req.tenant!.uuid;
-            const tenantUserUuid = req.user!.tenantUserUuid;
+            const tenantUserUuid = req.tenantUser!.uuid;
             const { operation, clientOrderUuid, data, syncVersion } = req.body;
             
             logWithContext("info", "[Sync] Order sync request", {

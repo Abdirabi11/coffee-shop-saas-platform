@@ -45,14 +45,18 @@ export const requireTenantContext = async (
             return next();
         }
 
-        // 1. Try explicit header first
+        // 1. Explicit header, if present. 2. Otherwise the tenantUuid already
+        // verified into this user's JWT at login (Token.service.ts). Both are
+        // checked the same way: an active tenantUser row must exist for this
+        // exact (userUuid, tenantUuid) pair, on an ACTIVE tenant.
         const headerTenantUuid = req.headers["x-tenant-uuid"] as string;
+        const claimedTenantUuid = headerTenantUuid || user.tenantUuid;
 
-        if (headerTenantUuid) {
+        if (claimedTenantUuid) {
             const tenantUser = await prisma.tenantUser.findFirst({
                 where: {
                     userUuid: user.userUuid,
-                    tenantUuid: headerTenantUuid,
+                    tenantUuid: claimedTenantUuid,
                     isActive: true,
                 },
                 include: { tenant: true },
@@ -71,18 +75,31 @@ export const requireTenantContext = async (
             return next();
         }
 
-        // 2. Fallback: look up user's tenant
-        const tenantUser = await prisma.tenantUser.findFirst({
+        // 3. No header and no tenantUuid on the token: only safe to fall back
+        // if the user has exactly one active membership. Fetching up to 2 is
+        // enough to detect ambiguity without counting the whole set.
+        const tenantUsers = await prisma.tenantUser.findMany({
             where: {
                 userUuid: user.userUuid,
                 isActive: true,
             },
             include: { tenant: true },
+            take: 2,
         });
 
-        if (!tenantUser || !tenantUser.tenant) {
+        if (tenantUsers.length === 0) {
             return res.status(403).json({ success: false, error: "NO_TENANT_ACCESS" });
         }
+
+        if (tenantUsers.length > 1) {
+            return res.status(400).json({
+                success: false,
+                error: "TENANT_CONTEXT_REQUIRED",
+                message: "Multiple tenant memberships found for this user; send x-tenant-uuid to specify which tenant.",
+            });
+        }
+
+        const [tenantUser] = tenantUsers;
 
         if (tenantUser.tenant.status !== "ACTIVE") {
             return res.status(403).json({ success: false, error: "TENANT_SUSPENDED" });

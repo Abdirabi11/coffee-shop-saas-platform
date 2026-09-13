@@ -7,7 +7,7 @@ import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 export function checkStoreRole(allowedRoles: string[]) {
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
-            const userUuid = req.user?.uuid;
+            const userUuid = req.user?.userUuid;
             const storeUuid = req.body.storeUuid || req.query.storeUuid || req.params.storeUuid;
 
             if (!userUuid || !storeUuid) {

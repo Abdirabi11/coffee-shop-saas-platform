@@ -8,7 +8,7 @@ export class OfflineSyncController {
     //GET /api/offline/sync-package
     static async getSyncPackage(req: Request, res: Response) {
         try {
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
             const { storeUuid } = req.query;
 
             if (!storeUuid) {
@@ -43,7 +43,7 @@ export class OfflineSyncController {
     //POST /api/offline/sync
     static async syncActions(req: Request, res: Response) {
         try {
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
             const { storeUuid, actions } = req.body;
 
             if (!storeUuid || !actions || !Array.isArray(actions)) {

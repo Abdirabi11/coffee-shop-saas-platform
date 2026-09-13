@@ -1,4 +1,4 @@
-
+import type { StoreRole } from "@prisma/client";
 
 export type Role = "CUSTOMER" | "STAFF" | "ADMIN";
 

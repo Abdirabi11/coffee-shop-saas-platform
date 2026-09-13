@@ -23,7 +23,7 @@ export class OrderController {
       const tenantUuid = req.tenant!.uuid;
       const storeUuid = req.body.storeUuid;  
 
-      let tenantUserUuid = req.user!.tenantUserUuid || (req as any).tenantUser?.uuid;
+      let tenantUserUuid = req.tenantUser?.uuid;
 
       if (!tenantUserUuid) {
         const tenantUser = await prisma.tenantUser.findFirst({
@@ -143,7 +143,7 @@ export class OrderController {
     try {
       const tenantUuid = req.tenant!.uuid;
       const storeUuid = req.query.storeUuid as string;
-      const tenantUserUuid = req.user!.tenantUserUuid;
+      const tenantUserUuid = req.tenantUser!.uuid;
       const userRole = req.user!.role;
 
       // For customers, only show their orders
@@ -202,7 +202,7 @@ export class OrderController {
     try {
       const tenantUuid = req.tenant!.uuid;
       const { orderUuid } = req.params;
-      const tenantUserUuid = req.user!.tenantUserUuid;
+      const tenantUserUuid = req.tenantUser!.uuid;
       const userRole = req.user!.role;
 
       const order = await OrderQueryService.getByUuid({
@@ -252,7 +252,7 @@ export class OrderController {
       const tenantUuid = req.tenant!.uuid;
       const { orderUuid } = req.params;
       const { status, reason, notes } = req.body;
-      const changedBy = req.user!.uuid;
+      const changedBy = req.user!.userUuid;
 
       if (!status) {
         return res.status(400).json({
@@ -321,7 +321,7 @@ export class OrderController {
         });
       };
 
-      let tenantUserUuid = req.user!.tenantUserUuid;
+      let tenantUserUuid = req.tenantUser?.uuid;
       if (!tenantUserUuid) {
         const tenantUser = await prisma.tenantUser.findFirst({
           where: { userUuid: req.user!.userUuid, tenantUuid, isActive: true },

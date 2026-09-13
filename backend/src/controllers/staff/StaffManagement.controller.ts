@@ -53,7 +53,7 @@ export class StaffManagementController {
                 payRate,
                 hireDate: hireDate ? new Date(hireDate) : undefined,
                 certifications,
-                createdBy: req.user!.uuid,
+                createdBy: req.user!.userUuid,
             });
 
             return res.status(201).json({
@@ -263,7 +263,7 @@ export class StaffManagementController {
             await StaffManagementService.resetPIN({
                 userUuid,
                 newPin,
-                resetBy: req.user!.uuid,
+                resetBy: req.user!.userUuid,
             });
 
             return res.status(200).json({
@@ -291,7 +291,7 @@ export class StaffManagementController {
                 tenantUuid,
                 terminationDate: terminationDate ? new Date(terminationDate) : undefined,
                 reason,
-                terminatedBy: req.user!.uuid,
+                terminatedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({

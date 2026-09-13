@@ -316,7 +316,7 @@ export class AuthController {
             const { token, newPassword } = req.body;
             if (!token || !newPassword) return res.status(400).json({ success: false, error: "TOKEN_AND_PASSWORD_REQUIRED" });
             if (newPassword.length < 8) return res.status(400).json({ success: false, error: "PASSWORD_TOO_SHORT" });
-            await PasswordResetService.resetPassword(token, newPassword);
+            await PasswordResetService.resetPassword({ token, newPassword });
             return res.status(200).json({ success: true, message: "Password reset. Please login." });
         } catch (e: any) { return handleAuthError(e, res, "resetPassword"); }
     }
@@ -339,8 +339,10 @@ export class AuthController {
             if (!user) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
             const { code } = req.body;
             if (!code) return res.status(400).json({ success: false, error: "CODE_REQUIRED" });
-            const result = await TwoFactorService.verifySetup({ userUuid: user.userUuid, token: code });
-            return res.status(200).json({ success: true, message: "2FA enabled", backupCodes: result.backupCodes });
+            await TwoFactorService.verifySetup({ userUuid: user.userUuid, token: code });
+            // Backup codes are only ever shown once, from /auth/2fa/setup — verifySetup
+            // enables 2FA against the already-stored (hashed) codes and cannot re-supply them.
+            return res.status(200).json({ success: true, message: "2FA enabled" });
         } catch (e: any) { return handleAuthError(e, res, "enable2FA"); }
     }
 

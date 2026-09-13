@@ -1,4 +1,4 @@
-import { prisma } from "../../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { redis } from "../../lib/redis.ts";
 
@@ -12,7 +12,8 @@ export class SettingsService {
             const cached = await redis.get(cacheKey);
 
             if (cached) {
-                return JSON.parse(cached);
+                // Upstash returns parsed JSON for objects, raw string for strings
+                return typeof cached === "string" ? JSON.parse(cached) : cached;
             }
 
             // Get from database
@@ -108,7 +109,8 @@ export class SettingsService {
             const cached = await redis.get(cacheKey);
 
             if (cached) {
-                return JSON.parse(cached);
+                // Upstash returns parsed JSON for objects, raw string for strings
+                return typeof cached === "string" ? JSON.parse(cached) : cached;
             }
 
             let settings = await prisma.storeSettings.findUnique({

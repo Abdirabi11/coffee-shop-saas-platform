@@ -74,7 +74,7 @@ export class TipsAndCommissionController{
 
             const tipPool = await TipsAndCommissionService.distributeTips({
                 tipPoolUuid,
-                distributedBy: req.user!.uuid,
+                distributedBy: req.user!.userUuid,
                 paymentMethod: paymentMethod || "payroll",
             });
 

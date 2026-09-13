@@ -1,27 +1,32 @@
 import express from "express"
 import { authenticate } from "../../middlewares/auth.middleware.ts";
+import { checkRole } from "../../middlewares/checkRole.middleware.ts";
+import { DeviceTrustController } from "../../controllers/security/Security.controller.ts";
+import { FraudReviewController } from "../../controllers/security/FraudReview.controller.ts";
+import { AuditLogController } from "../../controllers/security/AuditLog.controller.ts";
+import { IPWhitelistController } from "../../controllers/security/IPWhitelist.controller.ts";
 
 
 const router = express.Router();
- 
+
 const adminOnly = [authenticate, checkRole(["SUPER_ADMIN", "ADMIN", "TENANT_ADMIN"])];
 
-router.get( "/security/devices",               authenticate, SecurityController.listDevices);
-router.post("/security/devices/:uuid/revoke",  authenticate, SecurityController.revokeDevice);
-router.get( "/security/devices/status",        authenticate, SecurityController.getDeviceStatus);
+router.get( "/security/devices",               authenticate, DeviceTrustController.listDevices);
+router.post("/security/devices/:uuid/revoke",  authenticate, DeviceTrustController.revokeDevice);
+router.get( "/security/devices/status",        authenticate, DeviceTrustController.getDeviceStatus);
 
-router.get( "/security/fraud/stats",           ...adminOnly, SecurityController.getFraudStats);
-router.get( "/security/fraud",                 ...adminOnly, SecurityController.listFraudEvents);
-router.get( "/security/fraud/:uuid",           ...adminOnly, SecurityController.getFraudEvent);
-router.post("/security/fraud/:uuid/review",    ...adminOnly, SecurityController.reviewFraudEvent);
+router.get( "/security/fraud/stats",           ...adminOnly, FraudReviewController.getStats);
+router.get( "/security/fraud",                 ...adminOnly, FraudReviewController.listEvents);
+router.get( "/security/fraud/:uuid",           ...adminOnly, FraudReviewController.getEvent);
+router.post("/security/fraud/:uuid/review",    ...adminOnly, FraudReviewController.reviewEvent);
 
-router.get( "/security/audit/summary",         ...adminOnly, SecurityController.getAuditSummary);
-router.get( "/security/audit",                 ...adminOnly, SecurityController.searchAuditLogs);
-router.get( "/security/audit/:uuid",           ...adminOnly, SecurityController.getAuditDetail);
+router.get( "/security/audit/summary",         ...adminOnly, AuditLogController.getSummary);
+router.get( "/security/audit",                 ...adminOnly, AuditLogController.search);
+router.get( "/security/audit/:uuid",           ...adminOnly, AuditLogController.getDetail);
 
-router.get(   "/security/ip-whitelist",        ...adminOnly, SecurityController.listIPWhitelist);
-router.post(  "/security/ip-whitelist",        ...adminOnly, SecurityController.addIPWhitelist);
-router.delete("/security/ip-whitelist/:uuid",  ...adminOnly, SecurityController.removeIPWhitelist);
-router.post(  "/security/ip-whitelist/check",  ...adminOnly, SecurityController.checkIPWhitelist);
- 
+router.get(   "/security/ip-whitelist",        ...adminOnly, IPWhitelistController.list);
+router.post(  "/security/ip-whitelist",        ...adminOnly, IPWhitelistController.add);
+router.delete("/security/ip-whitelist/:uuid",  ...adminOnly, IPWhitelistController.remove);
+router.post(  "/security/ip-whitelist/check",  ...adminOnly, IPWhitelistController.check);
+
 export default router;

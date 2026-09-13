@@ -291,7 +291,7 @@ export class AuthService {
     const requires2FA = await TwoFactorService.isRequired(user.uuid);
     if (requires2FA) {
       return {
-        requires2FA: true,
+        requires2FA: true as const,
         tempToken: await this.createTempToken(user.uuid, "2FA_PENDING"),
         user: { uuid: user.uuid, name: user.name },
       };
@@ -344,7 +344,7 @@ export class AuthService {
     const requires2FA = await TwoFactorService.isRequired(user.uuid);
     if (requires2FA) {
       return {
-        requires2FA: true,
+        requires2FA: true as const,
         tempToken: await this.createTempToken(user.uuid, "2FA_PENDING"),
         user: { uuid: user.uuid, name: user.name },
       };
@@ -439,7 +439,7 @@ export class AuthService {
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
-      requires2FA: false,
+      requires2FA: false as const,
     };
   }
  

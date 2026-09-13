@@ -15,7 +15,7 @@ export const rateLimitByTenant = ({
         try {
             // Get tenant UUID (should be set by requireTenantContext middleware)
             const tenantUuid = req.tenant?.uuid;
-            const userUuid = req.user?.uuid;
+            const userUuid = req.user?.userUuid;
             const ip = req.ip;
 
             // Build identifier (prefer tenant > user > IP)
@@ -86,7 +86,7 @@ export const rateLimitByUser = ({
 }) => {
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
-            const userUuid = req.user?.uuid;
+            const userUuid = req.user?.userUuid;
             const ip = req.ip;
 
             const identifier = userUuid || ip;

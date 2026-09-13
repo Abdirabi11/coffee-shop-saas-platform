@@ -100,7 +100,7 @@ export class PlanController{
 
             const plan = await PlanService.createPlan({
                 ...validation.data,
-                createdBy: req.user!.uuid,
+                createdBy: req.user!.userUuid,
             });
 
             return res.status(201).json({
@@ -131,7 +131,7 @@ export class PlanController{
             const plan = await PlanService.updatePlan({
                 planUuid,
                 data: validation.data,
-                updatedBy: req.user!.uuid,
+                updatedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({
@@ -250,7 +250,7 @@ export class PlanController{
                 features,
                 quotas,
                 changeDescription,
-                changedBy: req.user!.uuid,
+                changedBy: req.user!.userUuid,
             });
 
             return res.status(201).json({
@@ -274,7 +274,7 @@ export class PlanController{
             await PlanService.setPlanStatus({
                 planUuid,
                 isActive: true,
-                updatedBy: req.user!.uuid,
+                updatedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({
@@ -298,7 +298,7 @@ export class PlanController{
             await PlanService.setPlanStatus({
                 planUuid,
                 isActive: false,
-                updatedBy: req.user!.uuid,
+                updatedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({

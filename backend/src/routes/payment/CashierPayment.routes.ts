@@ -1,13 +1,15 @@
 import express from "express"
 import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
+import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { CashierPaymentController } from "../../controllers/payments/CashierPayment.controller.ts";
 import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 
 
 const router = express.Router();
- 
+
 router.use(authenticate);
- 
+router.use(requireTenantContext);
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  CASHIER PAYMENT PROCESSING
 //  POS/counter payments — cash, card terminal

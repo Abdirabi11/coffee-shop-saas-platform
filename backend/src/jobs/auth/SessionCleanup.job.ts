@@ -10,7 +10,7 @@ export class SessionCleanupJob {
  
   static async run() {
     const startTime = Date.now();
-    logWithContext("info", "[SessionCleanup] Starting");
+    logWithContext("info", "[SessionCleanup] Starting", {});
  
     try {
       const now = new Date();

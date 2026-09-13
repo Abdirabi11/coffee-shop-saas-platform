@@ -17,7 +17,7 @@ export class CashDrawerController {
                 userUuid,
                 startingCash,
                 drawerNumber,
-                openedBy: req.user!.uuid,
+                openedBy: req.user!.userUuid,
             });
 
             return res.status(201).json({
@@ -53,7 +53,7 @@ export class CashDrawerController {
             const result = await CashDrawerService.closeDrawer({
                 drawerUuid,
                 actualCash,
-                closedBy: req.user!.uuid,
+                closedBy: req.user!.userUuid,
                 cashCount,
                 notes,
             });
@@ -89,7 +89,7 @@ export class CashDrawerController {
                 drawerUuid,
                 storeUuid,
                 amount,
-                droppedBy: req.user!.uuid,
+                droppedBy: req.user!.userUuid,
                 reason,
             });
     
@@ -113,7 +113,7 @@ export class CashDrawerController {
 
             const cashDrop = await CashDrawerService.verifyCashDrop({
                 cashDropUuid,
-                verifiedBy: req.user!.uuid,
+                verifiedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({
@@ -132,7 +132,7 @@ export class CashDrawerController {
     //GET /api/cash-drawer/active
     static async getActiveDrawer(req: Request, res: Response) {
         try {
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
             const { storeUuid } = req.query;
 
             if (!storeUuid) {

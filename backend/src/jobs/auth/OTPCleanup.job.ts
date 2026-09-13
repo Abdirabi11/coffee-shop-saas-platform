@@ -8,7 +8,7 @@ export class OTPCleanupJob{
     static async run(){
         const startTime = Date.now();
     
-        logWithContext("info", "[OTPCleanup] Starting cleanup");
+        logWithContext("info", "[OTPCleanup] Starting cleanup", {});
 
         try {
             const now = new Date();

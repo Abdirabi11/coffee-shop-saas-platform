@@ -47,7 +47,7 @@ export const auditLogMiddleware = async (
                 await prisma.auditLog.create({
                     data: {
                         tenantUuid: req.tenant?.uuid || "SYSTEM",
-                        userUuid: req.user?.uuid,
+                        userUuid: req.user?.userUuid,
                         action: `${req.method} ${req.path}`,
                         entityType: extractEntityType(req.path),
                         entityUuid: extractEntityUuid(req),

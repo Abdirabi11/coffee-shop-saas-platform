@@ -35,7 +35,7 @@ export class ApprovalRequestController {
 
             const request = await ApprovalRequestService.approveRequest({
                 requestUuid,
-                approvedBy: req.user!.uuid,
+                approvedBy: req.user!.userUuid,
                 notes,
             });
 
@@ -60,7 +60,7 @@ export class ApprovalRequestController {
 
             const request = await ApprovalRequestService.rejectRequest({
                 requestUuid,
-                approvedBy: req.user!.uuid,
+                approvedBy: req.user!.userUuid,
                 notes,
             });
 

@@ -81,7 +81,7 @@ export class BreakEnforcementController {
 
             const violation = await BreakEnforcementService.acknowledgeViolation({
                 violationUuid,
-                acknowledgedBy: req.user!.uuid,
+                acknowledgedBy: req.user!.userUuid,
             });
 
             return res.status(200).json({
@@ -112,7 +112,7 @@ export class BreakEnforcementController {
 
             const violation = await BreakEnforcementService.waiveViolation({
                 violationUuid,
-                waivedBy: req.user!.uuid,
+                waivedBy: req.user!.userUuid,
                 reason,
             });
 

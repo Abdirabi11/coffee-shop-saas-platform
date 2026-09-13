@@ -15,7 +15,7 @@ export class CategoryController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const storeUuid = req.store!.uuid;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
 
             // Validate input
             const validationResult = createCategorySchema.safeParse(req.body);
@@ -151,7 +151,7 @@ export class CategoryController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const { uuid } = req.params;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
 
             // Validate input
             const validationResult = updateCategorySchema.safeParse(req.body);
@@ -194,7 +194,7 @@ export class CategoryController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const { uuid } = req.params;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
 
             await CategoryService.delete({
                 tenantUuid,
@@ -231,7 +231,7 @@ export class CategoryController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const storeUuid = req.store!.uuid;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
             const { orders } = req.body;
 
             if (!Array.isArray(orders)) {

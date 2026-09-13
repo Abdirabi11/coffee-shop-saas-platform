@@ -1,6 +1,7 @@
 import express from "express"
 import { PaymentController } from "../../controllers/payments/payment.controller.ts";
 import { authenticate, require2FA } from "../../middlewares/auth.middleware.ts";
+import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { idempotencyMiddleware } from "../../middlewares/idempotency.middleware.ts";
 import { maintenanceGuard } from "../../middlewares/maintainence.ts";
 import { requirePermission } from "../../middlewares/permission.middleware.ts";
@@ -55,7 +56,8 @@ PaymentWebhookController.handleEVC
 // ══════════════════════════════════════════════════════════════════════════════
  
 router.use(authenticate);
- 
+router.use(requireTenantContext);
+
 // Start a provider payment (creates Stripe PaymentIntent or EVC session)
 // Body: { orderUuid: string, provider: "STRIPE" | "EVC_PLUS" }
 router.post(

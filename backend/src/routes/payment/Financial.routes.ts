@@ -1,5 +1,6 @@
 import express from "express"
 import { authenticate } from "../../middlewares/auth.middleware.ts";
+import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { ReconciliationDashboardController } from "../../controllers/dashboards/ReconciliationDashboard.controller.ts";
 import { CashDrawerReportController } from "../../controllers/dashboards/CashDrawerReport.controller.ts";
 import { ReceiptController } from "../../controllers/payments/Receipt.controller.ts";
@@ -12,8 +13,8 @@ import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 
 const router = express.Router();
  
-const adminOnly = [authenticate, checkRole(["ADMIN", "TENANT_ADMIN"])];
-const managerUp = [authenticate, checkRole(["MANAGER", "ADMIN", "TENANT_ADMIN"])];
+const adminOnly = [authenticate, requireTenantContext, checkRole(["ADMIN", "TENANT_ADMIN"])];
+const managerUp = [authenticate, requireTenantContext, checkRole(["MANAGER", "ADMIN", "TENANT_ADMIN"])];
  
 // ══════════════════════════════════════════════════════════════════════════
 //  RECONCILIATION
@@ -108,6 +109,7 @@ router.get(
 router.get(
     "/receipts/order/:orderUuid",
     authenticate,
+    requireTenantContext,
     ReceiptController.getByOrder
 );
  

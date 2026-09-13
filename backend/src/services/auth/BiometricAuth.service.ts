@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { TokenService } from "./Token.service.ts";
 
 export class BiometricAuthService {
   // Enable biometric auth for a device

@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { SessionService } from "../auth/session.service.ts";
+import { SessionService } from "../auth/Session.service.ts";
 import { DeviceTrustService } from "./DeviceTrust.service.ts";
 import { FraudService } from "./Fraud.service.ts";
 

@@ -26,7 +26,7 @@ export class WebhookManagementController {
                 description,
                 ipWhitelist,
                 headers,
-                createdBy: req.user!.uuid,
+                createdBy: req.user!.userUuid,
             });
 
             return res.status(201).json({

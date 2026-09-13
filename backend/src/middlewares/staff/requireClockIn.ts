@@ -10,7 +10,7 @@ export async function warnIfNotClockedIn(
     next: NextFunction
 ) {
     try {
-        const userUuid = req.user?.uuid;
+        const userUuid = req.user?.userUuid;
         const storeUuid = req.body.storeUuid || req.query.storeUuid;
 
         if (!userUuid || !storeUuid) {

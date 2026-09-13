@@ -13,7 +13,7 @@ export class ProductController {
             // Extract context
             const tenantUuid = req.tenant!.uuid;
             const storeUuid = req.store!.uuid;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
     
             // Validate input
             const validationResult = createProductSchema.safeParse(req.body);
@@ -190,7 +190,7 @@ export class ProductController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const storeUuid = req.store!.uuid;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
             const { productUuid } = req.params;
     
             // Validate input
@@ -260,7 +260,7 @@ export class ProductController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const storeUuid = req.store!.uuid;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
             const { productUuid } = req.params;
     
             await ProductService.softDelete({
@@ -305,7 +305,7 @@ export class ProductController {
         try {
             const tenantUuid = req.tenant!.uuid;
             const storeUuid = req.store!.uuid;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
     
             const { productUuids, data } = req.body;
     

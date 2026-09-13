@@ -33,7 +33,7 @@ export class OrderAttributionController {
     static async setTakenBy(req: Request, res: Response) {
         try {
             const { orderUuid } = req.params;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
 
             const order = await OrderAttributionService.setTakenBy({
                 orderUuid,
@@ -88,7 +88,7 @@ export class OrderAttributionController {
     static async setServedBy(req: Request, res: Response) {
         try {
             const { orderUuid } = req.params;
-            const userUuid = req.user!.uuid;
+            const userUuid = req.user!.userUuid;
 
             const order = await OrderAttributionService.setServedBy({
                 orderUuid,

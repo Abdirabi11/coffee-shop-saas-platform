@@ -173,7 +173,7 @@ export class ShiftManagementController {
 
             const swapRequest = await ShiftManagementService.requestShiftSwap({
                 shiftUuid,
-                requestedBy: req.user!.uuid,
+                requestedBy: req.user!.userUuid,
                 requestedWith,
                 reason,
             });
@@ -199,7 +199,7 @@ export class ShiftManagementController {
 
             const swapRequest = await ShiftManagementService.respondToShiftSwap({
                 swapRequestUuid,
-                managerUuid: req.user!.uuid,
+                managerUuid: req.user!.userUuid,
                 approved,
                 notes,
             });

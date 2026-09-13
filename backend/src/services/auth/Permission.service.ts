@@ -25,7 +25,7 @@ export class PermissionService {
             if (!role) return [];
     
             return role.permissions
-                .map((rp) => rp.permission.key || rp.permission.slug)
+                .map((rp: { permission: { key: string | null; slug: string } }) => rp.permission.key || rp.permission.slug)
                 .filter(Boolean) as string[];
         
         } catch (error: any) {

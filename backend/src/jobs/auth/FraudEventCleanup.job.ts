@@ -11,7 +11,7 @@ export class FraudEventCleanupJob {
     static async run() {
         const startTime = Date.now();
       
-        logWithContext("info", "[FraudEventCleanup] Starting cleanup");
+        logWithContext("info", "[FraudEventCleanup] Starting cleanup", {});
   
         try {
             // Move resolved fraud events older than 1 year to archive

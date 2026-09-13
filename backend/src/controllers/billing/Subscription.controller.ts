@@ -119,7 +119,7 @@ export class SubscriptionController{
                 tenantUuid,
                 immediately,
                 reason,
-                cancelledBy: req.user!.uuid,
+                cancelledBy: req.user!.userUuid,
             });
 
             return res.status(200).json({

@@ -10,7 +10,7 @@ export class DeviceCleanupJob {
     static async run() {
       const startTime = Date.now();
       
-        logWithContext("info", "[DeviceCleanup] Starting cleanup");
+        logWithContext("info", "[DeviceCleanup] Starting cleanup", {});
   
         try {
             const count = await DeviceTrustService.cleanupOldDevices();
