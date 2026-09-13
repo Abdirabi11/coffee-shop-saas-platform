@@ -4,6 +4,7 @@ import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../utils/jwt.ts";
 import { SessionService } from "./Session.service.ts";
+import type { StoreRole, GlobalRole } from "@prisma/client";
   
 // Refresh token lifetime: 30 days for mobile (offline-first), 7 days for web
 const MOBILE_TOKEN_EXPIRY_DAYS = 30;
@@ -42,7 +43,7 @@ export class TokenService {
     const accessToken = signAccessToken({
       userUuid: input.userUuid,
       tenantUuid: input.tenantUuid,
-      role: input.role,
+      role: input.role as StoreRole | GlobalRole,
       tokenVersion,
     });
  
@@ -271,7 +272,7 @@ export class TokenService {
     // Create new session
     await SessionService.create({
       userUuid: storedToken.user.uuid,
-      tenantUuid: storedToken.tenantUuid,
+      tenantUuid: storedToken.tenantUuid ?? undefined,
       refreshTokenUuid: newStoredToken.uuid,
       storeUuid: undefined,
       req,

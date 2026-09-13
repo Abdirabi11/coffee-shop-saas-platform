@@ -13,7 +13,7 @@ export class PermissionService {
                         { uuid: roleIdentifier },
                         { slug: roleIdentifier },
                     ],
-                    active: true,
+                    isActive: true,
                 },
                 include: {
                     permissions: {
@@ -73,7 +73,7 @@ export class PermissionService {
                             { slug: permissionKey },
                         ],
                     },
-                    revoked: false,
+                    granted: true,
                 },
             });
             if (directPerm) return true;
@@ -83,7 +83,12 @@ export class PermissionService {
                 where: {
                     userUuid,
                     ...(storeUuid && { storeUuid }),
-                    permissionKey,
+                    permission: {
+                        OR: [
+                            { key: permissionKey },
+                            { slug: permissionKey },
+                        ],
+                    },
                     revoked: false,
                     validUntil: { gt: new Date() },
                 },
@@ -93,7 +98,7 @@ export class PermissionService {
             //Check role-based permissions via UserStore
             if (storeUuid) {
                 const userStore = await prisma.userStore.findFirst({
-                    where: { userUuid, storeUuid, active: true },
+                    where: { userUuid, storeUuid, isActive: true },
                 });
                 if (userStore) {
                     return this.hasPermission(userStore.role, permissionKey);
@@ -220,15 +225,26 @@ export class PermissionService {
     static async grantTemporaryPermission(input: {
         userUuid: string;
         permissionKey: string;
-        storeUuid?: string;
+        storeUuid: string;
         grantedBy: string;
         validUntil: Date;
         reason: string;
     }) {
+        const permission = await prisma.permission.findFirst({
+            where: {
+                OR: [
+                    { key: input.permissionKey },
+                    { slug: input.permissionKey },
+                ],
+            },
+        });
+
+        if (!permission) throw new Error("PERMISSION_NOT_FOUND");
+
         await prisma.temporaryPermission.create({
             data: {
                 userUuid: input.userUuid,
-                permissionKey: input.permissionKey,
+                permissionUuid: permission.uuid,
                 storeUuid: input.storeUuid,
                 grantedBy: input.grantedBy,
                 validUntil: input.validUntil,

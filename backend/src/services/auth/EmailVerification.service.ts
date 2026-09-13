@@ -169,10 +169,20 @@ export class EmailVerificationService {
             // Send email
             await this.sendVerificationEmail(userUuid);
 
+            const user = await prisma.user.findUnique({
+                where: { uuid: userUuid },
+                select: { email: true },
+            });
+
+            if (!user?.email) {
+                throw new Error("USER_OR_EMAIL_NOT_FOUND");
+            }
+
             // Log email
             await prisma.emailLog.create({
                 data: {
                     userUuid,
+                    to: user.email,
                     type: "EMAIL_VERIFICATION",
                     status: "SENT",
                 },

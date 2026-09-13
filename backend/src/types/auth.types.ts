@@ -1,4 +1,4 @@
-import type { StoreRole } from "@prisma/client";
+import type { StoreRole, GlobalRole } from "@prisma/client";
 
 export type Role = "CUSTOMER" | "STAFF" | "ADMIN";
 
@@ -9,7 +9,8 @@ export interface JwtPayload {
 
 export interface AccessTokenPayload {
   userUuid: string;
-  role: StoreRole | "SUPER_ADMIN";
+  // StoreRole for store-scoped staff, GlobalRole (includes "SUPER_ADMIN") for platform-level users
+  role: StoreRole | GlobalRole;
   tenantUuid?: string;
   storeUuid?: string;
   tokenVersion: number; 

@@ -100,10 +100,11 @@ export const requireStoreAccess =
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     const storeUuid = req.params[storeParam];
 
-    const access = await prisma.storeStaff.findFirst({
+    const access = await prisma.userStore.findFirst({
       where: {
         userUuid: req.user!.userUuid,
         storeUuid,
+        isActive: true,
       },
     });
 
@@ -129,7 +130,7 @@ export const enforceStoreLimit = async (req: AuthRequest, res: Response, next: N
         return res.status(403).json({ message: "No active subscription" });
     };
 
-    if (tenant.stores.length >= tenant.subscription.plan.maxStores) {
+    if (tenant.stores.length >= tenant.maxStores) {
         return res.status(403).json({ message: "Store limit reached" });
     };
 
