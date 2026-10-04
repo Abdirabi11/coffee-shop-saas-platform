@@ -50,7 +50,7 @@ export class TenantAnalyticsService {
         const granularity = filters.granularity ?? inferGranularity(from, to);
     
         const version = await getCacheVersion(`tenant:${tenantUuid}:analytics`);
-        const cacheKey = `analytics:revenue:${tenantUuid}:${storeUuid ?? "all"}:${granularity}:${from.toISOString()}:${to.toISOString()}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:analytics:revenue:${storeUuid ?? "all"}:${granularity}:${from.toISOString()}:${to.toISOString()}:v${version}`;
     
         return withCache(cacheKey, 600, async () => {
             const dateTrunc = buildDateTrunc(granularity);
@@ -103,7 +103,7 @@ export class TenantAnalyticsService {
     static async getPaymentMethodBreakdown(filters: AnalyticsFilters) {
         const { tenantUuid, storeUuid } = filters;
         const { from, to } = resolveAnalyticsDates(filters.from, filters.to);
-        const cacheKey = `analytics:payment-methods:${tenantUuid}:${storeUuid ?? "all"}:${from.getTime()}:${to.getTime()}`;
+        const cacheKey = `tenant:${tenantUuid}:analytics:payment-methods:${storeUuid ?? "all"}:${from.getTime()}:${to.getTime()}`;
 
         return withCache(cacheKey, 600, async () => {
             const storeWhere = storeUuid ? { storeUuid } : {};
@@ -142,7 +142,7 @@ export class TenantAnalyticsService {
         days: number = 30
     ) {
         const since = dayjs().subtract(days, "day").toDate();
-        const cacheKey = `analytics:peak-hours:${tenantUuid}:${storeUuid ?? "all"}:${days}d`;
+        const cacheKey = `tenant:${tenantUuid}:analytics:peak-hours:${storeUuid ?? "all"}:${days}d`;
  
         return withCache(cacheKey, 1800, async () => {
             const storeFilter = storeUuid
@@ -200,7 +200,7 @@ export class TenantAnalyticsService {
         days: number = 90
     ) {
         const since = dayjs().subtract(days, "day").toDate();
-        const cacheKey = `analytics:dow:${tenantUuid}:${storeUuid ?? "all"}:${days}d`;
+        const cacheKey = `tenant:${tenantUuid}:analytics:dow:${storeUuid ?? "all"}:${days}d`;
     
         return withCache(cacheKey, 3600, async () => {
             const storeFilter = storeUuid
@@ -239,7 +239,7 @@ export class TenantAnalyticsService {
     //Store comparison — side-by-side metrics for all stores
     static async getStoreComparison(tenantUuid: string, days: number = 30) {
         const since = dayjs().subtract(days, "day").toDate();
-        const cacheKey = `analytics:store-compare:${tenantUuid}:${days}d`;
+        const cacheKey = `tenant:${tenantUuid}:analytics:store-compare:${days}d`;
     
         return withCache(cacheKey, 600, async () => {
             const stores = await prisma.store.findMany({
@@ -302,7 +302,7 @@ export class TenantAnalyticsService {
     //Customer analytics — new vs returning, top customers
     // static async getCustomerAnalytics(tenantUuid: string, days: number = 30) {
     //     const since = dayjs().subtract(days, "day").toDate();
-    //     const cacheKey = `analytics:customers:${tenantUuid}:${days}d`;
+    //     const cacheKey = `tenant:${tenantUuid}:analytics:customers:${days}d`;
     
     //     return withCache(cacheKey, 600, async () => {
     //         const [
@@ -393,7 +393,7 @@ export class TenantAnalyticsService {
     // }
     static async getCustomerAnalytics(tenantUuid: string, days: number = 30) {
         const since = dayjs().subtract(days, "day").toDate();
-        const cacheKey = `analytics:customers:${tenantUuid}:${days}d`;
+        const cacheKey = `tenant:${tenantUuid}:analytics:customers:${days}d`;
 
         return withCache(cacheKey, 600, async () => {
             const [totalCustomers, topCustomers] = await Promise.all([

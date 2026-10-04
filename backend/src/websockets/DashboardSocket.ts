@@ -2,6 +2,9 @@ import { Server as SocketIOServer } from "socket.io";
 import { Server } from "http";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { EventBus } from "../events/eventBus.ts";
+import prisma from "../config/prisma.ts";
+import { verifyAccessToken } from "../utils/jwt.ts";
+import type { AccessTokenPayload } from "../types/auth.types.ts";
 
 export class DashboardSocket {
   private io: SocketIOServer;
@@ -29,9 +32,19 @@ export class DashboardSocket {
           return next(new Error("Authentication required"));
         }
 
-        const decoded = verifyToken(token);
-        (socket as any).user = decoded;
+        const payload = verifyAccessToken(token);
 
+        // Same revocation checks as the HTTP `authenticate` middleware
+        const user = await prisma.user.findUnique({
+          where: { uuid: payload.userUuid },
+          select: { tokenVersion: true, isBanned: true },
+        });
+
+        if (!user || user.isBanned || payload.tokenVersion !== user.tokenVersion) {
+          return next(new Error("Invalid token"));
+        }
+
+        socket.data.user = payload;
         next();
       } catch (error) {
         next(new Error("Invalid token"));
@@ -41,7 +54,7 @@ export class DashboardSocket {
 
   private setupConnectionHandlers() {
     this.io.on("connection", (socket) => {
-      const user = (socket as any).user;
+      const user = socket.data.user as AccessTokenPayload;
 
       logWithContext("info", "[DashboardSocket] Client connected", {
         socketId: socket.id,
@@ -62,12 +75,29 @@ export class DashboardSocket {
       }
 
       // Handle room subscriptions
-      socket.on("subscribe", (room: string) => {
-        socket.join(room);
-        logWithContext("info", "[DashboardSocket] Subscribed to room", {
-          socketId: socket.id,
-          room,
-        });
+      socket.on("subscribe", async (room: string) => {
+        try {
+          if (!(await this.canJoinRoom(user, room))) {
+            logWithContext("warn", "[DashboardSocket] Room subscription denied", {
+              socketId: socket.id,
+              userUuid: user.userUuid,
+              room,
+            });
+            socket.emit("subscribe:denied", { room });
+            return;
+          }
+
+          socket.join(room);
+          logWithContext("info", "[DashboardSocket] Subscribed to room", {
+            socketId: socket.id,
+            room,
+          });
+        } catch (error: any) {
+          logWithContext("error", "[DashboardSocket] Subscribe failed", {
+            socketId: socket.id,
+            error: error.message,
+          });
+        }
       });
 
       socket.on("unsubscribe", (room: string) => {
@@ -80,6 +110,39 @@ export class DashboardSocket {
         });
       });
     });
+  }
+
+  // Rooms are tenant/store scoped; a client may only join rooms it has an
+  // active membership for.
+  private async canJoinRoom(user: AccessTokenPayload, room: string): Promise<boolean> {
+    if (typeof room !== "string") return false;
+
+    if (room === "superadmin") {
+      return user.role === "SUPER_ADMIN";
+    }
+
+    const [scope, uuid, ...rest] = room.split(":");
+    if (!uuid || rest.length > 0) return false;
+
+    if (scope === "tenant") {
+      if (user.role === "SUPER_ADMIN") return true;
+      const membership = await prisma.tenantUser.findFirst({
+        where: { userUuid: user.userUuid, tenantUuid: uuid, isActive: true },
+        select: { uuid: true },
+      });
+      return !!membership;
+    }
+
+    if (scope === "store") {
+      if (user.role === "SUPER_ADMIN") return true;
+      const membership = await prisma.userStore.findFirst({
+        where: { userUuid: user.userUuid, storeUuid: uuid, isActive: true },
+        select: { uuid: true },
+      });
+      return !!membership;
+    }
+
+    return false;
   }
 
   private setupEventListeners() {

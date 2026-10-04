@@ -10,18 +10,32 @@ export class OrderCacheService{
         STORE_STATS: 1800, // 30 minutes
         RECENT_ORDERS: 180, // 3 minutes
     };
+
+    // Every key is tenant-scoped so a cache hit can never return another
+    // tenant's data, even if an entity uuid is known.
+    private static activeOrdersKey(tenantUuid: string, storeUuid: string) {
+        return `tenant:${tenantUuid}:active-orders:${storeUuid}`;
+    }
+
+    private static orderDetailsKey(tenantUuid: string, orderUuid: string) {
+        return `tenant:${tenantUuid}:order:${orderUuid}`;
+    }
+
+    private static storeStatsKey(tenantUuid: string, storeUuid: string) {
+        return `tenant:${tenantUuid}:store-stats:${storeUuid}`;
+    }
     
     //Cache active orders for kitchen display
     static async getActiveOrders(input: {
         tenantUuid: string;
         storeUuid: string;
     }) {
-        const cacheKey = `active-orders:${input.storeUuid}`;
+        const cacheKey = this.activeOrdersKey(input.tenantUuid, input.storeUuid);
 
         try {
-            const cached = await redis.get(cacheKey);
+            const cached = await redis.get<any>(cacheKey);
 
-            if (cached) {
+            if (cached !== null) {
                 logWithContext("info", "[OrderCache] Active orders cache hit", {
                     storeUuid: input.storeUuid,
                 });
@@ -30,7 +44,7 @@ export class OrderCacheService{
                     type: "active_orders",
                 });
 
-                return JSON.parse(cached);
+                return cached;
             };
 
             // Cache miss - fetch from DB
@@ -87,16 +101,16 @@ export class OrderCacheService{
         tenantUuid: string;
         orderUuid: string;
     }){
-        const cacheKey = `order:${input.orderUuid}`;
+        const cacheKey = this.orderDetailsKey(input.tenantUuid, input.orderUuid);
 
         try {
-            const cached = await redis.get(cacheKey);
+            const cached = await redis.get<any>(cacheKey);
 
-            if (cached) {
+            if (cached !== null) {
                 MetricsService.increment("order.cache.hit", 1, {
                     type: "order_details",
                 });
-                return JSON.parse(cached);
+                return cached;
             }
 
             MetricsService.increment("order.cache.miss", 1, {
@@ -156,16 +170,16 @@ export class OrderCacheService{
         tenantUuid: string;
         storeUuid: string;
     }) {
-        const cacheKey = `store-stats:${input.storeUuid}`;
+        const cacheKey = this.storeStatsKey(input.tenantUuid, input.storeUuid);
  
         try {
-            const cached = await redis.get(cacheKey);
+            const cached = await redis.get<any>(cacheKey);
         
-            if (cached) {
+            if (cached !== null) {
                 MetricsService.increment("order.cache.hit", 1, {
                 type: "store_stats",
                 });
-                return JSON.parse(cached);
+                return cached;
             }
         
             MetricsService.increment("order.cache.miss", 1, {
@@ -224,8 +238,8 @@ export class OrderCacheService{
     }
  
     //Invalidate active orders cache
-    static async invalidateActiveOrders(storeUuid: string) {
-        const cacheKey = `active-orders:${storeUuid}`;
+    static async invalidateActiveOrders(tenantUuid: string, storeUuid: string) {
+        const cacheKey = this.activeOrdersKey(tenantUuid, storeUuid);
     
         try {
             await redis.del(cacheKey);
@@ -241,8 +255,8 @@ export class OrderCacheService{
     }
  
     //Invalidate order details cache
-    static async invalidateOrderDetails(orderUuid: string) {
-        const cacheKey = `order:${orderUuid}`;
+    static async invalidateOrderDetails(tenantUuid: string, orderUuid: string) {
+        const cacheKey = this.orderDetailsKey(tenantUuid, orderUuid);
     
         try {
             await redis.del(cacheKey);
@@ -254,8 +268,8 @@ export class OrderCacheService{
     }
  
     //Invalidate store stats cache
-    static async invalidateStoreStats(storeUuid: string) {
-        const cacheKey = `store-stats:${storeUuid}`;
+    static async invalidateStoreStats(tenantUuid: string, storeUuid: string) {
+        const cacheKey = this.storeStatsKey(tenantUuid, storeUuid);
     
         try {
             await redis.del(cacheKey);
@@ -267,10 +281,10 @@ export class OrderCacheService{
     }
  
     //Invalidate all order-related caches for a store
-    static async invalidateStoreCache(storeUuid: string) {
+    static async invalidateStoreCache(tenantUuid: string, storeUuid: string) {
         await Promise.all([
-            this.invalidateActiveOrders(storeUuid),
-            this.invalidateStoreStats(storeUuid),
+            this.invalidateActiveOrders(tenantUuid, storeUuid),
+            this.invalidateStoreStats(tenantUuid, storeUuid),
         ]);
     }
 }

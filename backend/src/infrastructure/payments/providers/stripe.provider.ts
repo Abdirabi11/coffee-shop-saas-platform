@@ -4,7 +4,9 @@ import type  { PaymentProvider } from "./paymentProvider.interface.ts";
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2023-10-16",
+  // Pinned to the version the integration was built against; the SDK types
+  // only accept its own latest. Upgrade deliberately, not via this cast.
+  apiVersion: "2023-10-16" as Stripe.LatestApiVersion,
 });
  
 // FIX #1: Single class replacing both StripeAdapter and StripeProvider
@@ -13,14 +15,20 @@ export class StripeProvider implements PaymentProvider {
         amount: number;
         currency: string;
         metadata: Record<string, any>;
+        idempotencyKey: string;
     }) {
         try {
-            const paymentIntent = await stripe.paymentIntents.create({
-                amount: input.amount,
-                currency: input.currency.toLowerCase(),
-                metadata: input.metadata,
-                automatic_payment_methods: { enabled: true },
-            });
+            const paymentIntent = await stripe.paymentIntents.create(
+                {
+                    amount: input.amount,
+                    currency: input.currency.toLowerCase(),
+                    metadata: input.metadata,
+                    automatic_payment_methods: { enabled: true },
+                },
+                // A retried request returns the original intent instead of
+                // creating a second one
+                { idempotencyKey: input.idempotencyKey }
+            );
         
             logWithContext("info", "[Stripe] Payment intent created", {
                 intentId: paymentIntent.id,
@@ -50,6 +58,8 @@ export class StripeProvider implements PaymentProvider {
                 : intent.status === "canceled" ? ("FAILED" as const)
                 : ("PENDING" as const),
                 providerRef: intent.id,
+                amountReceived: intent.amount_received,
+                currency: intent.currency,
                 snapshot: intent,
             };
         } catch (error: any) {

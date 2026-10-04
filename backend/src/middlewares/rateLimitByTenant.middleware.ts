@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
-import { redis } from "../lib/redis.ts";
+import { hitRateLimitWindow } from "../lib/rateLimitWindow.ts";
 
 export const rateLimitByTenant = ({
     points,
@@ -22,22 +22,16 @@ export const rateLimitByTenant = ({
             const identifier = tenantUuid || userUuid || ip;
 
             if (!identifier) {
-                logWithContext("warn", "[RateLimit] No identifier found, allowing request");
+                logWithContext("warn", "[RateLimit] No identifier found, allowing request", {});
                 return next();
             };
 
             const key = `ratelimit:${keyPrefix}:${identifier}`;
 
-            // Increment counter
-            const current = await redis.incr(key);
-
-            // Set expiry on first request
-            if (current === 1) {
-                await redis.expire(key, duration);
-            };
-
-            // Get TTL for response headers
-            const ttl = await redis.ttl(key);
+            // Increment counter and guarantee a TTL in one round-trip
+            const window = await hitRateLimitWindow(key, duration * 1000);
+            const current = window.count;
+            const ttl = Math.ceil(window.ttlMs / 1000);
 
             // Set rate limit headers
             res.set({
@@ -92,13 +86,9 @@ export const rateLimitByUser = ({
             const identifier = userUuid || ip;
             const key = `ratelimit:${keyPrefix}:${identifier}`;
 
-            const current = await redis.incr(key);
-
-            if (current === 1) {
-                await redis.expire(key, duration);
-            }
-
-            const ttl = await redis.ttl(key);
+            const window = await hitRateLimitWindow(key, duration * 1000);
+            const current = window.count;
+            const ttl = Math.ceil(window.ttlMs / 1000);
 
             res.set({
                 "X-RateLimit-Limit": String(points),

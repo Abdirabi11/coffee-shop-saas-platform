@@ -3,6 +3,8 @@ import crypto from "crypto";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import prisma from "../config/prisma.ts"
 
+const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
+
 export const deviceFingerprintMiddleware = async (
     req: Request,
     res: Response,
@@ -24,12 +26,15 @@ export const deviceFingerprintMiddleware = async (
             return next();
         }
   
-        // Verify device exists and is trusted
-        const device = await prisma.userDevice.findFirst({
+        // Verify device exists and is trusted. UserDevice only stores push
+        // registrations; the client-supplied device id lives on TrustedDevice.
+        const device = await prisma.trustedDevice.findFirst({
             where: {
                 deviceId,
-                isActive: true,
+                trusted: true,
+                trustRevokedAt: null,
             },
+            select: { uuid: true, lastSeenAt: true },
         });
   
         if (!device) {
@@ -44,11 +49,13 @@ export const deviceFingerprintMiddleware = async (
         } else {
             req.deviceTrusted = true;
     
-            // Update last seen
-            await prisma.userDevice.update({
-                where: { uuid: device.uuid },
-                data: { lastSeenAt: new Date() },
-            });
+            // Update last seen, throttled so every request isn't a DB write
+            if (Date.now() - device.lastSeenAt.getTime() > LAST_SEEN_THROTTLE_MS) {
+                await prisma.trustedDevice.update({
+                    where: { uuid: device.uuid },
+                    data: { lastSeenAt: new Date() },
+                });
+            }
         }
     
         req.deviceId = deviceId;

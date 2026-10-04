@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
+import { PaymentStateMachine } from "../../domain/payment/PaymentStateMachine.ts";
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 

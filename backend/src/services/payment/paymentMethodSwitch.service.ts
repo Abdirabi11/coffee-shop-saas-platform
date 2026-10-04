@@ -36,8 +36,12 @@ export class PaymentMethodSwitchService {
             amount: payment.amount,
             currency: payment.currency,
             metadata: {
+                paymentUuid: payment.uuid,
                 orderUuid: payment.orderUuid,
             },
+            // Stable for retries of this switch; changes once the switch is
+            // saved (updatedAt moves), so a later switch gets a new intent
+            idempotencyKey: `payment-intent-${payment.uuid}-switch-${payment.updatedAt.getTime()}`,
         });
     
         const previousProvider = payment.provider;

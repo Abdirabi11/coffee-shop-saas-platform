@@ -1,12 +1,14 @@
 import type { Request, Response } from "express";
+import type { WebhookProvider } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { WebhookVerifier } from "../../infrastructure/webhooks/webhookVerifier.ts";
+import { WebhookEventLedger } from "../../infrastructure/webhooks/webhookEventLedger.ts";
 import { PaymentService } from "../../services/payment/payment.service.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { RefundService } from "../../services/payment/Refund.service.ts";
 import { PaymentDisputeService } from "../../services/payment/paymentDispute.service.ts";
- 
+
 
 const ALLOWED_EVENTS = [
     "payment_intent.succeeded",
@@ -14,70 +16,58 @@ const ALLOWED_EVENTS = [
     "payment_intent.canceled",
     "charge.refunded",
     "charge.dispute.created",
-    "charge.dispute.updated",  
-    "charge.dispute.closed",  
+    "charge.dispute.updated",
+    "charge.dispute.closed",
 ];
- 
-// Idempotency service (inline — extract to separate file if it grows)
-class WebhookIdempotencyService {
-    static async isProcessed(provider: string, eventId: string): Promise<boolean> {
-        const existing = await prisma.webhookEvent.findFirst({
-            where: {
-                provider: provider.toUpperCase() as any,
-                providerEventUuid: eventId,
-                status: { in: ["PROCESSED", "IGNORED"] },
-            },
-        });
-        return !!existing;
-    }
-    
-    static async markProcessed(provider: string, eventId: string) {
-        await prisma.webhookEvent.updateMany({
-            where: {
-                provider: provider.toUpperCase() as any,
-                providerEventUuid: eventId,
-            },
-            data: { status: "PROCESSED", processedAt: new Date() },
-        });
-    }
-}
- 
+
+// Webhook processing order for every provider:
+//   1. verify the signature over the raw request bytes
+//   2. claim the VERIFIED event id in the WebhookEvent ledger (unique insert)
+//   3. process
+//   4. mark PROCESSED / IGNORED, or FAILED + non-2xx so the provider retries
+// A duplicate delivery stops at step 2 with a 200; a concurrent one gets a
+// 409 and is retried by the provider after the first finishes.
 export class PaymentWebhookController {
     static async handleStripe(req: Request, res: Response) {
         const traceId = (req.headers["x-trace-id"] as string) || `wh_${Date.now()}`;
-    
+        const provider: WebhookProvider = "STRIPE";
+
+        const signature = req.headers["stripe-signature"] as string;
+        const rawBody = req.rawBody;
+
+        if (!signature || !rawBody) {
+            logWithContext("warn", "[Webhook] Rejected — missing signature or body", { traceId });
+            return res.status(400).json({ error: "Missing signature" });
+        };
+
+        // Verify webhook signature
+        let event: any;
         try {
-            const signature = req.headers["stripe-signature"] as string;
-            const rawBody = (req as any).rawBody;
-        
-            if (!signature) {
-                logWithContext("warn", "[Webhook] Rejected — missing signature", { traceId });
-                return res.status(400).json({ error: "Missing signature" });
-            };
-    
-            // Verify webhook signature
-            let event: any;
-            try {
-                event = await WebhookVerifier.verify({
-                    provider: "stripe",
-                    signature,
-                    rawBody,
-                });
-            } catch (err: any) {
-                logWithContext("error", "[Webhook] Signature verification failed", {
-                    traceId,
-                    error: err.message,
-                });
-                return res.status(401).json({ error: "Invalid signature" });
-            }
-    
-            // Idempotency check
-            const isProcessed = await WebhookIdempotencyService.isProcessed(
-                "stripe",
-                event.id
-            );
-        
-            if (isProcessed) {
+            event = await WebhookVerifier.verify({
+                provider: "stripe",
+                signature,
+                rawBody,
+            });
+        } catch (err: any) {
+            logWithContext("error", "[Webhook] Signature verification failed", {
+                traceId,
+                error: err.message,
+            });
+            return res.status(401).json({ error: "Invalid signature" });
+        }
+
+        try {
+            const claim = await WebhookEventLedger.claim({
+                provider,
+                eventId: event.id,
+                eventType: event.type,
+                payload: event,
+                sourceIp: req.ip || "unknown",
+                userAgent: req.headers["user-agent"],
+                signatureHeader: signature,
+            });
+
+            if (claim.outcome === "DUPLICATE") {
                 logWithContext("info", "[Webhook] Duplicate ignored", {
                     traceId,
                     eventId: event.id,
@@ -85,306 +75,338 @@ export class PaymentWebhookController {
                 });
                 return res.status(200).json({ received: true, duplicate: true });
             }
-    
-            logWithContext("info", "[Webhook] Received", {
-                traceId,
-                eventId: event.id,
-                eventType: event.type,
-            });
-        
-            // Validate event type
-            if (!ALLOWED_EVENTS.includes(event.type)) {
-                logWithContext("info", "[Webhook] Event type not handled", {
-                    traceId,
-                    eventType: event.type,
-                });
-                await WebhookIdempotencyService.markProcessed("stripe", event.id);
-                return res.status(200).json({ received: true, ignored: true });
-            };
-    
-            // Extract payment data
-            const data = event.data.object;
-            const orderUuid = data.metadata?.orderUuid;
-        
-            // For dispute events, orderUuid might not be in metadata
-            const isDisputeEvent = event.type.startsWith("charge.dispute");
-    
-            if (!orderUuid && !isDisputeEvent) {
-                logWithContext("warn", "[Webhook] Missing orderUuid in metadata", {
-                    traceId,
-                    eventId: event.id,
-                    eventType: event.type,
-                });
-                await WebhookIdempotencyService.markProcessed("stripe", event.id);
-                return res.status(200).json({ received: true, error: "Missing orderUuid" });
+            if (claim.outcome === "IN_PROGRESS") {
+                return res.status(409).json({ error: "Event is being processed" });
             }
-    
-            // Find payment in our system (skip for dispute events that use providerDisputeId)
-            let payment: any = null;
-    
-            if (!isDisputeEvent) {
-                payment = await prisma.payment.findFirst({
-                    where: {
-                        orderUuid,
-                        provider: "STRIPE",
-                        // FIX #2: Was `data.od` — typo, should be `data.id`
-                        providerRef: data.id,
-                    },
-                });
-        
-                if (!payment) {
-                    logWithContext("warn", "[Webhook] Payment not found", {
-                        traceId,
-                        eventId: event.id,
-                        orderUuid,
-                        providerRef: data.id, // FIX #2: Was `data.od`
-                    });
-                    await WebhookIdempotencyService.markProcessed("stripe", event.id);
-                    return res.status(200).json({ received: true, error: "Payment not found" });
-                }
-            }
-    
-            // Amount validation for payment success
-            if (event.type === "payment_intent.succeeded" && payment) {
-                if (data.amount !== payment.amount) {
-                    logWithContext("error", "[Webhook] Amount mismatch — possible fraud", {
-                        traceId,
-                        eventId: event.id,
-                        expectedAmount: payment.amount,
-                        receivedAmount: data.amount,
-                    });
-                    return res.status(400).json({ error: "Amount mismatch" });
-                }
-            }
-    
-            // Process event
-            try {
-                switch (event.type) {
-                case "payment_intent.succeeded": {
-                    await PaymentService.confirmFromProviderEvent({
-                        paymentUuid: payment.uuid,
-                        providerRef: data.id,
-                        snapshot: data,
-                    });
-                    MetricsService.increment("payment.webhook.success", 1, {
-                        provider: "stripe",
-                    });
-                    break;
-                }
-        
-                case "payment_intent.payment_failed": {
-                    await PaymentService.markFailedFromProvider({
-                        paymentUuid: payment.uuid,
-                        failureCode: this.normalizeStripeError(data.last_payment_error),
-                        failureReason: data.last_payment_error?.message,
-                        snapshot: data,
-                    });
-                    MetricsService.increment("payment.webhook.failed", 1, {
-                        provider: "stripe",
-                    });
-                    break;
-                }
-        
-                case "payment_intent.canceled": {
-                    await PaymentService.cancelFromProvider({
-                        paymentUuid: payment.uuid,
-                        snapshot: data,
-                    });
-                    break;
-                }
-        
-                case "charge.refunded": {
-                    await RefundService.processProviderRefund({
-                        provider: "stripe",
-                        providerRef: data.payment_intent,
-                        amount: data.amount_refunded,
-                        snapshot: data,
-                    });
-                    MetricsService.increment("refund.webhook.processed", 1, {
-                        provider: "stripe",
-                    });
-                    break;
-                }
-        
-                case "charge.dispute.created": {
-                    // For disputes, find payment via the charge's payment_intent
-                    const disputePayment = await prisma.payment.findFirst({
-                        where: { provider: "STRIPE", providerRef: data.payment_intent },
-                    });
-        
-                    if (disputePayment) {
-                        await PaymentDisputeService.createFromWebhook({
-                            provider: "stripe",
-                            providerDisputeId: data.id,
-                            paymentUuid: disputePayment.uuid,
-                            amount: data.amount,
-                            reason: data.reason,
-                            reasonCode: data.reason,
-                            evidenceDueBy: data.evidence_details?.due_by
-                                ? new Date(data.evidence_details.due_by * 1000)
-                                : undefined,
-                            snapshot: data,
-                        });
-                    }
-                    break;
-                }
-        
-                case "charge.dispute.updated": {
-                    await PaymentDisputeService.updateFromWebhook({
-                        providerDisputeId: data.id,
-                        status: data.status,
-                        snapshot: data,
-                    });
-                    break;
-                }
-        
-                case "charge.dispute.closed": {
-                    await PaymentDisputeService.updateFromWebhook({
-                        providerDisputeId: data.id,
-                        status: data.status,
-                        resolution: data.status,
-                        snapshot: data,
-                    });
-                    break;
-                }
-        
-                default:
-                    logWithContext("warn", "[Webhook] Unhandled event in switch", {
-                        traceId,
-                        eventType: event.type,
-                    });
-                }
-            } catch (processingError: any) {
-                logWithContext("error", "[Webhook] Processing failed", {
-                    traceId,
-                    eventId: event.id,
-                    eventType: event.type,
-                    error: processingError.message,
-                });
-        
-                // Dead letter queue for retry
-                await prisma.webhookDeadLetter.create({
-                    data: {
-                        provider: "STRIPE",
-                        eventUuid: event.id,
-                        eventType: event.type,
-                        payload: event,
-                        errorMessage: processingError.message,
-                        status: "FAILED",
-                    },
-                });
-        
-                return res.status(500).json({ error: "Processing failed" });
-            }
-        
-            // Mark as processed
-            await WebhookIdempotencyService.markProcessed("stripe", event.id);
-        
-            logWithContext("info", "[Webhook] Processed successfully", {
-                traceId,
-                eventId: event.id,
-                eventType: event.type,
-            });
-        
-            return res.status(200).json({ received: true });
         } catch (err: any) {
-            logWithContext("error", "[Webhook] Handler error", {
-                traceId,
-                error: err.message,
-            });
+            logWithContext("error", "[Webhook] Ledger claim failed", { traceId, error: err.message });
             return res.status(500).json({ error: "Internal server error" });
         }
+
+        logWithContext("info", "[Webhook] Received", {
+            traceId,
+            eventId: event.id,
+            eventType: event.type,
+        });
+
+        try {
+            const result = await PaymentWebhookController.processStripeEvent(event, traceId);
+            await WebhookEventLedger.complete(provider, event.id, result.status, result.detail);
+
+            logWithContext("info", "[Webhook] Processed", {
+                traceId,
+                eventId: event.id,
+                eventType: event.type,
+                status: result.status,
+            });
+
+            return res.status(200).json({ received: true, ...(result.status === "IGNORED" && { ignored: true }) });
+        } catch (processingError: any) {
+            logWithContext("error", "[Webhook] Processing failed", {
+                traceId,
+                eventId: event.id,
+                eventType: event.type,
+                error: processingError.message,
+            });
+
+            await WebhookEventLedger.fail(provider, event.id, processingError.message).catch(() => {});
+
+            // Dead letter queue for retry
+            await prisma.webhookDeadLetter.create({
+                data: {
+                    provider: "STRIPE",
+                    eventUuid: event.id,
+                    eventType: event.type,
+                    payload: event,
+                    errorMessage: processingError.message,
+                    status: "FAILED",
+                },
+            }).catch(() => {});
+
+            return res.status(500).json({ error: "Processing failed" });
+        }
     }
-    
+
+    private static async processStripeEvent(
+        event: any,
+        traceId: string
+    ): Promise<{ status: "PROCESSED" | "IGNORED"; detail?: Record<string, unknown> }> {
+        if (!ALLOWED_EVENTS.includes(event.type)) {
+            return { status: "IGNORED", detail: { reason: "UNHANDLED_EVENT_TYPE" } };
+        }
+
+        const data = event.data.object;
+        const isDisputeEvent = event.type.startsWith("charge.dispute");
+
+        if (event.type === "charge.refunded") {
+            await RefundService.processProviderRefund({
+                provider: "stripe",
+                providerRef: data.payment_intent,
+                amount: data.amount_refunded,
+                snapshot: data,
+            });
+            MetricsService.increment("refund.webhook.processed", 1, { provider: "stripe" });
+            return { status: "PROCESSED" };
+        }
+
+        if (isDisputeEvent) {
+            return this.processStripeDispute(event.type, data);
+        }
+
+        // payment_intent.* events
+        const orderUuid = data.metadata?.orderUuid;
+        if (!orderUuid) {
+            logWithContext("warn", "[Webhook] Missing orderUuid in metadata", {
+                traceId,
+                eventId: event.id,
+            });
+            return { status: "IGNORED", detail: { reason: "MISSING_ORDER_UUID" } };
+        }
+
+        // The webhook can beat the providerRef write in attachProviderIntent
+        // (or that write can fail after Stripe created the intent), so also
+        // match the placeholder by the paymentUuid we put in the intent's
+        // metadata. Ignoring the event here would lose a real capture: the
+        // ledger would mark it IGNORED and Stripe's retries become duplicates.
+        const metadataPaymentUuid: unknown = data.metadata?.paymentUuid;
+        const payment = await prisma.payment.findFirst({
+            where: {
+                orderUuid,
+                provider: "STRIPE",
+                OR: [
+                    { providerRef: data.id },
+                    ...(typeof metadataPaymentUuid === "string"
+                        ? [{ uuid: metadataPaymentUuid, providerRef: null }]
+                        : []),
+                ],
+            },
+            select: { uuid: true, providerRef: true },
+        });
+
+        if (payment && !payment.providerRef) {
+            await prisma.payment.updateMany({
+                where: { uuid: payment.uuid, providerRef: null },
+                data: { providerRef: data.id },
+            });
+        }
+
+        if (!payment) {
+            logWithContext("warn", "[Webhook] Payment not found", {
+                traceId,
+                eventId: event.id,
+                orderUuid,
+                providerRef: data.id,
+            });
+            return { status: "IGNORED", detail: { reason: "PAYMENT_NOT_FOUND" } };
+        }
+
+        switch (event.type) {
+            case "payment_intent.succeeded": {
+                // amount_received (not amount) is what was actually collected
+                const { outcome } = await PaymentService.confirmFromProviderEvent({
+                    paymentUuid: payment.uuid,
+                    providerRef: data.id,
+                    amountReceived: typeof data.amount_received === "number" ? data.amount_received : null,
+                    currency: typeof data.currency === "string" ? data.currency : null,
+                    snapshot: data,
+                    source: "WEBHOOK",
+                });
+                MetricsService.increment("payment.webhook.success", 1, { provider: "stripe" });
+                return { status: "PROCESSED", detail: { outcome } };
+            }
+
+            case "payment_intent.payment_failed": {
+                await PaymentService.markFailedFromProvider({
+                    paymentUuid: payment.uuid,
+                    failureCode: this.normalizeStripeError(data.last_payment_error),
+                    failureReason: data.last_payment_error?.message,
+                    snapshot: data,
+                });
+                MetricsService.increment("payment.webhook.failed", 1, { provider: "stripe" });
+                return { status: "PROCESSED" };
+            }
+
+            case "payment_intent.canceled": {
+                await PaymentService.cancelFromProvider({
+                    paymentUuid: payment.uuid,
+                    snapshot: data,
+                });
+                return { status: "PROCESSED" };
+            }
+        }
+
+        return { status: "IGNORED", detail: { reason: "UNHANDLED_EVENT_TYPE" } };
+    }
+
+    private static async processStripeDispute(
+        type: string,
+        data: any
+    ): Promise<{ status: "PROCESSED" | "IGNORED"; detail?: Record<string, unknown> }> {
+        switch (type) {
+            case "charge.dispute.created": {
+                // For disputes, find payment via the charge's payment_intent
+                const disputePayment = await prisma.payment.findFirst({
+                    where: { provider: "STRIPE", providerRef: data.payment_intent },
+                });
+
+                if (!disputePayment) {
+                    return { status: "IGNORED", detail: { reason: "PAYMENT_NOT_FOUND" } };
+                }
+
+                await PaymentDisputeService.createFromWebhook({
+                    provider: "stripe",
+                    providerDisputeId: data.id,
+                    paymentUuid: disputePayment.uuid,
+                    amount: data.amount,
+                    reason: data.reason,
+                    reasonCode: data.reason,
+                    evidenceDueBy: data.evidence_details?.due_by
+                        ? new Date(data.evidence_details.due_by * 1000)
+                        : undefined,
+                    snapshot: data,
+                });
+                return { status: "PROCESSED" };
+            }
+
+            case "charge.dispute.updated":
+                await PaymentDisputeService.updateFromWebhook({
+                    providerDisputeId: data.id,
+                    status: data.status,
+                    snapshot: data,
+                });
+                return { status: "PROCESSED" };
+
+            case "charge.dispute.closed":
+                await PaymentDisputeService.updateFromWebhook({
+                    providerDisputeId: data.id,
+                    status: data.status,
+                    resolution: data.status,
+                    snapshot: data,
+                });
+                return { status: "PROCESSED" };
+        }
+
+        return { status: "IGNORED", detail: { reason: "UNHANDLED_EVENT_TYPE" } };
+    }
+
     // EVC Plus webhook handler
+    // Body arrives raw (see server.ts) so the HMAC is checked over the exact
+    // bytes EVC signed, not a re-serialization of parsed JSON.
     static async handleEVC(req: Request, res: Response) {
         const traceId = (req.headers["x-trace-id"] as string) || `wh_evc_${Date.now()}`;
-    
+        const provider: WebhookProvider = "EVC_PLUS";
+
+        const signature = req.headers["x-evc-signature"] as string;
+        const rawBody = req.rawBody;
+
+        if (!signature || !rawBody) {
+            return res.status(400).json({ error: "Missing signature" });
+        }
+
+        let body: any;
         try {
-            const signature = req.headers["x-evc-signature"] as string;
-        
-            if (!signature) {
-                return res.status(400).json({ error: "Missing signature" });
-            }
-        
-            // Verify HMAC signature
-            let verified: boolean;
-            try {
-                verified = await WebhookVerifier.verify({
-                    provider: "evc_plus",
-                    signature,
-                    rawBody: JSON.stringify(req.body),
-                });
-            } catch {
-                return res.status(401).json({ error: "Invalid signature" });
-            }
-        
-            const { transaction_id, status, metadata } = req.body;
-            const orderUuid = metadata?.orderUuid;
-        
-            if (!orderUuid || !transaction_id) {
-                return res.status(200).json({ received: true, error: "Missing data" });
-            }
-        
-            // Idempotency
-            const isProcessed = await WebhookIdempotencyService.isProcessed(
-                "evc_plus",
-                transaction_id
-            );
-            if (isProcessed) {
+            body = await WebhookVerifier.verify({
+                provider: "evc_plus",
+                signature,
+                rawBody,
+            });
+        } catch {
+            return res.status(401).json({ error: "Invalid signature" });
+        }
+
+        const { transaction_id, status, metadata } = body ?? {};
+        const orderUuid = metadata?.orderUuid;
+        const normalizedStatus = typeof status === "string" ? status.toLowerCase() : "unknown";
+
+        if (!orderUuid || !transaction_id) {
+            return res.status(200).json({ received: true, error: "Missing data" });
+        }
+
+        // One transaction sends several callbacks (pending → completed), so
+        // the event id is transaction + status, not the transaction alone.
+        // TODO: switch to EVC's own event/notification id if the API has one.
+        const eventId = `${transaction_id}:${normalizedStatus}`;
+
+        try {
+            const claim = await WebhookEventLedger.claim({
+                provider,
+                eventId,
+                eventType: `payment.${normalizedStatus}`,
+                payload: body,
+                sourceIp: req.ip || "unknown",
+                userAgent: req.headers["user-agent"],
+                signatureHeader: signature,
+            });
+
+            if (claim.outcome === "DUPLICATE") {
                 return res.status(200).json({ received: true, duplicate: true });
             }
-        
+            if (claim.outcome === "IN_PROGRESS") {
+                return res.status(409).json({ error: "Event is being processed" });
+            }
+        } catch (err: any) {
+            logWithContext("error", "[Webhook] EVC ledger claim failed", { traceId, error: err.message });
+            return res.status(500).json({ error: "Internal server error" });
+        }
+
+        try {
             const payment = await prisma.payment.findFirst({
                 where: { orderUuid, provider: "EVC_PLUS", providerRef: transaction_id },
+                select: { uuid: true },
             });
-        
+
             if (!payment) {
-                await WebhookIdempotencyService.markProcessed("evc_plus", transaction_id);
+                await WebhookEventLedger.complete(provider, eventId, "IGNORED", { reason: "PAYMENT_NOT_FOUND" });
                 return res.status(200).json({ received: true, error: "Payment not found" });
             }
-    
-            // Process based on status
-            const normalizedStatus = status?.toLowerCase();
-        
+
             if (normalizedStatus === "completed" || normalizedStatus === "success") {
-                await PaymentService.confirmFromProviderEvent({
+                const amount = Number(body.amount);
+                const { outcome } = await PaymentService.confirmFromProviderEvent({
                     paymentUuid: payment.uuid,
                     providerRef: transaction_id,
-                    snapshot: req.body,
+                    // EVC reports major units; payments are stored in cents
+                    // TODO: confirm amount/currency field names against EVC docs
+                    amountReceived: Number.isFinite(amount) ? Math.round(amount * 100) : null,
+                    currency: typeof body.currency === "string" ? body.currency : null,
+                    snapshot: body,
+                    source: "WEBHOOK",
                 });
+                await WebhookEventLedger.complete(provider, eventId, "PROCESSED", { outcome });
             } else if (normalizedStatus === "failed" || normalizedStatus === "rejected") {
                 await PaymentService.markFailedFromProvider({
                     paymentUuid: payment.uuid,
                     failureCode: "PROVIDER_DECLINED",
-                    failureReason: req.body.error_message || "EVC payment failed",
-                    snapshot: req.body,
+                    failureReason: body.error_message || "EVC payment failed",
+                    snapshot: body,
                 });
+                await WebhookEventLedger.complete(provider, eventId, "PROCESSED");
+            } else {
+                await WebhookEventLedger.complete(provider, eventId, "IGNORED", { reason: "NON_FINAL_STATUS" });
             }
-        
-            await WebhookIdempotencyService.markProcessed("evc_plus", transaction_id);
-    
+
             logWithContext("info", "[Webhook] EVC processed", {
                 traceId,
                 transactionId: transaction_id,
                 status: normalizedStatus,
             });
-        
+
             return res.status(200).json({ received: true });
         } catch (err: any) {
             logWithContext("error", "[Webhook] EVC handler error", {
                 traceId,
                 error: err.message,
             });
+            await WebhookEventLedger.fail(provider, eventId, err.message).catch(() => {});
             return res.status(500).json({ error: "Internal server error" });
         }
     }
-    
+
     private static normalizeStripeError(error: any): string {
         if (!error) return "UNKNOWN_ERROR";
-    
+
         const code = error.code || error.decline_code;
-    
+
         switch (code) {
             case "card_declined":
                 return "CARD_DECLINED";

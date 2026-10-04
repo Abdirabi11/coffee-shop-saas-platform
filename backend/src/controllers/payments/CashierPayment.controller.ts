@@ -17,7 +17,8 @@ export class CashierPaymentController {
                 return res.status(403).json({ success: false, error: "FORBIDDEN" });
             };
         
-            const tenantUuid = staff.tenantUuid;
+            // Verified by requireTenantContext (not the raw JWT claim)
+            const tenantUuid = req.tenant?.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
             };
@@ -47,7 +48,7 @@ export class CashierPaymentController {
                 amount: parsed.data.amount ?? 0, // Service validates against order total
                 amountTendered: parsed.data.amountTendered,
                 changeGiven: parsed.data.changeGiven,
-                processedBy: staff.uuid,
+                processedBy: staff.userUuid,
                 deviceId,
                 terminalId,
                 ipAddress,
@@ -74,7 +75,7 @@ export class CashierPaymentController {
             logWithContext("error", "[CashierPaymentController] processPayment failed", {
                 error: error.message,
             });
-            return res.status(this.errorToStatus(error)).json({
+            return res.status(CashierPaymentController.errorToStatus(error)).json({
                 success: false,
                 error: error.message,
             });
@@ -104,11 +105,19 @@ export class CashierPaymentController {
                 });
             }
         
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+            }
+
+            // The authenticated manager authorizes the void with their own PIN
             const payment = await CashierPaymentService.voidPayment({
+                tenantUuid,
                 paymentUuid,
-                voidedBy: staff.uuid,
+                voidedBy: staff.userUuid,
                 voidReason: parsed.data.voidReason,
                 managerPin: parsed.data.managerPin,
+                managerUuid: staff.userUuid,
             });
         
             return res.status(200).json({
@@ -124,7 +133,7 @@ export class CashierPaymentController {
             logWithContext("error", "[CashierPaymentController] voidPayment failed", {
                 error: error.message,
             });
-            return res.status(this.errorToStatus(error)).json({
+            return res.status(CashierPaymentController.errorToStatus(error)).json({
                 success: false,
                 error: error.message,
             });
@@ -154,10 +163,16 @@ export class CashierPaymentController {
                 });
             }
         
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+            }
+
             const payment = await CashierPaymentService.correctPayment({
+                tenantUuid,
                 paymentUuid,
                 correctAmount: parsed.data.correctAmount,
-                correctedBy: staff.uuid,
+                correctedBy: staff.userUuid,
                 correctionReason: parsed.data.correctionReason,
             });
     
@@ -174,7 +189,7 @@ export class CashierPaymentController {
             logWithContext("error", "[CashierPaymentController] correctPayment failed", {
                 error: error.message,
             });
-            return res.status(this.errorToStatus(error)).json({
+            return res.status(CashierPaymentController.errorToStatus(error)).json({
                 success: false,
                 error: error.message,
             });
@@ -184,7 +199,7 @@ export class CashierPaymentController {
     private static errorToStatus(error: any): number {
         const msg = error.message || "";
         if (msg.includes("NOT_FOUND")) return 404;
-        if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN")) return 409;
+        if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN") || msg.includes("NOT_PAYABLE")) return 409;
         if (msg.includes("TOO_OLD") || msg.includes("INVALID") || msg.includes("MISMATCH")) return 400;
         if (msg.includes("FORBIDDEN") || msg.includes("LOCKED")) return 403;
         return 500;

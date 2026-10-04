@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { PaymentStateMachine } from "../../domain/payment/paymentStateMachine.ts";
+import { PaymentStateMachine } from "../../domain/payment/PaymentStateMachine.ts";
 import { RefundStateMachine } from "../../domain/payment/RefundStateMachine.ts";
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
@@ -19,21 +19,24 @@ export class RefundService{
         const order = await prisma.order.findUnique({
             where: { uuid: input.orderUuid },
             include: {
-                payment: true,
+                // Order has `payments` (Payment.orderUuid is unique, so at
+                // most one); `payment` isn't a relation and made Prisma throw
+                payments: true,
                 refunds: true,
                 tenantUser: true, // Needed for risk check
             },
         });
  
         if (!order) throw new Error("ORDER_NOT_FOUND");
-        if (!order.payment) throw new Error("NO_PAYMENT_FOUND");
+        const [payment] = order.payments;
+        if (!payment) throw new Error("NO_PAYMENT_FOUND");
     
         //Check both PAID and COMPLETED (cashier flow uses COMPLETED)
-        if (order.payment.status !== "PAID" && order.payment.status !== "COMPLETED") {
+        if (payment.status !== "PAID" && payment.status !== "COMPLETED") {
             throw new Error("PAYMENT_NOT_REFUNDABLE");
         };
     
-        const totalPaid = order.payment.amount;
+        const totalPaid = payment.amount;
         const refundedSoFar = order.refunds
             .filter((r) => r.status === "COMPLETED")
             .reduce((sum, r) => sum + r.amount, 0);
@@ -66,19 +69,19 @@ export class RefundService{
                 const refund = await prisma.refund.create({
                     data: {
                         tenantUuid: order.tenantUuid,
-                        paymentUuid: order.payment.uuid,
+                        paymentUuid: payment.uuid,
                         orderUuid: order.uuid,
                         storeUuid: order.storeUuid,
                         amount: refundAmount,
-                        currency: order.payment.currency,
+                        currency: payment.currency,
                         status: "REQUESTED",
                         reason: input.reason,
                         requestedBy: input.requestedBy,
-                        provider: order.payment.provider,
+                        provider: payment.provider,
                         snapshot: {
                             originalPayment: {
-                                amount: order.payment.amount,
-                                status: order.payment.status,
+                                amount: payment.amount,
+                                status: payment.status,
                             },
                             requestedAmount: refundAmount,
                             refundableAmount,
@@ -122,19 +125,19 @@ export class RefundService{
         const refund = await prisma.refund.create({
             data: {
                 tenantUuid: order.tenantUuid,
-                paymentUuid: order.payment.uuid,
+                paymentUuid: payment.uuid,
                 orderUuid: order.uuid,
                 storeUuid: order.storeUuid,
                 amount: refundAmount,
-                currency: order.payment.currency,
+                currency: payment.currency,
                 status: "REQUESTED",
                 reason: input.reason,
                 requestedBy: input.requestedBy,
-                provider: order.payment.provider,
+                provider: payment.provider,
                 snapshot: {
                     originalPayment: {
-                        amount: order.payment.amount,
-                        status: order.payment.status,
+                        amount: payment.amount,
+                        status: payment.status,
                     },
                     requestedAmount: refundAmount,
                     refundableAmount,
@@ -144,19 +147,19 @@ export class RefundService{
  
         EventBus.emit("REFUND_REQUESTED", {
             refundUuid: refund.uuid,
-            paymentUuid: order.payment.uuid,
+            paymentUuid: payment.uuid,
             orderUuid: order.uuid,
             tenantUuid: order.tenantUuid,
             storeUuid: order.storeUuid,
             amount: refundAmount,
-            currency: order.payment.currency,
+            currency: payment.currency,
             reason: input.reason,
             requestedBy: input.requestedBy,
         });
  
         logWithContext("info", "[Refund] Requested", {
             refundUuid: refund.uuid,
-            paymentUuid: order.payment.uuid,
+            paymentUuid: payment.uuid,
             amount: refundAmount,
             });
     

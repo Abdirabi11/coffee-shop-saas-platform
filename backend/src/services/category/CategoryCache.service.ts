@@ -7,6 +7,10 @@ import { CategoryService } from "../category/category.service.ts";
 export class CategoryCacheService {
     private static readonly TTL = 3600; // 1 hour
     private static readonly PREFIX = "category";
+
+    private static key(tenantUuid: string, storeUuid: string, shape: "tree" | "flat") {
+        return `tenant:${tenantUuid}:${this.PREFIX}:store:${storeUuid}:${shape}`;
+    }
   
     //Get categories for store (with cache)
     static async getCategories(input: {
@@ -14,27 +18,19 @@ export class CategoryCacheService {
         storeUuid: string;
         includeChildren?: boolean;
     }) {
-        const cacheKey = `${this.PREFIX}:store:${input.storeUuid}:${input.includeChildren ? "tree" : "flat"}`;
+        const cacheKey = this.key(input.tenantUuid, input.storeUuid, input.includeChildren ? "tree" : "flat");
   
         try {
             // Try cache first
-            const cached = await redis.get(cacheKey);
+            const cached = await redis.get<any>(cacheKey);
     
-            if (cached) {
-                logWithContext("debug", "[CategoryCache] Cache hit", {
-                    storeUuid: input.storeUuid,
-                });
-        
+            if (cached !== null) {
                 MetricsService.increment("category.cache.hit", 1);
         
-                return JSON.parse(cached);
+                return cached;
             };
   
             // Cache miss - fetch from DB
-            logWithContext("debug", "[CategoryCache] Cache miss", {
-                storeUuid: input.storeUuid,
-            });
-    
             MetricsService.increment("category.cache.miss", 1);
     
             const categories = await CategoryService.list({
@@ -65,11 +61,11 @@ export class CategoryCacheService {
     }
   
     //Invalidate category cache
-    static async invalidate(storeUuid: string) {
+    static async invalidate(tenantUuid: string, storeUuid: string) {
         try {
             const keys = [
-                `${this.PREFIX}:store:${storeUuid}:tree`,
-                `${this.PREFIX}:store:${storeUuid}:flat`,
+                this.key(tenantUuid, storeUuid, "tree"),
+                this.key(tenantUuid, storeUuid, "flat"),
             ];
     
             for (const key of keys) {

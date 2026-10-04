@@ -911,6 +911,7 @@ enum PaymentMethod {
   CARD_TERMINAL
   STRIPE
   WALLET
+  EVC_PLUS
   BANK_TRANSFER
   APPLE_PAY
   GOOGLE_PAY
@@ -1567,6 +1568,7 @@ enum WebhookEventType {
 
 enum WebhookProvider {
   STRIPE
+  EVC_PLUS
   PAYPAL
   SQUARE
   SENDGRID
@@ -3945,7 +3947,15 @@ model Order {
   // Auto-generated back-relations
   paymentDisputes PaymentDispute[]
 
+  // Offline sync
+  clientOrderUuid String? // Id generated on the device; unique per tenant
+  deviceId        String?
+  syncVersion     Int      @default(1)
+  lastSyncedAt    DateTime @default(now())
+  syncSource      String   @default("SERVER") // "SERVER" | "CLIENT"
+
   @@unique([tenantUuid, orderNumber])
+  @@unique([tenantUuid, clientOrderUuid])
   @@index([tenantUuid, storeUuid, status])
   @@index([tenantUuid, tenantUserUuid, createdAt])
   @@index([storeUuid, createdAt])

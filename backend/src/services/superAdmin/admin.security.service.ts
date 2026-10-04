@@ -1,4 +1,4 @@
-import prisma from "../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
 
 
 export const getSecurityOverview= async (storeUuid: string)=>{
@@ -15,12 +15,12 @@ export const getSecurityOverview= async (storeUuid: string)=>{
 
         prisma.user.count({
             where: {
-                banned: true,
+                isBanned: true,
                 userStores: { some: { storeUuid } },
             }
         }),
 
-        prisma.adminAlert.create({
+        prisma.adminAlert.count({
             where: { resolved: false, storeUuid },
         }),
     ]);
@@ -31,17 +31,18 @@ export const getSecurityOverview= async (storeUuid: string)=>{
 export const getHighRiskUsers= async (storeUuid: string)=>{
     return prisma.user.findMany({
         where: {
-            userStore: {some: {storeUuid}},
+            userStores: {some: {storeUuid}},
             fraudEvents: {
                 some: { 
                     severity: "HIGH",
                     storeUuid
                 }
             },
-            select: {
+        },
+        select: {
                 uuid: true,
                 phoneNumber: true,
-                banned: true,
+                isBanned: true,
                 fraudEvents: {
                     where: { storeUuid },
                     orderBy: {createdAt: "desc"},
@@ -54,7 +55,7 @@ export const getHighRiskUsers= async (storeUuid: string)=>{
                 },
                 sessions: {
                     where: {
-                        revoke: false,
+                        revoked: false,
                         storeUuid,
                     },
                     select: {
@@ -63,7 +64,6 @@ export const getHighRiskUsers= async (storeUuid: string)=>{
                         lastUsedAt: true,
                     },
                 },
-            },
         },
     });
 };
@@ -115,7 +115,7 @@ export const getSecurityHeatmap= async (storeUuid: string)=>{
 };
 
 export const getHourlyThreats= async (storeUuid: string)=>{
-    return prisma.queryRaw`
+    return prisma.$queryRaw`
         SELECT
             date_trunc('hour', "createdAt") as hour,
             count(*) as events

@@ -17,7 +17,7 @@ EventBus.on("ORDER_CREATED", async (payload) => {
 
     try {
         // Invalidate caches
-        await OrderCacheService.invalidateStoreCache(payload.storeUuid);
+        await OrderCacheService.invalidateStoreCache(payload.tenantUuid, payload.storeUuid);
     
         MetricsService.increment("order.created", 1, {
           tenantUuid: payload.tenantUuid,
@@ -58,8 +58,8 @@ EventBus.on("PAYMENT_CONFIRMED", async (payload) => {
         });
 
         // Invalidate caches
-        await OrderCacheService.invalidateOrderDetails(payload.orderUuid);
-        await OrderCacheService.invalidateStoreCache(payload.storeUuid);
+        await OrderCacheService.invalidateOrderDetails(payload.tenantUuid, payload.orderUuid);
+        await OrderCacheService.invalidateStoreCache(payload.tenantUuid, payload.storeUuid);
 
         MetricsService.increment("payment.confirmed", 1, {
             tenantUuid: payload.tenantUuid,
@@ -108,8 +108,8 @@ EventBus.on("PAYMENT_FAILED", async (payload) => {
         });
 
         // Invalidate caches
-        await OrderCacheService.invalidateOrderDetails(payload.orderUuid);
-        await OrderCacheService.invalidateStoreCache(payload.storeUuid);
+        await OrderCacheService.invalidateOrderDetails(payload.tenantUuid, payload.orderUuid);
+        await OrderCacheService.invalidateStoreCache(payload.tenantUuid, payload.storeUuid);
 
         MetricsService.increment("payment.failed", 1, {
             reason: payload.failureReason,
@@ -140,8 +140,8 @@ EventBus.on("ORDER_CANCELLED_AFTER_PAYMENT", async (payload) => {
         });
 
         // Invalidate caches
-        await OrderCacheService.invalidateOrderDetails(payload.orderUuid);
-        await OrderCacheService.invalidateStoreCache(payload.storeUuid);
+        await OrderCacheService.invalidateOrderDetails(payload.tenantUuid, payload.orderUuid);
+        await OrderCacheService.invalidateStoreCache(payload.tenantUuid, payload.storeUuid);
 
         MetricsService.increment("order.refund.requested", 1);
     } catch (error: any) {
@@ -161,8 +161,8 @@ EventBus.on("ORDER_STATUS_CHANGED", async (payload) => {
     });
     try {
         // Invalidate caches
-        await OrderCacheService.invalidateOrderDetails(payload.orderUuid);
-        await OrderCacheService.invalidateStoreCache(payload.storeUuid);
+        await OrderCacheService.invalidateOrderDetails(payload.tenantUuid, payload.orderUuid);
+        await OrderCacheService.invalidateStoreCache(payload.tenantUuid, payload.storeUuid);
 
         MetricsService.increment("order.status.changed", 1, {
             from: payload.from,

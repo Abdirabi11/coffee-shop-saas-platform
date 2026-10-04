@@ -17,8 +17,11 @@ export class MenuService {
         const startTime = Date.now();
  
         try {
+            // Version stays store-level so one bump invalidates every variant;
+            // the data key carries tenantUuid so entries are never shared
+            // across tenants.
             const version = await getCacheVersion(`menu:${input.storeUuid}`);
-            const cacheKey = `menu:${input.storeUuid}:v${version}:${input.includeUnavailable ? "all" : "available"}`;
+            const cacheKey = `menu:${input.tenantUuid}:${input.storeUuid}:v${version}:${input.includeUnavailable ? "all" : "available"}`;
  
             const menu = await withCache(cacheKey, 300, async () => {
                 MetricsService.increment("menu.cache.miss");
@@ -37,6 +40,8 @@ export class MenuService {
 
             return input.userUuid ? this.applyPersonalization(menu, input.userUuid) : menu;
         } catch (error: any) {
+            if (error.message === "STORE_NOT_FOUND") throw error;
+
             logWithContext("error", "[Menu] Failed to get menu", {
                 storeUuid: input.storeUuid,
                 error: error.message,
@@ -54,16 +59,21 @@ export class MenuService {
     }) {
         const now = new Date();
  
+        // Store must belong to the requesting tenant
         // NOTE: Store model uses `active` not `isActive`
-        const store = await prisma.store.findUnique({
-            where: { uuid: input.storeUuid },
+        const store = await prisma.store.findFirst({
+            where: { uuid: input.storeUuid, tenantUuid: input.tenantUuid },
             select: { uuid: true, name: true, active: true },
         });
  
-        if (!store || !store.active) {
+        if (!store) {
+            throw new Error("STORE_NOT_FOUND");
+        }
+ 
+        if (!store.active) {
             return {
                 storeUuid: input.storeUuid,
-                storeName: store?.name || "Unknown",
+                storeName: store.name,
                 isOpen: false,
                 categories: [],
                 generatedAt: now.toISOString(),
@@ -72,6 +82,7 @@ export class MenuService {
  
         const categories = await prisma.category.findMany({
             where: {
+                tenantUuid: input.tenantUuid,
                 storeUuid: input.storeUuid,
                 isActive: true,
                 ...(input.includeUnavailable ? {} : { isAvailable: true }),
@@ -251,7 +262,7 @@ export class MenuService {
                 },
             });
  
-            if (!product || product.storeUuid !== input.storeUuid) {
+            if (!product || product.storeUuid !== input.storeUuid || product.tenantUuid !== input.tenantUuid) {
                 throw new Error("PRODUCT_NOT_FOUND");
             }
  

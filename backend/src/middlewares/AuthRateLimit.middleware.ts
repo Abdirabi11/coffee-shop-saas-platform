@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { redis } from "../lib/redis.ts";
+import { hitRateLimitWindow } from "../lib/rateLimitWindow.ts";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../infrastructure/observability/MetricsService.ts";
 
@@ -17,19 +17,13 @@ function createRateLimiter(config: RateLimitConfig) {
         const key = `ratelimit:${config.keyPrefix}:${config.keyExtractor(req)}`;
     
         try {
-            const current = await redis.incr(key);
-        
-            if (current === 1) {
-                // First request in window — set expiry
-                await redis.pexpire(key, config.windowMs);
-            }
+            const { count: current, ttlMs: ttl } = await hitRateLimitWindow(key, config.windowMs);
         
             // Set rate limit headers
             res.setHeader("X-RateLimit-Limit", config.maxAttempts);
             res.setHeader("X-RateLimit-Remaining", Math.max(0, config.maxAttempts - current));
         
             if (current > config.maxAttempts) {
-                const ttl = await redis.pttl(key);
                 res.setHeader("Retry-After", Math.ceil(ttl / 1000));
         
                 logWithContext("warn", "[RateLimit] Blocked", {

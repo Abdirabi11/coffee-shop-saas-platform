@@ -1,3 +1,4 @@
+import type { MenuSnapshotReason } from "@prisma/client";
 import { MenuEventService } from "../events/menu.events.ts";
 import { MenuPrewarmService } from "../services/menu/menu-prewarm.service.ts";
 import { MenuSnapshotService } from "../services/menu/menu-snapshot.service.ts";

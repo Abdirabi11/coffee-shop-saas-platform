@@ -1,8 +1,10 @@
 
 
+import prisma from "../config/prisma.ts";
+
 export async function trackJobExecution(
     jobName: string,
-    execution: () => Promise<void>
+    execution: () => Promise<unknown>
   ) {
     const startTime = Date.now();
     let status: "SUCCESS" | "FAILED" = "SUCCESS";

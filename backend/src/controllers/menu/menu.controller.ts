@@ -39,6 +39,9 @@ export class MenuController {
  
             return res.status(200).json({ success: true, data: menu });
         } catch (error: any) {
+            if (error.message === "STORE_NOT_FOUND") {
+                return res.status(404).json({ success: false, error: "STORE_NOT_FOUND" });
+            }
             logWithContext("error", "[MenuCtrl] Get store menu failed", { error: error.message });
             return res.status(500).json({ success: false, error: "MENU_FETCH_FAILED" });
         }
@@ -53,7 +56,11 @@ export class MenuController {
     static async getMenuPreview(req: Request, res: Response) {
         try {
             const { storeUuid } = req.params;
-            const tenantUuid = req.headers["x-tenant-uuid"] as string;
+            // Verified by requireTenantContext; never trust the raw header here
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+            }
  
             const menu = await MenuService.getStoreMenu({
                 tenantUuid,
@@ -63,6 +70,9 @@ export class MenuController {
  
             return res.status(200).json({ success: true, data: menu });
         } catch (error: any) {
+            if (error.message === "STORE_NOT_FOUND") {
+                return res.status(404).json({ success: false, error: "STORE_NOT_FOUND" });
+            }
             logWithContext("error", "[MenuCtrl] Preview failed", { error: error.message });
             return res.status(500).json({ success: false, error: "PREVIEW_FAILED" });
         }
@@ -72,13 +82,19 @@ export class MenuController {
     static async prewarmMenu(req: Request, res: Response) {
         try {
             const { storeUuid } = req.params;
-            const tenantUuid = req.headers["x-tenant-uuid"] as string;
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+            }
  
             await MenuService.getStoreMenu({ tenantUuid, storeUuid, includeUnavailable: false });
             await MenuService.getStoreMenu({ tenantUuid, storeUuid, includeUnavailable: true });
  
             return res.status(200).json({ success: true, message: "Menu cache warmed" });
         } catch (error: any) {
+            if (error.message === "STORE_NOT_FOUND") {
+                return res.status(404).json({ success: false, error: "STORE_NOT_FOUND" });
+            }
             return res.status(500).json({ success: false, error: "PREWARM_FAILED" });
         }
     }

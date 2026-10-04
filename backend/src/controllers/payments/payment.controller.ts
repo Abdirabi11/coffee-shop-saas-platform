@@ -6,9 +6,14 @@ export class PaymentController {
     // POST /api/v1/payments/start
     static async startPayment(req: Request, res: Response) {
         try {
-            const staff = (req as any).user;
-            if (!staff) {
-                return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
+            // Both set by requireTenantContext. tenantUserUuid must be the
+            // real membership id: the JWT has no tenantUserUuid, and an
+            // undefined value made the payment limits count every payment on
+            // the platform.
+            const tenantUuid = req.tenant?.uuid;
+            const tenantUserUuid = req.tenantUser?.uuid;
+            if (!tenantUuid || !tenantUserUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
             };
 
             const { orderUuid, provider } = req.body;
@@ -21,9 +26,10 @@ export class PaymentController {
             };
 
             const result = await PaymentService.startPayment({
+                tenantUuid,
+                tenantUserUuid,
                 orderUuid,
                 provider,
-                tenantUserUuid: staff.tenantUserUuid || staff.uuid,
             });
 
             return res.status(201).json({ success: true, data: result });
@@ -35,6 +41,7 @@ export class PaymentController {
             const status = error.message.includes("NOT_FOUND") ? 404
                 : error.message.includes("LOCKED") || error.message.includes("REVIEW") ? 403
                 : error.message.includes("LIMIT") ? 429
+                : error.message.includes("IN_PROGRESS") || error.message.includes("ALREADY_EXISTS") ? 409
                 : 400;
         
             return res.status(status).json({ success: false, error: error.message });
@@ -45,12 +52,16 @@ export class PaymentController {
     static async retryPayment(req: Request, res: Response) {
         try {
             const { paymentUuid } = req.params;
+            const tenantUuid = req.tenant?.uuid;
         
             if (!paymentUuid) {
                 return res.status(400).json({ success: false, error: "paymentUuid required" });
             }
+            if (!tenantUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+            }
         
-            const result = await PaymentService.retryFailedPayment(paymentUuid);
+            const result = await PaymentService.retryFailedPayment(paymentUuid, tenantUuid);
         
             return res.status(200).json({ success: true, data: { uuid: result.uuid, status: result.status } });
         } catch (error: any) {
@@ -59,7 +70,7 @@ export class PaymentController {
             });
         
             const status = error.message.includes("NOT_FOUND") ? 404
-                : error.message.includes("MAX_RETRIES") ? 409
+                : error.message.includes("MAX_RETRIES") || error.message.includes("IN_PROGRESS") ? 409
                 : 400;
         
             return res.status(status).json({ success: false, error: error.message });
@@ -70,9 +81,13 @@ export class PaymentController {
     static async getStatus(req: Request, res: Response) {
         try {
             const { paymentUuid } = req.params;
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+            }
         
-            // For provider payments, poll the provider for latest status
-            const result = await PaymentService.confirmByPolling(paymentUuid);
+            // Tenant-scoped; polls the provider only for active payments, throttled
+            const result = await PaymentService.getStatusForTenant({ paymentUuid, tenantUuid });
         
             return res.status(200).json({
                 success: true,

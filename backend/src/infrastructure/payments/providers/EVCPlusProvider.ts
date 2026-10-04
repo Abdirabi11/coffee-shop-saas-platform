@@ -1,8 +1,8 @@
 import axios from "axios";
 import { logWithContext } from "../../observability/Logger.ts";
-import { PaymentProviderAdapter } from "./paymentProvider.adapter.ts";
+import type { PaymentProvider } from "./paymentProvider.interface.ts";
 
-export class EVCPlusProvider implements PaymentProviderAdapter {
+export class EVCPlusProvider implements PaymentProvider {
     private baseURL: string;
     private merchantUuid: string;
     private apiKey: string;
@@ -16,6 +16,7 @@ export class EVCPlusProvider implements PaymentProviderAdapter {
         amount: number;
         currency: string;
         metadata: Record<string, any>;
+        idempotencyKey: string;
     }) {
         try {
             const response= await axios.post(
@@ -26,13 +27,17 @@ export class EVCPlusProvider implements PaymentProviderAdapter {
                     currency: input.currency,
                     phone_number: input.metadata.customerPhone, 
                     description: `Order ${input.metadata.orderUuid}`,
-                    callback_url: `${process.env.APP_URL}/webhooks/evc`,
+                    callback_url: `${process.env.APP_URL}/api/payments/webhooks/evc`,
+                    // Merchant reference doubles as the dedup key on EVC's side
+                    // TODO: confirm field/header names against EVC Plus API docs
+                    reference: input.idempotencyKey,
                     metadata: input.metadata,
                 },
                 {
                     headers: {
                         "Authorization": `Bearer ${this.apiKey}`,
                         "Content-Type": "application/json",
+                        "Idempotency-Key": input.idempotencyKey,
                     },
                 }
             );
@@ -67,9 +72,16 @@ export class EVCPlusProvider implements PaymentProviderAdapter {
                 }
             );
     
+            const amount = Number(response.data.amount);
+            const status = this.normalizeStatus(response.data.status);
             return {
-                status: this.normalizeStatus(response.data.status),
+                // Lookups only distinguish settled outcomes; "needs customer
+                // action" is still pending from our side
+                status: status === "REQUIRES_ACTION" ? ("PENDING" as const) : status,
                 providerRef: response.data.transaction_uuid,
+                // EVC reports major units; convert to cents like the rest of the system
+                amountReceived: Number.isFinite(amount) ? Math.round(amount * 100) : null,
+                currency: typeof response.data.currency === "string" ? response.data.currency : null,
                 snapshot: response.data,
             };
         } catch (error: any) {
@@ -157,21 +169,6 @@ export class EVCPlusProvider implements PaymentProviderAdapter {
             default:
                 return new Error("PROVIDER_UNAVAILABLE");
         }
-    }
-
-    /**
-     * Verify webhook signature
-    */
-    verifyWebhook(payload: any, signature: string): boolean {
-        const crypto = require("crypto");
-        const secret = process.env.EVC_PLUS_WEBHOOK_SECRET!;
-
-        const computed = crypto
-          .createHmac("sha256", secret)
-          .update(JSON.stringify(payload))
-          .digest("hex");
-
-        return computed === signature;
     }
 };
 

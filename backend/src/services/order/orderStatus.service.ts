@@ -1,20 +1,26 @@
 import prisma from "../../config/prisma.ts"
-import { OrderStatus } from "@prisma/client";
-import { InventoryService } from "../inventory/inventory.service.ts";
+import { OrderStatus, type Order } from "@prisma/client";
+import { InventoryOrderService } from "../inventory/InventoryOrder.service.ts";
 import { EventBus } from "../../events/eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 
 const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  PENDING: ["PAID", "CANCELLED"],
+  PENDING: ["PAID", "PAYMENT_FAILED", "CANCELLED"],
   PAID: ["PREPARING"],
   PREPARING: ["READY"],
   READY: ["COMPLETED"],
-  PAYMENT_FAILED: [],
+  // A failed payment attempt can still be followed by a successful retry
+  PAYMENT_FAILED: ["PAID", "CANCELLED"],
   CANCELLED: [],
   COMPLETED: [],
 };
 
 export class OrderStatusService{
+  static canTransition(from: OrderStatus, to: OrderStatus): boolean {
+    return ORDER_TRANSITIONS[from]?.includes(to) ?? false;
+  }
+
   static async transition(
     orderUuid: string, 
     to: OrderStatus,
@@ -31,7 +37,7 @@ export class OrderStatusService{
       throw new Error("Order not found");
     };
 
-    if (!ORDER_TRANSITIONS[order.status].includes(to)) {
+    if (!this.canTransition(order.status, to)) {
       throw new Error( `Invalid transition: ${order.status} → ${to}` );
     };
 
@@ -85,41 +91,50 @@ export class OrderStatusService{
     return updated;
   }
 
+  // Runs after the status change has committed, so a failing side effect
+  // must not surface as a failed transition: log it instead of throwing.
+  // Stock for CANCELLED is released by the ORDER_STATUS_CHANGED listener
+  // (events/order.events.ts), so it isn't released again here.
   private static async handleStatusChangeEffects(
     order: Order,
     newStatus: OrderStatus
   ) {
-    switch (newStatus) {
-      case "CANCELLED":
-        await InventoryService.releaseStock({
-          orderUuid: order.uuid,
-        });
-        if (order.paymentStatus === "CAPTURED") {
-          OrderEventBus.emit("ORDER_CANCELLED_AFTER_PAYMENT", {
+    try {
+      switch (newStatus) {
+        case "CANCELLED":
+          if (order.paymentStatus === "CAPTURED") {
+            await EventBus.emit("ORDER_CANCELLED_AFTER_PAYMENT", {
+              orderUuid: order.uuid,
+              tenantUuid: order.tenantUuid,
+            });
+          }
+          break;
+
+        case "PAYMENT_FAILED":
+          // Only releases ACTIVE reservations, so a repeat call is a no-op
+          await InventoryOrderService.releaseForOrder({ orderUuid: order.uuid });
+          break;
+
+        case "PREPARING":
+          await EventBus.emit("ORDER_READY_FOR_KITCHEN", {
             orderUuid: order.uuid,
+            storeUuid: order.storeUuid,
           });
-        }
-        break;
+          break;
 
-      case "PAYMENT_FAILED":
-        await InventoryService.releaseStock({
-          orderUuid: order.uuid,
-        });
-        break;
-
-      case "PREPARING":
-        OrderEventBus.emit("ORDER_READY_FOR_KITCHEN", {
-          orderUuid: order.uuid,
-          storeUuid: order.storeUuid,
-        });
-        break;
-
-      case "READY":
-        OrderEventBus.emit("ORDER_READY_FOR_PICKUP", {
-          orderUuid: order.uuid,
-          customerPhone: order.customerPhone,
-        });
-        break;
+        case "READY":
+          await EventBus.emit("ORDER_READY_FOR_PICKUP", {
+            orderUuid: order.uuid,
+            customerPhone: order.customerPhone,
+          });
+          break;
+      }
+    } catch (error: any) {
+      logWithContext("error", "[OrderStatus] Status change side effect failed", {
+        orderUuid: order.uuid,
+        newStatus,
+        error: error.message,
+      });
     }
   }
 };

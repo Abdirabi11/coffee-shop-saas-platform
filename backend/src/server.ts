@@ -53,6 +53,8 @@ app.use(compressionMiddleware);
 // This must run BEFORE the global JSON body parser below — once express.json()
 // consumes the stream for this path, the raw bytes are gone for good.
 app.use("/api/payments/webhooks/stripe", rawBodyParser);
+// EVC Plus signs the raw body too (HMAC over the exact bytes)
+app.use("/api/payments/webhooks/evc", rawBodyParser);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));

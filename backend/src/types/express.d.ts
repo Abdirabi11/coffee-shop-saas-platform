@@ -1,4 +1,4 @@
-import type { Tenant, TenantUser } from "@prisma/client";
+import type { StoreRole, Tenant, TenantUser } from "@prisma/client";
 
 declare global {
   namespace Express {
@@ -30,6 +30,29 @@ declare global {
       // Set by middlewares/deviceFingerprint.middleware.ts
       deviceId?: string;
       deviceTrusted?: boolean;
+
+      // Set by middlewares/menu/requireTenantHeader.middleware.ts on public
+      // routes. Unauthenticated header value — never use it to authorize.
+      tenantUuid?: string;
+
+      // Set by middlewares/ensureTenantIsolation.ts
+      prismaFilter?: { tenantUuid: string };
+
+      // Set by middlewares/staff/checkRole.middleware.ts
+      staffRole?: StoreRole;
+
+      // Set by middlewares/staff/requireClockIn.ts
+      clockInWarning?: boolean;
+
+      // Set by middlewares/staff/validateGeofence.ts
+      geofenceViolation?: boolean;
+      distanceFromStore?: number;
+
+      // Set by middlewares/menu/cache.controller.ts
+      menuVersion?: string;
+
+      // Set by middlewares/traceContext.ts
+      traceId?: string;
 
       rawBody?: Buffer;
       requestId?: string;

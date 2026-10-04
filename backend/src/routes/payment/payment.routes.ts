@@ -1,5 +1,5 @@
 import express from "express"
-import { PaymentController } from "../../controllers/payments/payment.controller.ts";
+import { PaymentController } from "../../controllers/payments/Payment.controller.ts";
 import { authenticate, require2FA } from "../../middlewares/auth.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { idempotencyMiddleware } from "../../middlewares/idempotency.middleware.ts";
@@ -7,10 +7,9 @@ import { maintenanceGuard } from "../../middlewares/maintainence.ts";
 import { requirePermission } from "../../middlewares/permission.middleware.ts";
 import { verifyPaymentWebhook } from "../../middlewares/peymetWebhook.middleware.ts";
 import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
-import { preventReplayAttack } from "../../middlewares/replayProtection.middleware.ts";
 import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.middleware.ts";
 import { webhookRateLimit } from "../../middlewares/webhookRateLimit.middleware.ts";
-import { PaymentWebhookController } from "../../controllers/payments/PaymentWebhook.controller.ts";
+import { PaymentWebhookController } from "../../controllers/payments/Paymentwebhook.controller.ts";
 import { PaymentAnomalyController } from "../../controllers/payments/PaymentAnomaly.controller.ts";
 import { CashDrawerController } from "../../controllers/payments/CashDrawer.controller.ts";
 import { CashierPaymentController } from "../../controllers/payments/CashierPayment.controller.ts";
@@ -20,24 +19,26 @@ import { rawBodyParser } from "../../middlewares/rawBodyParser.middleware.ts";
 
 const router = express.Router(); 
  
+// Provider webhooks. No idempotencyMiddleware / header-based replay check
+// here: providers send neither an Idempotency-Key nor tenant context. Each
+// handler verifies the signature over the raw body and deduplicates on the
+// verified provider event id (WebhookEventLedger).
+
 // Stripe webhook — raw body required for signature verification
 router.post(
   "/webhooks/stripe",
   rawBodyParser,
   webhookRateLimit,
   webhookSignatureGuard,
-  preventReplayAttack,
-  idempotencyMiddleware,
   PaymentWebhookController.handleStripe
 );
  
-// EVC Plus webhook — JSON body, HMAC signature in x-evc-signature header
+// EVC Plus webhook — raw JSON body, HMAC signature in x-evc-signature header
 router.post(
-"/webhooks/evc",
-webhookRateLimit,
-preventReplayAttack,
-idempotencyMiddleware,
-PaymentWebhookController.handleEVC
+  "/webhooks/evc",
+  rawBodyParser,
+  webhookRateLimit,
+  PaymentWebhookController.handleEVC
 );
  
 // Generic provider webhook (future providers)
@@ -81,7 +82,7 @@ router.post(
   requirePermission("PAYMENT_RETRY"),
   maintenanceGuard,
   idempotencyMiddleware,
-  rateLimit("payment.retry"),
+  rateLimit({ keyPrefix: "payment.retry", limit: 5, windowSeconds: 300 }),
   PaymentController.retryPayment
 );
  

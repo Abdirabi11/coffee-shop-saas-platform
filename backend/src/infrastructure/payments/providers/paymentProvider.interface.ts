@@ -3,6 +3,8 @@ export interface PaymentProvider {
     amount: number;
     currency: string;
     metadata: Record<string, any>;
+    // Same key => same intent. Retries after a timeout must reuse it.
+    idempotencyKey: string;
   }): Promise<{
     providerRef: string;
     clientSecret?: string;
@@ -13,6 +15,9 @@ export interface PaymentProvider {
   lookup(providerRef: string): Promise<{
     status: "PAID" | "FAILED" | "PENDING";
     providerRef?: string;
+    // Amount actually collected, in minor units (cents); null if unknown
+    amountReceived: number | null;
+    currency: string | null;
     snapshot?: any;
   }>;
  

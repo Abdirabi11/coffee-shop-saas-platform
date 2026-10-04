@@ -3,6 +3,7 @@ import prisma from "../../../config/prisma.ts"
 import { EventBus } from "../../../events/eventBus.ts";
 import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
 import { PaymentAnomalyDetector } from "../paymentAnomalyDetector.ts";
+import { OrderStatusService } from "../../order/OrderStatus.service.ts";
 
 interface ProcessCashierPaymentInput {
     orderUuid: string;
@@ -18,7 +19,6 @@ interface ProcessCashierPaymentInput {
     receiptNumber?: string;
     notes?: string;
     idempotencyKey: string;
-    managerUuid: string;
 };
 
 export class CashierPaymentService{
@@ -37,8 +37,8 @@ export class CashierPaymentService{
             return JSON.parse(existingIdempotency.response as string);
         };
  
-        const order = await prisma.order.findUnique({
-            where: { uuid: input.orderUuid },
+        const order = await prisma.order.findFirst({
+            where: { uuid: input.orderUuid, tenantUuid: input.tenantUuid },
             include: { payments: true, items: true },
         });
     
@@ -47,6 +47,10 @@ export class CashierPaymentService{
         }
         if (order.payments.length > 0) {
             throw new Error("PAYMENT_ALREADY_EXISTS");
+        }
+        // e.g. a CANCELLED order (stock already released) must not become PAID
+        if (!OrderStatusService.canTransition(order.status, "PAID")) {
+            throw new Error(`ORDER_NOT_PAYABLE: ${order.status}`);
         }
         // if (order.status !== "READY") {
         //     throw new Error(`INVALID_ORDER_STATUS: ${order.status}`);
@@ -242,6 +246,7 @@ export class CashierPaymentService{
 
     //Void payment (requires manager role)
     static async voidPayment(input: {
+        tenantUuid: string;
         paymentUuid: string;
         voidedBy: string;
         voidReason: string;
@@ -277,8 +282,8 @@ export class CashierPaymentService{
             throw new Error("INVALID_MANAGER_PIN");
         }
 
-        const payment = await prisma.payment.findUnique({
-            where: { uuid: input.paymentUuid },
+        const payment = await prisma.payment.findFirst({
+            where: { uuid: input.paymentUuid, tenantUuid: input.tenantUuid },
             include: { order: true },
         });
 

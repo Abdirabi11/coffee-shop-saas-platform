@@ -1,8 +1,12 @@
 import dayjs from "dayjs";
+import { CountType, TaskStatus } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { TimeEntryService } from "./TimeEntry.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+
+const COIN_VALUES_CENTS = { pennies: 1, nickels: 5, dimes: 10, quarters: 25 } as const;
+const BILL_VALUES_CENTS = { ones: 100, fives: 500, tens: 1000, twenties: 2000, fifties: 5000, hundreds: 10000 } as const;
 
 interface OfflineData {
     userProfile?: any;
@@ -18,10 +22,13 @@ interface OfflineData {
 export class OfflineSyncService {
     //Prepare offline data package for staff member
     static async prepareOfflinePackage(input: {
+        tenantUuid: string;
         userUuid: string;
         storeUuid: string;
     }): Promise<OfflineData> {
         try {
+            await this.assertStoreAccess(input);
+
             const [
                 userProfile,
                 permissions,
@@ -48,7 +55,7 @@ export class OfflineSyncService {
                 this.getActiveCashDrawer(input.userUuid, input.storeUuid),
                 
                 // Menu items (simplified)
-                this.getMenuItems(input.storeUuid),
+                this.getMenuItems(input.tenantUuid, input.storeUuid),
                 
                 // Announcements
                 this.getAnnouncements(input.userUuid, input.storeUuid),
@@ -89,6 +96,7 @@ export class OfflineSyncService {
 
     //Sync offline actions when back online
     static async syncOfflineActions(input: {
+        tenantUuid: string;
         userUuid: string;
         storeUuid: string;
         actions: Array<{
@@ -106,14 +114,19 @@ export class OfflineSyncService {
             details: [] as any[],
         };
 
+        // tenantUuid comes from req.tenant and storeUuid must belong to it;
+        // reject the whole batch before touching anything.
+        await this.assertStoreAccess(input);
+
         // Sort actions by timestamp
-        const sortedActions = input.actions.sort((a, b) => 
+        const sortedActions = [...input.actions].sort((a, b) => 
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
 
         for (const action of sortedActions) {
             try {
                 const result = await this.syncAction({
+                    tenantUuid: input.tenantUuid,
                     userUuid: input.userUuid,
                     storeUuid: input.storeUuid,
                     action,
@@ -158,6 +171,7 @@ export class OfflineSyncService {
 
     //Sync individual action
     private static async syncAction(input: {
+        tenantUuid: string;
         userUuid: string;
         storeUuid: string;
         action: {
@@ -167,7 +181,13 @@ export class OfflineSyncService {
             deviceId: string;
         };
     }) {
-        const { type, data, timestamp, deviceId } = input.action;
+        const { type, timestamp, deviceId } = input.action;
+        const data = input.action.data ?? {};
+        const scope = {
+            tenantUuid: input.tenantUuid,
+            userUuid: input.userUuid,
+            storeUuid: input.storeUuid,
+        };
 
         switch (type) {
             case "CLOCK_IN":
@@ -181,6 +201,7 @@ export class OfflineSyncService {
 
             case "CLOCK_OUT":
                 return this.syncClockOut({
+                    tenantUuid: input.tenantUuid,
                     userUuid: input.userUuid,
                     storeUuid: input.storeUuid,
                     data,
@@ -189,35 +210,19 @@ export class OfflineSyncService {
                 });
 
             case "BREAK_START":
-                return this.syncBreakStart({
-                    userUuid: input.userUuid,
-                    data,
-                    timestamp,
-                });
+                return this.syncBreakStart({ ...scope, data, timestamp });
 
             case "BREAK_END":
-                return this.syncBreakEnd({
-                    data,
-                    timestamp,
-                });
+                return this.syncBreakEnd({ ...scope, data, timestamp });
 
             case "CASH_COUNT":
-                return this.syncCashCount({
-                    data,
-                    timestamp,
-                });
+                return this.syncCashCount({ ...scope, data, timestamp });
 
             case "ANNOUNCEMENT_READ":
-                return this.syncAnnouncementRead({
-                    userUuid: input.userUuid,
-                    data,
-                });
+                return this.syncAnnouncementRead({ ...scope, data });
 
             case "TASK_UPDATE":
-                return this.syncTaskUpdate({
-                    data,
-                    timestamp,
-                });
+                return this.syncTaskUpdate({ ...scope, data, timestamp });
 
             default:
                 throw new Error(`UNKNOWN_ACTION_TYPE: ${type}`);
@@ -283,6 +288,7 @@ export class OfflineSyncService {
     }
 
     private static async syncClockOut(input: {
+        tenantUuid: string;
         userUuid: string;
         storeUuid: string;
         data: any;
@@ -302,7 +308,7 @@ export class OfflineSyncService {
             // Conflict: no active clock-in found
             await prisma.staffApprovalRequest.create({
                 data: {
-                    tenantUuid: await this.getTenantUuid(input.userUuid, input.storeUuid),
+                    tenantUuid: input.tenantUuid,
                     storeUuid: input.storeUuid,
                     requestedBy: input.userUuid,
                     approvalType: "MISSED_CLOCK_OUT",
@@ -331,15 +337,20 @@ export class OfflineSyncService {
     }
 
     private static async syncBreakStart(input: {
+        tenantUuid: string;
         userUuid: string;
+        storeUuid: string;
         data: any;
         timestamp: string;
     }) {
         const timeEntry = await prisma.timeEntry.findFirst({
             where: {
-                userUuid: input.userUuid,
                 uuid: input.data.timeEntryUuid,
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                userUuid: input.userUuid,
             },
+            select: { uuid: true },
         });
 
         if (!timeEntry) {
@@ -347,7 +358,7 @@ export class OfflineSyncService {
         }
 
         await TimeEntryService.startBreak({
-            timeEntryUuid: input.data.timeEntryUuid,
+            timeEntryUuid: timeEntry.uuid,
             breakType: input.data.breakType,
         });
 
@@ -355,28 +366,88 @@ export class OfflineSyncService {
     }
 
     private static async syncBreakEnd(input: {
+        tenantUuid: string;
+        userUuid: string;
+        storeUuid: string;
         data: any;
         timestamp: string;
     }) {
+        // Break must belong to one of this user's time entries at this store
+        const breakEntry = await prisma.breakEntry.findFirst({
+            where: {
+                uuid: input.data.breakEntryUuid,
+                timeEntry: {
+                    tenantUuid: input.tenantUuid,
+                    storeUuid: input.storeUuid,
+                    userUuid: input.userUuid,
+                },
+            },
+            select: { uuid: true },
+        });
+
+        if (!breakEntry) {
+            return { conflict: true, reason: "BREAK_NOT_FOUND" };
+        }
+
         await TimeEntryService.endBreak({
-            breakEntryUuid: input.data.breakEntryUuid,
+            breakEntryUuid: breakEntry.uuid,
         });
 
         return { conflict: false, synced: true };
     }
 
     private static async syncCashCount(input: {
+        tenantUuid: string;
+        userUuid: string;
+        storeUuid: string;
         data: any;
         timestamp: string;
     }) {
+        const drawer = await prisma.cashDrawer.findFirst({
+            where: {
+                uuid: input.data.drawerUuid,
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+            },
+            select: { uuid: true },
+        });
+
+        if (!drawer) {
+            return { conflict: true, reason: "DRAWER_NOT_FOUND" };
+        }
+
+        const countType = Object.values(CountType).includes(input.data.countType)
+            ? (input.data.countType as CountType)
+            : undefined;
+
+        // Whitelist denomination fields; never spread client data into the row
+        const raw = input.data.denominations ?? {};
+        const counts: Record<string, number> = {};
+        let totalCoins = 0;
+        let totalBills = 0;
+
+        for (const [field, cents] of Object.entries(COIN_VALUES_CENTS)) {
+            const n = this.toCount(raw[field]);
+            counts[field] = n;
+            totalCoins += n * cents;
+        }
+        for (const [field, cents] of Object.entries(BILL_VALUES_CENTS)) {
+            const n = this.toCount(raw[field]);
+            counts[field] = n;
+            totalBills += n * cents;
+        }
+
         // Cash counts are usually final, so just record it
         await prisma.cashCount.create({
             data: {
-                cashDrawerUuid: input.data.drawerUuid,
-                countType: input.data.countType,
-                countedBy: input.data.countedBy,
+                cashDrawerUuid: drawer.uuid,
+                countType,
+                countedBy: input.userUuid,
                 countedAt: new Date(input.timestamp),
-                ...input.data.denominations,
+                ...counts,
+                totalCoins,
+                totalBills,
+                totalCash: totalCoins + totalBills,
             },
         });
 
@@ -384,16 +455,23 @@ export class OfflineSyncService {
     }
 
     private static async syncAnnouncementRead(input: {
+        tenantUuid: string;
         userUuid: string;
+        storeUuid: string;
         data: any;
     }) {
-        const announcement = await prisma.shiftAnnouncement.findUnique({
-            where: { uuid: input.data.announcementUuid },
+        const announcement = await prisma.shiftAnnouncement.findFirst({
+            where: {
+                uuid: input.data.announcementUuid,
+                tenantUuid: input.tenantUuid,
+                OR: [{ storeUuid: input.storeUuid }, { storeUuid: null }],
+            },
+            select: { uuid: true, readBy: true },
         });
 
         if (announcement && !announcement.readBy.includes(input.userUuid)) {
             await prisma.shiftAnnouncement.update({
-                where: { uuid: input.data.announcementUuid },
+                where: { uuid: announcement.uuid },
                 data: {
                     readBy: {
                         push: input.userUuid,
@@ -406,16 +484,42 @@ export class OfflineSyncService {
     }
 
     private static async syncTaskUpdate(input: {
+        tenantUuid: string;
+        userUuid: string;
+        storeUuid: string;
         data: any;
         timestamp: string;
     }) {
+        // Staff can only update tasks assigned to them at this store
+        const task = await prisma.staffTask.findFirst({
+            where: {
+                uuid: input.data.taskUuid,
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
+                assignedTo: input.userUuid,
+            },
+            select: { uuid: true },
+        });
+
+        if (!task) {
+            return { conflict: true, reason: "TASK_NOT_FOUND" };
+        }
+
+        if (!Object.values(TaskStatus).includes(input.data.status)) {
+            throw new Error(`INVALID_TASK_STATUS: ${input.data.status}`);
+        }
+        const status = input.data.status as TaskStatus;
+        const isCompleted = status === TaskStatus.COMPLETED;
+
         await prisma.staffTask.update({
-            where: { uuid: input.data.taskUuid },
+            where: { uuid: task.uuid },
             data: {
-                status: input.data.status,
-                completedAt: input.data.status === "COMPLETED" ? new Date(input.timestamp) : undefined,
-                completedBy: input.data.completedBy,
-                completionNotes: input.data.completionNotes,
+                status,
+                completedAt: isCompleted ? new Date(input.timestamp) : undefined,
+                completedBy: isCompleted ? input.userUuid : undefined,
+                completionNotes: typeof input.data.completionNotes === "string"
+                    ? input.data.completionNotes
+                    : undefined,
             },
         });
 
@@ -439,12 +543,12 @@ export class OfflineSyncService {
     }
 
     private static async getUserPermissions(userUuid: string, storeUuid: string) {
-        const { PermissionManagementService } = require("./PermissionManagement.service");
+        const { PermissionManagementService } = await import("./PermissionManagement.service.ts");
         return PermissionManagementService.getUserPermissions({ userUuid, storeUuid });
     }
 
     private static async getTodayShifts(storeUuid: string) {
-        const { ShiftManagementService } = require("./ShiftManagement.service");
+        const { ShiftManagementService } = await import("./ShiftManagement.service.ts");
         return ShiftManagementService.getStoreShifts({
             storeUuid,
             date: new Date(),
@@ -452,18 +556,19 @@ export class OfflineSyncService {
     }
 
     private static async getActiveStaff(storeUuid: string) {
-        const { StaffManagementService } = require("./StaffManagement.service");
+        const { StaffManagementService } = await import("./StaffManagement.service.ts");
         return StaffManagementService.getStoreStaff(storeUuid, false);
     }
 
     private static async getActiveCashDrawer(userUuid: string, storeUuid: string) {
-        const { CashDrawerService } = require("./CashDrawer.service");
+        const { CashDrawerService } = await import("./CashDrawer.service.ts");
         return CashDrawerService.getActiveDrawer({ userUuid, storeUuid });
     }
 
-    private static async getMenuItems(storeUuid: string) {
+    private static async getMenuItems(tenantUuid: string, storeUuid: string) {
         return prisma.product.findMany({
             where: {
+                tenantUuid,
                 storeUuid,
                 isActive: true,
             },
@@ -479,12 +584,12 @@ export class OfflineSyncService {
     }
 
     private static async getAnnouncements(userUuid: string, storeUuid: string) {
-        const { StaffCommunicationService } = require("./StaffCommunication.service");
+        const { StaffCommunicationService } = await import("./StaffCommunication.service.ts");
         return StaffCommunicationService.getActiveAnnouncements({ userUuid, storeUuid });
     }
 
     private static async getUserTasks(userUuid: string, storeUuid: string) {
-        const { StaffCommunicationService } = require("./StaffCommunication.service");
+        const { StaffCommunicationService } = await import("./StaffCommunication.service.ts");
         return StaffCommunicationService.getUserTasks({
             userUuid,
             storeUuid,
@@ -492,12 +597,30 @@ export class OfflineSyncService {
         });
     }
 
-    private static async getTenantUuid(userUuid: string, storeUuid: string) {
-        const userStore = await prisma.userStore.findUnique({
+    // The store must belong to the authenticated tenant, and the user must
+    // have an active assignment there.
+    private static async assertStoreAccess(input: {
+        tenantUuid: string;
+        userUuid: string;
+        storeUuid: string;
+    }) {
+        const membership = await prisma.userStore.findFirst({
             where: {
-                userUuid_storeUuid: { userUuid, storeUuid },
+                userUuid: input.userUuid,
+                storeUuid: input.storeUuid,
+                tenantUuid: input.tenantUuid,
+                isActive: true,
             },
+            select: { uuid: true },
         });
-        return userStore?.tenantUuid || "";
+
+        if (!membership) {
+            throw new Error("STORE_ACCESS_DENIED");
+        }
+    }
+
+    private static toCount(value: unknown): number {
+        const n = Number(value);
+        return Number.isInteger(n) && n >= 0 ? n : 0;
     }
 }

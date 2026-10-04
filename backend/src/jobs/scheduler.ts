@@ -42,6 +42,8 @@ import { ProductPopularityJob } from "./Order/productPopularity.job.ts";
 import { ProductMetricsCalculationJob } from "./Product/productMetricsCalculation.job.ts";
 import { AnalyticsSnapshotCleanupJob } from "./Analytics/Analyticssnapshotcleanup.job.ts";
 import { generateMonthlyInvoices } from "./Billing/generateMonthlyInvoices.job.ts";
+import { suspendOverdueTenants } from "./Billing/suspendOverdueTenants.job.ts";
+import { IdempotencyKeyCleanupJob } from "./Payment/IdempotencyKeyCleanup.job.ts";
 import { DailyStoreMetricsJob } from "./Order/dailyStoreMetrics.job.ts";
 import { InventoryReconciliationJob } from "./Inventory/InventoryReconciliation.job.ts";
 import { DashboardSnapshotJob } from "./dashboard/dashboardSnapshot.job.ts";
@@ -63,7 +65,7 @@ import { CohortRetentionJob } from "./Analytics/cohortRetention.job.ts";
 
 
 
-function schedule(cronExpr: string, jobName: string, fn: () => Promise<void>) {
+function schedule(cronExpr: string, jobName: string, fn: () => Promise<unknown>) {
   cron.schedule(cronExpr, async () => {
     try {
       await trackJobExecution(jobName, fn);

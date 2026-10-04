@@ -6,19 +6,24 @@ export class ProductCacheService{
     private static readonly CACHE_TTL = 1800; // 30 minutes
     private static readonly CACHE_PREFIX = "product";
 
+    // Tenant-scoped so a known productUuid can't pull another tenant's entry
+    private static key(tenantUuid: string, productUuid: string) {
+        return `tenant:${tenantUuid}:${this.CACHE_PREFIX}:${productUuid}`;
+    }
+
     //Get single product (with cache)
     static async getProduct(input: {
         storeUuid: string;
         productUuid: string;
         tenantUuid: string;
     }){
-        const cacheKey= `${this.CACHE_PREFIX}:${input.productUuid}`;
+        const cacheKey= this.key(input.tenantUuid, input.productUuid);
 
         try {
-            const cached = await redis.get(cacheKey);
+            const cached = await redis.get<any>(cacheKey);
       
-            if (cached) {
-                return JSON.parse(cached);
+            if (cached !== null) {
+                return cached;
             };
 
             // Fetch from database
@@ -36,8 +41,8 @@ export class ProductCacheService{
     }
 
     //Invalidate product cache
-    static async invalidate(productUuid: string) {
-        const cacheKey = `${this.CACHE_PREFIX}:${productUuid}`;
+    static async invalidate(tenantUuid: string, productUuid: string) {
+        const cacheKey = this.key(tenantUuid, productUuid);
         await redis.del(cacheKey);
     }
 }

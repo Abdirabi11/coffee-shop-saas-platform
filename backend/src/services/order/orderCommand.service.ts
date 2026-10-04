@@ -8,6 +8,7 @@ import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";
 import { StoreHoursService } from "../store/storeHours.service.ts";
 import { IdempotencyService } from "./Idempotency.service.ts";
 import { OrderPricingService } from "./OrderPricing.service.ts";
+import { OrderNumberService } from "./OrderNumber.service.ts";
 
 interface CreateOrderItemInput {
   productUuid: string;
@@ -92,8 +93,8 @@ export class OrderCommandService {
                 throw new Error("ORDER_EMPTY");
             }
     
-            // Generate order number: ORD-20260328-0001
-            const orderNumber = await this.generateOrderNumber(tenantUuid, storeUuid);
+            // Generate order number: ORD-20260328-0001 (locked inside this tx)
+            const orderNumber = await OrderNumberService.next(tx, tenantUuid);
         
             // Create order
             const order = await tx.order.create({
@@ -198,25 +199,5 @@ export class OrderCommandService {
         MetricsService.increment("order.created", 1);
     
         return order;
-    }
- 
-    // ── Order number generator ───────────────────────────────────────────────
-    // Format: ORD-20260328-0001 (date + daily sequence per store)
- 
-    private static async generateOrderNumber(
-        tenantUuid: string,
-        storeUuid: string
-    ): Promise<string> {
-        const today = new Date().toISOString().split("T")[0].replace(/-/g, "");
-        const count = await prisma.order.count({
-            where: {
-                tenantUuid,
-                storeUuid,
-                createdAt: {
-                    gte: new Date(new Date().setHours(0, 0, 0, 0)),
-                },
-            },
-        });
-        return `ORD-${today}-${String(count + 1).padStart(4, "0")}`;
     }
 }

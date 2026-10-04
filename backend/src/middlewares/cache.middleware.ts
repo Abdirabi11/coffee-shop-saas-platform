@@ -8,12 +8,12 @@ export const cache = (keyGenerator: (req: Request) => string, ttlSeconds = 60) =
         try {
             const cacheKey = keyGenerator(req);
     
-            // Try to get from cache
-            const cached = await redis.get(cacheKey);
+            // Try to get from cache. Upstash auto-deserializes JSON, so the
+            // value is already the response body.
+            const cached = await redis.get<unknown>(cacheKey);
     
-            if (cached) {
-                logWithContext("debug", "[Cache] Cache hit", { key: cacheKey });
-                return res.json(JSON.parse(cached));
+            if (cached !== null) {
+                return res.json(cached);
             };
   
             // Cache miss - capture response
@@ -24,7 +24,6 @@ export const cache = (keyGenerator: (req: Request) => string, ttlSeconds = 60) =
                 setImmediate(async () => {
                     try {
                         await redis.setex(cacheKey, ttlSeconds, JSON.stringify(data));
-                        logWithContext("debug", "[Cache] Cached response", { key: cacheKey });
                     } catch (error: any) {
                         logWithContext("error", "[Cache] Failed to cache", {
                             error: error.message,

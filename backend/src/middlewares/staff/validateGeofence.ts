@@ -26,8 +26,8 @@ export async function validateGeofence(
         const distance = calculateDistance(
             latitude,
             longitude,
-            store.latitude,
-            store.longitude
+            Number(store.latitude),
+            Number(store.longitude)
         );
 
         // Max 100 meters

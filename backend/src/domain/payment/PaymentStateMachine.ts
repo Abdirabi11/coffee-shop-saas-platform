@@ -16,7 +16,9 @@ const transitions: Record<PaymentState, PaymentState[]> = {
   RETRYING: ["PAID", "COMPLETED", "FAILED", "CANCELLED"],
   PAID: ["REFUNDED", "PARTIALLY_REFUNDED", "VOIDED"],
   COMPLETED: ["REFUNDED", "PARTIALLY_REFUNDED", "VOIDED"], // Cashier payments
-  FAILED: ["RETRYING", "CANCELLED"],
+  // A failed attempt isn't final: Stripe lets the customer retry the same
+  // PaymentIntent with another card, so a later success must still land.
+  FAILED: ["RETRYING", "PAID", "CANCELLED"],
   CANCELLED: [],
   REFUNDED: [],
   PARTIALLY_REFUNDED: ["REFUNDED", "PARTIALLY_REFUNDED"],

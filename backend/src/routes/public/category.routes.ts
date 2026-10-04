@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { CategoryCacheService } from "../../services/cache/CategoryCache.service.ts"; 
+import { CategoryCacheService } from "../../services/category/CategoryCache.service.ts"; 
 import { rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts"; 
 
 const router = Router();

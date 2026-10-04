@@ -18,7 +18,16 @@ export class OfflineSyncController {
                 });
             }
 
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({
+                    error: "TENANT_CONTEXT_REQUIRED",
+                    message: "Tenant context is required",
+                });
+            }
+
             const packageData = await OfflineSyncService.prepareOfflinePackage({
+                tenantUuid,
                 userUuid,
                 storeUuid: storeUuid as string,
             });
@@ -29,6 +38,10 @@ export class OfflineSyncController {
             });
 
         } catch (error: any) {
+            if (error.message === "STORE_ACCESS_DENIED") {
+                return res.status(403).json({ error: "STORE_ACCESS_DENIED" });
+            }
+
             logWithContext("error", "[OfflineSync] Failed to prepare package", {
                 error: error.message,
             });
@@ -53,7 +66,16 @@ export class OfflineSyncController {
                 });
             }
 
+            const tenantUuid = req.tenant?.uuid;
+            if (!tenantUuid) {
+                return res.status(400).json({
+                    error: "TENANT_CONTEXT_REQUIRED",
+                    message: "Tenant context is required",
+                });
+            }
+
             const results = await OfflineSyncService.syncOfflineActions({
+                tenantUuid,
                 userUuid,
                 storeUuid,
                 actions,
@@ -65,6 +87,10 @@ export class OfflineSyncController {
             });
 
         } catch (error: any) {
+            if (error.message === "STORE_ACCESS_DENIED") {
+                return res.status(403).json({ error: "STORE_ACCESS_DENIED" });
+            }
+
             logWithContext("error", "[OfflineSync] Sync failed", {
                 error: error.message,
             });

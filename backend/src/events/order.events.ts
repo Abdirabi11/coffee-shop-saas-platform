@@ -48,7 +48,7 @@ EventBus.on("ORDER_STATUS_CHANGED", async ({ orderUuid, tenantUuid, storeUuid, f
   await bumpCacheVersion(`store:${storeUuid}:active-orders`);
 
   if (to === "CANCELLED") {
-    await InventoryOrderService.releaseForOrder(orderUuid);
+    await InventoryOrderService.releaseForOrder({ orderUuid });
 
     if (["PAID", "PREPARING"].includes(from)) {
       await prisma.refund.create({
@@ -75,7 +75,7 @@ EventBus.on("PAYMENT_CONFIRMED", async({ orderUuid, tenantUuid, storeUuid }) => 
 
 EventBus.on("PAYMENT_FAILED", async ({ orderUuid, tenantUuid, storeUuid }) => {
   console.log(`[EVENT] PAYMENT_FAILED: ${orderUuid}`);
-  await InventoryOrderService.releaseForOrder(orderUuid);
+  await InventoryOrderService.releaseForOrder({ orderUuid });
   await OrderNotificationJob.paymentFailed(orderUuid);
 });
 

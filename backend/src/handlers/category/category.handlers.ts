@@ -1,6 +1,6 @@
-import { logWithContext } from "../infrastructure/observability/logger.ts";
-import { CategoryCacheService } from "../services/cache/CategoryCache.service.ts";
-import { EventBus } from "./eventBus.ts";
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { CategoryCacheService } from "../../services/category/CategoryCache.service.ts";
+import { EventBus } from "../../events/eventBus.ts";
 
 
 // Category created → Invalidate cache
@@ -9,7 +9,7 @@ EventBus.on("CATEGORY_CREATED", async (payload) => {
         categoryUuid: payload.categoryUuid,
     });
   
-    await CategoryCacheService.invalidate(payload.storeUuid);
+    await CategoryCacheService.invalidate(payload.tenantUuid, payload.storeUuid);
 });
   
 // Category updated → Invalidate cache
@@ -18,7 +18,7 @@ EventBus.on("CATEGORY_UPDATED", async (payload) => {
         categoryUuid: payload.categoryUuid,
     });
   
-    await CategoryCacheService.invalidate(payload.storeUuid);
+    await CategoryCacheService.invalidate(payload.tenantUuid, payload.storeUuid);
 });
   
 // Category deleted → Invalidate cache
@@ -27,7 +27,7 @@ EventBus.on("CATEGORY_DELETED", async (payload) => {
         categoryUuid: payload.categoryUuid,
     });
   
-    await CategoryCacheService.invalidate(payload.storeUuid);
+    await CategoryCacheService.invalidate(payload.tenantUuid, payload.storeUuid);
 });
   
 // Category reordered → Invalidate cache
@@ -36,6 +36,6 @@ EventBus.on("CATEGORY_REORDERED", async (payload) => {
         storeUuid: payload.storeUuid,
     });
   
-    await CategoryCacheService.invalidate(payload.storeUuid);
+    await CategoryCacheService.invalidate(payload.tenantUuid, payload.storeUuid);
 });
   

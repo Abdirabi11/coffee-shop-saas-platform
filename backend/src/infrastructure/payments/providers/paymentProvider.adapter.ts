@@ -8,7 +8,9 @@ import { ProviderMap } from "./provider.map.ts";
 // }; 
  
 export function getProvider(provider: string): PaymentProvider {
-    const key = provider.toUpperCase();
+    // ProviderMap keys are lower-case ("stripe", "evc_plus"); payment rows
+    // store the enum ("STRIPE", "EVC_PLUS")
+    const key = provider.toLowerCase();
     const impl = ProviderMap[key];
     
     if (!impl) {
@@ -24,6 +26,7 @@ export class PaymentProviderAdapter {
         amount: number;
         currency: string;
         metadata: Record<string, any>;
+        idempotencyKey: string;
     }) {
         const provider = getProvider(input.provider);
         return provider.createIntent(input);

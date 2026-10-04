@@ -1,4 +1,4 @@
-import prisma from "../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
 
 
 export const viewActiveSessions= async (storeUuid: string)=>{
@@ -9,7 +9,7 @@ export const viewActiveSessions= async (storeUuid: string)=>{
         },
         include: {
             user: {
-                select: { phoneNumber: true, role: true },
+                select: { phoneNumber: true, globalRole: true },
             },
         },
     });

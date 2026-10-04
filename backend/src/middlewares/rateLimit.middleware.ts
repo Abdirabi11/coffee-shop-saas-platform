@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { redis } from "../lib/redis.ts"
+import { hitRateLimitWindow } from "../lib/rateLimitWindow.ts"
 
 export const rateLimit= ({
     keyPrefix,
@@ -18,11 +18,7 @@ export const rateLimit= ({
             const identifier = userUuid || ip;
             const key = `ratelimit:${keyPrefix}:${identifier}`;
 
-            const current= await redis.incr(key);
-
-            if (current === 1) {
-                await redis.expire(key, windowSeconds);
-            };
+            const { count: current } = await hitRateLimitWindow(key, windowSeconds * 1000);
 
             if (current > limit) {
                 return res.status(429).json({

@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.ts"
-import { redisClient, redis } from "../lib/redis.ts";
+import { hitRateLimitWindow } from "../lib/rateLimitWindow.ts";
 
 export const checkTenantQuota= async (
     tenantUuid: string,
@@ -10,17 +10,15 @@ export const checkTenantQuota= async (
     });
     if(!quota)return { allowed: true };
 
-    const key= `tenant:${tenantUuid}:requests`;
-    const current= await redisClient.incr(key);
+    // Quotas are configured per scope, so count per scope too
+    const key= `tenant:${tenantUuid}:requests:${scope}`;
+    const { count: current, ttlMs }= await hitRateLimitWindow(key, quota.windowSeconds * 1000);
 
-    if (current === 1) {
-        await redis.expire(key, quota.windowSeconds);
-    };
     if (current > quota.maxRequests) {
         return {
           allowed: false,
           remaining: 0,
-          resetIn: await redis.ttl(key),
+          resetIn: Math.ceil(ttlMs / 1000),
         };
     };
 
