@@ -2,7 +2,7 @@ import type { MenuSnapshotReason } from "@prisma/client";
 import { MenuEventService } from "../events/menu.events.ts";
 import { MenuPrewarmService } from "../services/menu/menu-prewarm.service.ts";
 import { MenuSnapshotService } from "../services/menu/menu-snapshot.service.ts";
-import { bumpCacheVersion } from "./cacheVersion.ts.ts"
+import { bumpCacheVersion } from "./cacheVersion.ts"
 
 export async function invalidateMenu(
   storeUuid: string,

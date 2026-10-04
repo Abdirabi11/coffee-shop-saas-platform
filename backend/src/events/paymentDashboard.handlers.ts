@@ -1,4 +1,4 @@
-import { bumpCacheVersion } from "../cache/cacheVersion.ts";
+import { bumpCacheVersion } from "../infrastructure/cache/cacheVersion.ts";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { StoreDailyMetricsService } from "../services/Dashboards/StoreDailyMetrics.service.ts";
 import { ReceiptService } from "../services/payment/Receipt.service.ts";

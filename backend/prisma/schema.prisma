@@ -3,9 +3,6 @@
 //
 // Multi-tenant, offline-first coffee shop management system
 // with mobile ordering, dual payment flows, and staff management.
-//
-// Models: 150 | Enums: 170
-// Deduplication removed 40 duplicate blocks from original
 // ============================================================================
 
 generator client {
@@ -179,52 +176,6 @@ enum ApprovalType {
   TIME_OFF
   SCHEDULE_CHANGE
   TEMP_PERMISSION
-}
-
-enum AuditAction {
-  // User actions
-  USER_LOGIN
-  USER_LOGOUT
-  USER_CREATED
-  USER_UPDATED
-  USER_DELETED
-  USER_BANNED
-  USER_ROLE_CHANGED
-
-  // Store actions
-  STORE_CREATED
-  STORE_UPDATED
-  STORE_DELETED
-  STORE_STATUS_CHANGED
-
-  // Product actions
-  PRODUCT_CREATED
-  PRODUCT_UPDATED
-  PRODUCT_DELETED
-  PRODUCT_PRICE_CHANGED
-
-  // Order actions
-  ORDER_CREATED
-  ORDER_UPDATED
-  ORDER_CANCELLED
-  ORDER_REFUNDED
-
-  // Payment actions
-  PAYMENT_PROCESSED
-  PAYMENT_REFUNDED
-  PAYMENT_FAILED
-
-  // Security actions
-  PASSWORD_CHANGED
-  TWO_FA_ENABLED
-  TWO_FA_DISABLED
-  PERMISSION_GRANTED
-  PERMISSION_REVOKED
-
-  // Settings
-  SETTINGS_UPDATED
-  INTEGRATION_ADDED
-  INTEGRATION_REMOVED
 }
 
 enum AuditCategory {
@@ -617,13 +568,6 @@ enum FulfillmentStatus {
   CANCELLED
 }
 
-enum FunnelStep {
-  VIEW
-  ADD_TO_CART
-  CHECKOUT
-  PURCHASE
-}
-
 enum GlobalRole {
   SUPER_ADMIN
   PLATFORM_MANAGER
@@ -895,16 +839,6 @@ enum PaymentFlow {
   PROVIDER
 }
 
-enum PaymentIntentStatus {
-  PENDING
-  LOCKED
-  PROCESSING
-  COMPLETED
-  FAILED
-  EXPIRED
-  CANCELLED
-}
-
 enum PaymentMethod {
   CASH
   CARD
@@ -926,12 +860,6 @@ enum PaymentProvider {
   ZAAD
   EDAHAB
   MPESA
-}
-
-enum PaymentSnapshotStatus {
-  PENDING
-  CAPTURED
-  VOIDED
 }
 
 enum PaymentStatus {
@@ -980,29 +908,6 @@ enum PeriodType {
   MONTHLY
 }
 
-enum PermissionAction {
-  CREATE
-  READ
-  UPDATE
-  DELETE
-  EXECUTE
-  MANAGE
-  APPROVE
-}
-
-enum PermissionCategory {
-  PRODUCTS
-  ORDERS
-  PAYMENTS
-  USERS
-  ANALYTICS
-  SETTINGS
-  SECURITY
-  SYSTEM
-  TENANT
-  STORE
-}
-
 enum PermissionScope {
   GLOBAL
   TENANT
@@ -1026,12 +931,6 @@ enum PlanType {
   HYBRID
   ONE_TIME
   FREEMIUM
-}
-
-enum Platform {
-  WEB
-  IOS
-  ANDROID
 }
 
 enum PoolPeriodType {
@@ -1378,13 +1277,6 @@ enum StoreStatus {
   CLOSED
 }
 
-enum SubscriptionEvent {
-  CREATED
-  MIGRATED
-  CANCELED
-  REACTIVATED
-}
-
 enum SubscriptionEventType {
   CREATED
   ACTIVATED
@@ -1503,12 +1395,6 @@ enum WalletStatus {
   CLOSED
 }
 
-enum WalletTransactionType {
-  TOP_UP
-  PAYMENT
-  REFUND
-}
-
 enum WalletTxnStatus {
   PENDING
   COMPLETED
@@ -1519,15 +1405,6 @@ enum WalletTxnStatus {
 enum WalletTxnType {
   CREDIT
   DEBIT
-}
-
-enum WebhookDeliveryStatus {
-  PENDING
-  SENDING
-  SUCCESS
-  FAILED
-  TIMEOUT
-  RATE_LIMITED
 }
 
 enum WebhookEventType {

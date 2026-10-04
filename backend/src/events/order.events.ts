@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.ts"
-import { bumpCacheVersion } from "../cache/cacheVersion.ts";
+import { bumpCacheVersion } from "../infrastructure/cache/cacheVersion.ts";
 import { EventBus } from "./eventBus.ts";
 import { FinalizeOrderJob } from "../jobs/Order/finalizeOrder.job.ts";
 import { OrderNotificationJob } from "../jobs/Order/orderNotifications.job.ts";
@@ -43,27 +43,15 @@ EventBus.on("ORDER_CREATED", async ({ orderUuid, tenantUuid, storeUuid, totalAmo
   }
 });
   
-EventBus.on("ORDER_STATUS_CHANGED", async ({ orderUuid, tenantUuid, storeUuid, from, to }) => {
+EventBus.on("ORDER_STATUS_CHANGED", async ({ orderUuid, storeUuid, to }) => {
   await bumpCacheVersion(`store:${storeUuid}:dashboard`);
   await bumpCacheVersion(`store:${storeUuid}:active-orders`);
 
+  // Refunds for paid orders go through ORDER_CANCELLED_AFTER_PAYMENT
+  // (handlers/order/order.handlers.ts); requesting one here too would
+  // refund the order twice.
   if (to === "CANCELLED") {
     await InventoryOrderService.releaseForOrder({ orderUuid });
-
-    if (["PAID", "PREPARING"].includes(from)) {
-      await prisma.refund.create({
-        data: {
-          tenantUuid,
-          storeUuid,
-          orderUuid,
-          paymentUuid: (await prisma.payment.findFirst({ where: { orderUuid } }))?.uuid!,
-          amount: (await prisma.order.findUnique({ where: { uuid: orderUuid } }))?.totalAmount!,
-          reason: "ORDER_CANCELLED",
-          status: "REQUESTED",
-          requestedBy: "SYSTEM",
-        },
-      });
-    }
   }
 });
   
