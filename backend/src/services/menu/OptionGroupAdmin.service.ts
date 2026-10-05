@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts";
-import { MenuCacheService } from "./MenuCache.service.ts";
+import { MenuCacheService } from "./menuCache.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class OptionGroupAdminService {

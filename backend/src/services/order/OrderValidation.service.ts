@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { InventoryService } from "../inventory/inventory.service.ts";
 import { ProductOptionService } from "../products/productOption.service.ts";
-import { StoreHoursService } from "../store/storeHours.service.ts";
+import { StoreHoursService } from "../store/StoreHours.service.ts";
 
 export class OrderValidationService{
     //Validate order before creation

@@ -31,19 +31,26 @@ export function registerInventoryEventHandlers() {
         }
     });
  
-    eventBus.on("PAYMENT_FAILED", async (payload) => {
-        const { orderUuid } = payload;
-    
-        if (!orderUuid) return;
-    
+    // No PAYMENT_FAILED release: a failed payment can still be retried and
+    // succeed (FAILED -> PAID), so the reservation is kept until it expires
+    // (ReservationExpiryJob) or the order is cancelled.
+
+    // Moved from order.events.ts so it can be registered on its own.
+    // releaseForOrder only touches ACTIVE reservations, so overlapping calls
+    // (e.g. OrderCancellation.service releasing directly) are no-ops.
+    eventBus.on("ORDER_STATUS_CHANGED", async (payload) => {
+        const { orderUuid, to } = payload;
+
+        if (to !== "CANCELLED" || !orderUuid) return;
+
         try {
             await InventoryOrderService.releaseForOrder({ orderUuid });
-        
-            logWithContext("info", "[InventoryHandler] PAYMENT_FAILED — stock released", {
+
+            logWithContext("info", "[InventoryHandler] ORDER_CANCELLED — stock released", {
                 orderUuid,
             });
         } catch (error: any) {
-            logWithContext("error", "[InventoryHandler] PAYMENT_FAILED release failed", {
+            logWithContext("error", "[InventoryHandler] ORDER_CANCELLED release failed", {
                 orderUuid,
                 error: error.message,
             });
@@ -104,6 +111,13 @@ export function registerInventoryEventHandlers() {
         if (!orderUuid) return;
     
         try {
+            if (!(await hasUnreturnedSale(orderUuid))) {
+                logWithContext("info", "[InventoryHandler] PAYMENT_VOIDED — no sold stock to return", {
+                    orderUuid,
+                });
+                return;
+            }
+
             // Void = add stock back (reverse of deduction)
             const orderItems = await prisma.orderItem.findMany({
                 where: { orderUuid },
@@ -186,6 +200,13 @@ export function registerInventoryEventHandlers() {
                 return;
             }
     
+            if (!(await hasUnreturnedSale(orderUuid))) {
+                logWithContext("info", "[InventoryHandler] REFUND_COMPLETED — no sold stock to return", {
+                    orderUuid,
+                });
+                return;
+            }
+
             // Return stock (same logic as void)
             const orderItems = await prisma.orderItem.findMany({
                 where: { orderUuid },
@@ -265,7 +286,32 @@ export function registerInventoryEventHandlers() {
         await bumpCacheVersion(`store:${storeUuid}:dashboard`);
     });
     
-    logWithContext("info", "[InventoryHandlers] All inventory event handlers registered");
+    logWithContext("info", "[InventoryHandlers] All inventory event handlers registered", {});
+}
+
+// Stock is only returned on void/refund if the order actually sold it (a
+// SALE movement from commitForOrder/deductForOrder) and it hasn't been
+// returned since. Stops double returns when e.g. an order was cancelled
+// (reservation already released) and its late capture is then refunded, or
+// when a void is followed by a refund.
+async function hasUnreturnedSale(orderUuid: string): Promise<boolean> {
+    const lastSale = await prisma.inventoryMovement.findFirst({
+        where: { referenceType: "ORDER", referenceUuid: orderUuid, type: "SALE" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+    });
+    if (!lastSale) return false;
+
+    const returnedSince = await prisma.inventoryMovement.findFirst({
+        where: {
+            referenceType: "ORDER",
+            referenceUuid: orderUuid,
+            type: "RETURN",
+            createdAt: { gte: lastSale.createdAt },
+        },
+        select: { uuid: true },
+    });
+    return !returnedSince;
 }
 
 // HELPER: Update StoreDailyMetrics.itemsSold + CategoryDailyMetrics

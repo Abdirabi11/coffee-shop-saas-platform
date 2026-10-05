@@ -2,7 +2,7 @@ import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts"
 import { InventoryService } from "../inventory/inventory.service.ts";
 import { MenuService } from "../menu/menu.service.ts";
-import { OrderPricingService } from "./orderPricing.service.ts"
+import { OrderPricingService } from "./OrderPricing.service.ts"
 
 
 export class OrderModificationService{

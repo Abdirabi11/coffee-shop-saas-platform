@@ -43,16 +43,12 @@ EventBus.on("ORDER_CREATED", async ({ orderUuid, tenantUuid, storeUuid, totalAmo
   }
 });
   
-EventBus.on("ORDER_STATUS_CHANGED", async ({ orderUuid, storeUuid, to }) => {
+// Stock release on CANCELLED lives in inventory.handlers.ts (registered via
+// events/registerEvents.ts). Refunds for paid orders go through
+// ORDER_CANCELLED_AFTER_PAYMENT (handlers/order/order.handlers.ts).
+EventBus.on("ORDER_STATUS_CHANGED", async ({ storeUuid }) => {
   await bumpCacheVersion(`store:${storeUuid}:dashboard`);
   await bumpCacheVersion(`store:${storeUuid}:active-orders`);
-
-  // Refunds for paid orders go through ORDER_CANCELLED_AFTER_PAYMENT
-  // (handlers/order/order.handlers.ts); requesting one here too would
-  // refund the order twice.
-  if (to === "CANCELLED") {
-    await InventoryOrderService.releaseForOrder({ orderUuid });
-  }
 });
   
 EventBus.on("PAYMENT_CONFIRMED", async({ orderUuid, tenantUuid, storeUuid }) => {

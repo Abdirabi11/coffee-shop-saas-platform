@@ -2,8 +2,8 @@ import type { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { OrderCommandService } from "../../services/order/orderCommand.service.ts";
-import { OrderCancellationService } from "../../services/order/orderCancellation.service.ts";
+import { OrderCommandService } from "../../services/order/OrderCommand.service.ts";
+import { OrderCancellationService } from "../../services/order/OrderCancellation.service.ts";
 import { OrderModificationService } from "../../services/order/OrderModification.service.ts";
 import { OrderQueryService } from "../../services/order/OrderQuery.service.ts";
 import { OrderStatusService } from "../../services/order/OrderStatus.service.ts";

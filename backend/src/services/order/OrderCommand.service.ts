@@ -5,7 +5,7 @@ import { MetricsService } from "../../infrastructure/observability/MetricsServic
 import { InventoryOrderService } from "../inventory/InventoryOrder.service.ts";
 import { MenuService } from "../menu/menu.service.ts";
 import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";
-import { StoreHoursService } from "../store/storeHours.service.ts";
+import { StoreHoursService } from "../store/StoreHours.service.ts";
 import { IdempotencyService } from "./Idempotency.service.ts";
 import { OrderPricingService } from "./OrderPricing.service.ts";
 import { OrderNumberService } from "./OrderNumber.service.ts";
@@ -160,13 +160,17 @@ export class OrderCommandService {
             });
         
             // Reserve inventory (availableStock↓, reservedStock↑)
+            // Same transaction as the order: the reservation commits or
+            // rolls back with it, and can see the order items created above
             await InventoryOrderService.reserveForOrder({
-                orderUuid: order.uuid,
+                tenantUuid,
                 storeUuid,
+                orderUuid: order.uuid,
                 items: pricing.items.map((i) => ({
                     productUuid: i.productUuid,
                     quantity: i.quantity,
                 })),
+                tx,
             });
         
             return order;

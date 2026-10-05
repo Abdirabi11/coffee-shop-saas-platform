@@ -1,5 +1,5 @@
 import express from "express"
-import { OrderController } from "../../controllers/order/order.controller.ts";
+import { OrderController } from "../../controllers/order/Order.controller.ts";
 import { authenticate, authorize, requireStoreAccess } from "../../middlewares/auth.middleware.ts";
 import { burstProtection } from "../../middlewares/rateLimitByTenant.middleware.ts";
 import { rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts";

@@ -4,7 +4,7 @@ import prisma from "../../config/prisma.ts"
 import { StoreDashboardService } from "../../services/Dashboards/StoreDashboard.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { StoreDailyMetricsService } from "../../services/Dashboards/StoreDailyMetrics.service.ts";
-import { StoreHoursService } from "../../services/store/storeHours.service.ts";
+import { StoreHoursService } from "../../services/store/StoreHours.service.ts";
 
 export class StoreController {
  

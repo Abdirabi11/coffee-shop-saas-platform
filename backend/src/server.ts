@@ -33,6 +33,7 @@ import { notFoundHandler, errorHandler } from "./middlewares/errorHandler.middle
 import webhookRoutes from "./routes/webhooks/webhook.routes.ts";
 import webhookAdminRoutes from "./routes/webhooks/webhookAdmin.routes.ts";
 import { DashboardSocket } from "./websockets/DashboardSocket.ts";
+import { registerEventHandlers } from "./events/registerEvents.ts";
 
 
 
@@ -86,11 +87,8 @@ app.use(corsMiddleware);
 //   protectedRoutes,
 // ]);
 
-//registerPaymentEventHandlers()        → 12 handlers (fraud, alerts, metrics)
-//registerSuperAdminDashboardHandlers() → 12 handlers (super admin cache)
-//registerPaymentDashboardHandlers()    →  6 handlers (Tier 1: revenue metrics, cache, receipts)
-//registerTier2EventHandlers()          →  4 handlers (notifications, settlement)
-//registerInventoryEventHandlers()      →  7 handlers (inventory commit/release/deduct, cache)
+// Event listeners: see events/registerEvents.ts for what is (and isn't) on
+registerEventHandlers();
 
 app.use("/api", authRoutes);
 app.use("/api/store", storeRoutes);

@@ -1,6 +1,6 @@
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { OrderCancellationService } from "../../services/order/orderCancellation.service.ts";
+import { OrderCancellationService } from "../../services/order/OrderCancellation.service.ts";
 
 //Auto-cancel expired orders (payment timeout)
 //Runs every 5 minutes

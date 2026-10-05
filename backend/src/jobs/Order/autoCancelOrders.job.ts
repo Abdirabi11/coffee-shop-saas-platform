@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { DeadLetterQueue } from "../../services/order/DeadLetterQueue.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { OrderCancellationService } from "../../services/order/orderCancellation.service.ts";
+import { OrderCancellationService } from "../../services/order/OrderCancellation.service.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 const AUTO_CANCEL_MINUTES = 15;
