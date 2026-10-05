@@ -114,16 +114,16 @@ export class OrderController {
       MetricsService.increment("order.create.error", 1);
   
       // Handle specific errors
-      if (error.message.includes("Store is currently closed")) {
+      if (error.message.includes("STORE_CLOSED")) {
         return res.status(400).json({
           error: "STORE_CLOSED",
           message: "Store is currently closed",
         });
       };
   
-      if (error.message.includes("out of stock")) {
-        return res.status(400).json({
-          error: "INSUFFICIENT_STOCK",
+      if (error.message.includes("OUT_OF_STOCK")) {
+        return res.status(409).json({
+          error: "OUT_OF_STOCK",
           message: error.message,
         });
       };
@@ -344,22 +344,14 @@ export class OrderController {
         });
       }
 
-      // Cancel based on payment status
-      if (order.paymentStatus === "PAID") {
-        await OrderCancellationService.cancelAfterPayment({
-          tenantUuid,
-          orderUuid,
-          reason,
-          cancelledBy,
-        });
-      } else {
-        await OrderCancellationService.cancelBeforePayment({
-          tenantUuid,
-          orderUuid,
-          reason,
-          cancelledBy,
-        });
-      }
+      // Paid vs unpaid is decided under the order's row lock (a paid order
+      // gets a refund request); deciding here would race payment confirmation
+      const cancelled = await OrderCancellationService.cancel({
+        tenantUuid,
+        orderUuid,
+        reason,
+        cancelledBy,
+      });
 
       logWithContext("info", "[Order] Order cancelled", {
         traceId,
@@ -368,12 +360,15 @@ export class OrderController {
       });
 
       MetricsService.increment("order.cancelled", 1, {
-        isPaid: order.paymentStatus === "PAID",
+        isPaid: String(cancelled.refundRequested),
       });
 
       return res.status(200).json({
         success: true,
-        message: "Order cancelled successfully",
+        message: cancelled.refundRequested
+          ? "Order cancelled; refund requested"
+          : "Order cancelled successfully",
+        refundRequested: cancelled.refundRequested,
       });
 
     } catch (error: any) {

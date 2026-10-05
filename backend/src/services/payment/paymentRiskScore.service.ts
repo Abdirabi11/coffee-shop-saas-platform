@@ -1,8 +1,13 @@
+import type { RiskLevel } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 
+// PaymentRisk is keyed on @@unique([tenantUuid, userUuid]); by convention
+// its userUuid column holds the TENANT MEMBERSHIP uuid (tenantUser.uuid), so
+// risk stays isolated per tenant. (FraudEvent.userUuid is different: it's a
+// foreign key to User.)
 export class PaymentRiskScoreService{
     static async get(
         tenantUuid: string,
@@ -10,9 +15,9 @@ export class PaymentRiskScoreService{
     ): Promise<number> {
         const record = await prisma.paymentRisk.findUnique({
             where: {
-                tenantUuid_tenantUserUuid: {
+                tenantUuid_userUuid: {
                     tenantUuid,
-                    tenantUserUuid,
+                    userUuid: tenantUserUuid,
                 },
             },
         });
@@ -26,14 +31,14 @@ export class PaymentRiskScoreService{
         reason: string;
         source?: string;
     }) {
-        const tenantUuid = await this.getTenantUuid(input.tenantUserUuid);
+        const { tenantUuid, userUuid } = await this.getMembership(input.tenantUserUuid);
  
         await prisma.$transaction(async (tx) => {
             const updated = await tx.paymentRisk.upsert({
                 where: {
-                    tenantUuid_tenantUserUuid: {
+                    tenantUuid_userUuid: {
                         tenantUuid,
-                        tenantUserUuid: input.tenantUserUuid,
+                        userUuid: input.tenantUserUuid,
                     },
                 },
                 update: {
@@ -43,7 +48,7 @@ export class PaymentRiskScoreService{
                 },
                 create: {
                     tenantUuid,
-                    tenantUserUuid: input.tenantUserUuid,
+                    userUuid: input.tenantUserUuid,
                     score: input.delta,
                     level: this.calculateRiskLevel(input.delta),
                     lastIncidentAt: new Date(),
@@ -53,9 +58,9 @@ export class PaymentRiskScoreService{
             const newLevel = this.calculateRiskLevel(updated.score);
             await tx.paymentRisk.update({
                 where: {
-                    tenantUuid_tenantUserUuid: {
+                    tenantUuid_userUuid: {
                         tenantUuid,
-                        tenantUserUuid: input.tenantUserUuid,
+                        userUuid: input.tenantUserUuid,
                     },
                 },
                 data: { level: newLevel },
@@ -64,13 +69,12 @@ export class PaymentRiskScoreService{
             await tx.fraudEvent.create({
                 data: {
                     tenantUuid,
-                    userUuid: input.tenantUserUuid,
-                    storeUuid: "", // FIX: FraudEvent requires storeUuid — pass from caller or make nullable
+                    userUuid, // FK to User, not the membership
                     type: "PAYMENT_VELOCITY_EXCEEDED", // FIX: Use valid FraudType enum value
                     category: "PAYMENT",
                     severity: this.calculateSeverity(input.delta),
                     reason: input.reason,
-                    ipAddress: "SYSTEM", // FIX: FraudEvent requires ipAddress
+                    ipAddress: "SYSTEM",
                     metadata: {
                         delta: input.delta,
                         source: input.source || "PAYMENT_SYSTEM",
@@ -101,14 +105,14 @@ export class PaymentRiskScoreService{
         newScore: number;
         reason: string;
     }) {
-        const tenantUuid = await this.getTenantUuid(input.tenantUserUuid);
+        const { tenantUuid, userUuid } = await this.getMembership(input.tenantUserUuid);
  
         await prisma.$transaction(async (tx) => {
             await tx.paymentRisk.upsert({
                 where: {
-                    tenantUuid_tenantUserUuid: {
+                    tenantUuid_userUuid: {
                         tenantUuid,
-                        tenantUserUuid: input.tenantUserUuid,
+                        userUuid: input.tenantUserUuid,
                     },
                 },
                 update: {
@@ -118,7 +122,7 @@ export class PaymentRiskScoreService{
                 },
                 create: {
                     tenantUuid,
-                    tenantUserUuid: input.tenantUserUuid,
+                    userUuid: input.tenantUserUuid,
                     score: input.newScore,
                     level: this.calculateRiskLevel(input.newScore),
                 },
@@ -127,8 +131,7 @@ export class PaymentRiskScoreService{
             await tx.fraudEvent.create({
                 data: {
                     tenantUuid,
-                    userUuid: input.tenantUserUuid,
-                    storeUuid: "",
+                    userUuid, // FK to User, not the membership
                     type: "PAYMENT_VELOCITY_EXCEEDED", // Use valid FraudType enum
                     category: "PAYMENT",
                     severity: "LOW",
@@ -159,13 +162,12 @@ export class PaymentRiskScoreService{
             UPDATE "PaymentRisk"
             SET 
                 score = GREATEST(0, score - ${DECAY_AMOUNT}),
-                level = CASE
+                level = (CASE
                 WHEN GREATEST(0, score - ${DECAY_AMOUNT}) >= 80 THEN 'CRITICAL'
                 WHEN GREATEST(0, score - ${DECAY_AMOUNT}) >= 60 THEN 'HIGH'
                 WHEN GREATEST(0, score - ${DECAY_AMOUNT}) >= 40 THEN 'MEDIUM'
-                WHEN GREATEST(0, score - ${DECAY_AMOUNT}) >= 20 THEN 'LOW'
-                ELSE 'MINIMAL'
-                END
+                ELSE 'LOW'
+                END)::"RiskLevel"
             WHERE score > 0
         `;
     
@@ -175,13 +177,12 @@ export class PaymentRiskScoreService{
         });
     }
 
-    //Calculate risk level from score
-    private static calculateRiskLevel(score: number): string {
+    // Calculate risk level from score (RiskLevel has no level below LOW)
+    private static calculateRiskLevel(score: number): RiskLevel {
         if (score >= 80) return "CRITICAL";
         if (score >= 60) return "HIGH";
         if (score >= 40) return "MEDIUM";
-        if (score >= 20) return "LOW";
-        return "MINIMAL";
+        return "LOW";
     }
  
     // Calculate severity from delta
@@ -194,19 +195,19 @@ export class PaymentRiskScoreService{
         return "LOW";
     }
 
-   //Get tenant UUID from tenant user
-    private static async getTenantUuid(
+    // Tenant and user behind a tenant membership
+    private static async getMembership(
         tenantUserUuid: string
-    ): Promise<string> {
+    ): Promise<{ tenantUuid: string; userUuid: string }> {
         const tenantUser = await prisma.tenantUser.findUnique({
             where: { uuid: tenantUserUuid },
-            select: { tenantUuid: true },
+            select: { tenantUuid: true, userUuid: true },
         });
     
         if (!tenantUser) {
             throw new Error("TENANT_USER_NOT_FOUND");
         };
     
-        return tenantUser.tenantUuid;
+        return tenantUser;
     }
 };

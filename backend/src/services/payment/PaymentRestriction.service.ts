@@ -1,7 +1,9 @@
+import type { PaymentMethod, RestrictionSeverity, RestrictionType } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { PaymentRiskScoreService } from "./paymentRiskScore.service.ts";
 
+// PaymentRestriction.userUuid holds the tenant membership uuid
+// (tenantUser.uuid), same convention as PaymentRisk.
 export class PaymentRestrictionService {
     static async blockRetries(input: {
         tenantUserUuid: string;
@@ -11,7 +13,7 @@ export class PaymentRestrictionService {
         await this.upsertRestriction({
             tenantUserUuid: input.tenantUserUuid,
             tenantUuid: input.tenantUuid,
-            type: "BLOCK_RETRY",
+            type: "DISABLE_RETRY",
             severity: "MEDIUM",
             reason: input.reason || "High risk score - retries blocked",
         });
@@ -25,9 +27,9 @@ export class PaymentRestrictionService {
         await this.upsertRestriction({
             tenantUserUuid: input.tenantUserUuid,
             tenantUuid: input.tenantUuid,
-            type: "DISABLE_WALLET",
+            type: "BLOCK_WALLET_PAYMENTS",
             severity: "HIGH",
-            appliesToMethods: ["WALLET", "EVC_PLUS", "ZAAD", "EDAHAB", "MPESA"],
+            appliesToMethods: ["WALLET", "EVC_PLUS"],
             reason: input.reason || "Fraud risk - wallet payments disabled",
         });
     }
@@ -40,7 +42,7 @@ export class PaymentRestrictionService {
         await this.upsertRestriction({
             tenantUserUuid: input.tenantUserUuid,
             tenantUuid: input.tenantUuid,
-            type: "MANUAL_REVIEW",
+            type: "REQUIRE_MANUAL_REVIEW",
             severity: "HIGH",
             reason:
                 input.reason ||
@@ -50,11 +52,11 @@ export class PaymentRestrictionService {
     
     static async hasRestriction(
         tenantUserUuid: string,
-        type: string
+        type: RestrictionType
     ): Promise<boolean> {
         const restriction = await prisma.paymentRestriction.findFirst({
             where: {
-                tenantUserUuid,
+                userUuid: tenantUserUuid,
                 type,
                 active: true,
                 // Only count non-expired restrictions
@@ -71,7 +73,7 @@ export class PaymentRestrictionService {
     static async getActiveRestrictions(tenantUserUuid: string) {
         return prisma.paymentRestriction.findMany({
             where: {
-                tenantUserUuid,
+                userUuid: tenantUserUuid,
                 active: true,
                 OR: [
                 { effectiveUntil: null },
@@ -84,13 +86,13 @@ export class PaymentRestrictionService {
     
     static async removeRestriction(input: {
         tenantUserUuid: string;
-        type: string;
+        type: RestrictionType;
         removedBy: string;
         notes?: string;
     }) {
         const result = await prisma.paymentRestriction.updateMany({
             where: {
-                tenantUserUuid: input.tenantUserUuid,
+                userUuid: input.tenantUserUuid,
                 type: input.type,
                 active: true,
             },
@@ -113,16 +115,16 @@ export class PaymentRestrictionService {
     private static async upsertRestriction(input: {
         tenantUserUuid: string;
         tenantUuid: string;
-        type: string;
-        severity: string;
+        type: RestrictionType;
+        severity: RestrictionSeverity;
         reason: string;
-        appliesToMethods?: string[];
+        appliesToMethods?: PaymentMethod[];
         maxAmount?: number;
     }) {
         // Check if an active restriction of this type already exists
         const existing = await prisma.paymentRestriction.findFirst({
             where: {
-                tenantUserUuid: input.tenantUserUuid,
+                userUuid: input.tenantUserUuid,
                 tenantUuid: input.tenantUuid,
                 type: input.type,
                 active: true,
@@ -154,7 +156,7 @@ export class PaymentRestrictionService {
             await prisma.paymentRestriction.create({
                 data: {
                     tenantUuid: input.tenantUuid,
-                    tenantUserUuid: input.tenantUserUuid,
+                    userUuid: input.tenantUserUuid,
                     type: input.type,
                     severity: input.severity,
                     reason: input.reason,
@@ -169,54 +171,6 @@ export class PaymentRestrictionService {
                 type: input.type,
                 tenantUserUuid: input.tenantUserUuid,
                 severity: input.severity,
-            });
-        }
-    }
-}
- 
-// ════════════════════════════════════════════════════════════════════════════
-// RiskPolicyEnforcer
-// Applies restrictions based on current risk score thresholds
-// ════════════════════════════════════════════════════════════════════════════
- 
-export class RiskPolicyEnforcer {
-    static async apply(tenantUserUuid: string) {
-        const tenantUser = await prisma.tenantUser.findUnique({
-            where: { uuid: tenantUserUuid },
-            select: { tenantUuid: true },
-        });
-    
-        if (!tenantUser) return;
-    
-        const score = await PaymentRiskScoreService.get(
-            tenantUser.tenantUuid,
-            tenantUserUuid
-        );
-    
-        // Score >= 40: Block retries
-        if (score >= 40) {
-            await PaymentRestrictionService.blockRetries({
-                tenantUserUuid,
-                tenantUuid: tenantUser.tenantUuid,
-                reason: `Risk score ${score} — retries blocked`,
-            });
-        }
-    
-        // Score >= 60: Disable wallet payments
-        if (score >= 60) {
-            await PaymentRestrictionService.disableWallet({
-                tenantUserUuid,
-                tenantUuid: tenantUser.tenantUuid,
-                reason: `Risk score ${score} — wallet disabled`,
-            });
-        }
-    
-        // Score >= 80: Require manual review for everything
-        if (score >= 80) {
-            await PaymentRestrictionService.requireManualReview({
-                tenantUserUuid,
-                tenantUuid: tenantUser.tenantUuid,
-                reason: `Risk score ${score} — manual review required`,
             });
         }
     }

@@ -189,12 +189,18 @@ export function registerInventoryEventHandlers() {
         
             if (!order) return;
         
-            // Only return stock for full refunds
-            const isFullRefund = amount >= order.totalAmount;
-            if (!isFullRefund) {
+            // Only return stock once the order is fully refunded. Use the
+            // order's total COMPLETED refunds, not this event's amount, so a
+            // final partial refund that completes the full amount counts.
+            const refunded = (await prisma.refund.aggregate({
+                where: { orderUuid, status: "COMPLETED" },
+                _sum: { amount: true },
+            }))._sum.amount ?? 0;
+            if (refunded < order.totalAmount) {
                 logWithContext("info", "[InventoryHandler] Partial refund — no stock return", {
                     orderUuid,
                     refundAmount: amount,
+                    refundedTotal: refunded,
                     orderTotal: order.totalAmount,
                 });
                 return;

@@ -7,8 +7,10 @@ import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING: ["PAID", "PAYMENT_FAILED", "CANCELLED"],
-  PAID: ["PREPARING"],
-  PREPARING: ["READY"],
+  // Paid orders can be cancelled, but only through OrderCancellationService,
+  // which requests the refund (see REFUND_ON_CANCEL)
+  PAID: ["PREPARING", "CANCELLED"],
+  PREPARING: ["READY", "CANCELLED"],
   READY: ["COMPLETED"],
   // A failed payment attempt can still be followed by a successful retry
   PAYMENT_FAILED: ["PAID", "CANCELLED"],
@@ -16,11 +18,18 @@ const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   COMPLETED: [],
 };
 
+// Cancelling an order in one of these states means the customer has paid
+export const REFUND_ON_CANCEL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(["PAID", "PREPARING"]);
+
 export class OrderStatusService{
   static canTransition(from: OrderStatus, to: OrderStatus): boolean {
     return ORDER_TRANSITIONS[from]?.includes(to) ?? false;
   }
 
+  // The status is read and changed under a row lock on the order, so two
+  // concurrent writers (a status update, a cancellation, a payment
+  // confirmation) serialize and each one re-checks the state machine against
+  // the status the previous one committed.
   static async transition(
     orderUuid: string, 
     to: OrderStatus,
@@ -30,28 +39,32 @@ export class OrderStatusService{
       notes?: string;
     }
   ){
-    const order= await prisma.order.findUnique({
-      where: { uuid: orderUuid},
-    });
-    if (!order) {
-      throw new Error("Order not found");
-    };
-
-    if (!this.canTransition(order.status, to)) {
-      throw new Error( `Invalid transition: ${order.status} → ${to}` );
-    };
-
-    const previousStatus = order.status;
     const transitionedAt = new Date();
 
-    const duration = order.updatedAt
-      ? Math.floor((transitionedAt.getTime() - order.updatedAt.getTime()) / 1000)
-      : null;
+    const { before, updated } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "Order" WHERE "uuid" = ${orderUuid} FOR UPDATE`;
 
-    const updated= await prisma.$transaction(async (tx) => {
-      const updated= await tx.order.update({
-        where: {uuid: orderUuid},
-        data:{ 
+      const before = await tx.order.findUnique({
+        where: { uuid: orderUuid },
+      });
+      if (!before) {
+        throw new Error("Order not found");
+      };
+
+      if (!this.canTransition(before.status, to)) {
+        throw new Error(`Invalid transition: ${before.status} → ${to}`);
+      };
+
+      // A paid order must not be cancelled without its refund
+      if (to === "CANCELLED" && REFUND_ON_CANCEL.has(before.status)) {
+        throw new Error(`CANNOT_CANCEL_PAID_ORDER_HERE: ${before.status} orders are cancelled via OrderCancellationService`);
+      };
+
+      const duration = Math.floor((transitionedAt.getTime() - before.updatedAt.getTime()) / 1000);
+
+      const updated = await tx.order.update({
+        where: { uuid: orderUuid },
+        data: {
           status: to,
           ...(to === "READY" && { actualReadyAt: transitionedAt }),
           ...(to === "COMPLETED" && { deliveredAt: transitionedAt }),
@@ -59,15 +72,15 @@ export class OrderStatusService{
             cancelledAt: transitionedAt,
             cancelledBy: context?.changedBy,
             cancellationReason: context?.reason,
-          }),  
+          }),
         }
       });
 
       await tx.orderStatusHistory.create({
         data: {
-          tenantUuid: order.tenantUuid,
-          orderUuid: order.uuid,
-          fromStatus: previousStatus,
+          tenantUuid: before.tenantUuid,
+          orderUuid: before.uuid,
+          fromStatus: before.status,
           toStatus: to,
           changedBy: context?.changedBy,
           reason: context?.reason,
@@ -75,41 +88,33 @@ export class OrderStatusService{
           duration,
         },
       });
-      return updated;
-    })
-      
+
+      return { before, updated };
+    });
+
     EventBus.emit("ORDER_STATUS_CHANGED", {
       orderUuid,
-      tenantUuid: order.tenantUuid,
-      storeUuid: order.storeUuid,
-      from: previousStatus,
+      tenantUuid: before.tenantUuid,
+      storeUuid: before.storeUuid,
+      from: before.status,
       to,
       timestamp: transitionedAt,
     });
 
-    await this.handleStatusChangeEffects(order, to);
+    await this.handleStatusChangeEffects(before, to);
     return updated;
   }
 
   // Runs after the status change has committed, so a failing side effect
   // must not surface as a failed transition: log it instead of throwing.
   // Stock for CANCELLED is released by the ORDER_STATUS_CHANGED listener
-  // (events/order.events.ts), so it isn't released again here.
+  // (events/inventory.handlers.ts), so it isn't released again here.
   private static async handleStatusChangeEffects(
     order: Order,
     newStatus: OrderStatus
   ) {
     try {
       switch (newStatus) {
-        case "CANCELLED":
-          if (order.paymentStatus === "CAPTURED") {
-            await EventBus.emit("ORDER_CANCELLED_AFTER_PAYMENT", {
-              orderUuid: order.uuid,
-              tenantUuid: order.tenantUuid,
-            });
-          }
-          break;
-
         case "PAYMENT_FAILED":
           // Only releases ACTIVE reservations, so a repeat call is a no-op
           await InventoryOrderService.releaseForOrder({ orderUuid: order.uuid });

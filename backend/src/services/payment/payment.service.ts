@@ -8,7 +8,7 @@ import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/
 import { hitRateLimitWindow } from "../../lib/rateLimitWindow.ts";
 import { AccountService } from "../account/account.service.ts";
 import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
-import { OrderStatusService } from "../order/OrderStatus.service.ts";
+import { OrderStatusService, REFUND_ON_CANCEL } from "../order/OrderStatus.service.ts";
 import { RefundService } from "./Refund.service.ts";
 import { PaymentRateLimitService } from "./paymentRateLimit.service.ts";
 import { PaymentRiskScoreService } from "./paymentRiskScore.service.ts";
@@ -87,7 +87,7 @@ export class PaymentService{
     // is offline") read order.store.isOffline, which doesn't exist on Store,
     // so it never fired. Restore once the column exists.
 
-    await RiskPolicyEnforcer.apply(input.tenantUserUuid);
+    await RiskPolicyEnforcer.apply({ tenantUuid: order.tenantUuid, tenantUserUuid: input.tenantUserUuid });
 
     if (await AccountService.isPaymentLocked(input.tenantUserUuid)) {
       throw new Error("PAYMENT_LOCKED_BY_RISK_POLICY");
@@ -729,7 +729,11 @@ export class PaymentService{
         },
       });
 
-      if (OrderStatusService.canTransition(payment.order.status, "CANCELLED")) {
+      // A provider cancel never cancels a paid order (that needs a refund)
+      if (
+        OrderStatusService.canTransition(payment.order.status, "CANCELLED") &&
+        !REFUND_ON_CANCEL.has(payment.order.status)
+      ) {
         await tx.order.update({
           where: { uuid: payment.orderUuid },
           data: {

@@ -153,7 +153,7 @@ export class PaymentFraudEvaluator {
         source: "FRAUD_EVALUATOR",
       });
  
-      await RiskPolicyEnforcer.apply(tenantUserUuid);
+      await RiskPolicyEnforcer.apply({ tenantUuid: tenantContext.tenantUuid, tenantUserUuid });
     }
  
     logWithContext("info", "[FraudEvaluator] Payment failed evaluated", {
@@ -267,7 +267,7 @@ export class PaymentFraudEvaluator {
         source: "FRAUD_EVALUATOR",
       });
  
-      await RiskPolicyEnforcer.apply(tenantUserUuid);
+      await RiskPolicyEnforcer.apply({ tenantUuid: tenantContext.tenantUuid, tenantUserUuid });
     }
  
     logWithContext("info", "[FraudEvaluator] Refund evaluated", {

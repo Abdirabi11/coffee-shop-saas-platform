@@ -1,3 +1,4 @@
+import { PaymentProvider } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payment/PaymentStateMachine.ts";
 import { RefundStateMachine } from "../../domain/payment/RefundStateMachine.ts";
@@ -54,14 +55,18 @@ export class RefundService{
             throw new Error("INVALID_REFUND_AMOUNT");
         };
  
+        // Refund.type and Refund.provider are required columns
+        const refundType = refundAmount === totalPaid ? "FULL" : "PARTIAL";
+        const refundProvider = payment.provider ?? payment.paymentMethod; // cashier payments may have no provider
+
         // Apply risk policy enforcement before processing
         if (order.tenantUser) {
-            await RiskPolicyEnforcer.apply(order.tenantUser.uuid);
+            await RiskPolicyEnforcer.apply({ tenantUuid: order.tenantUuid, tenantUserUuid: order.tenantUser.uuid });
         
             // Check if manual review is required due to high fraud risk
             const requiresReview = await PaymentRestrictionService.hasRestriction(
                 order.tenantUser.uuid,
-                "MANUAL_REVIEW"
+                "REQUIRE_MANUAL_REVIEW"
             );
         
             if (requiresReview) {
@@ -74,10 +79,11 @@ export class RefundService{
                         storeUuid: order.storeUuid,
                         amount: refundAmount,
                         currency: payment.currency,
+                        type: refundType,
                         status: "REQUESTED",
                         reason: input.reason,
                         requestedBy: input.requestedBy,
-                        provider: payment.provider,
+                        provider: refundProvider,
                         snapshot: {
                             originalPayment: {
                                 amount: payment.amount,
@@ -130,10 +136,11 @@ export class RefundService{
                 storeUuid: order.storeUuid,
                 amount: refundAmount,
                 currency: payment.currency,
+                type: refundType,
                 status: "REQUESTED",
                 reason: input.reason,
                 requestedBy: input.requestedBy,
-                provider: payment.provider,
+                provider: refundProvider,
                 snapshot: {
                     originalPayment: {
                         amount: payment.amount,
@@ -300,111 +307,131 @@ export class RefundService{
         }
     }
  
+    // Provider-side refund notification (Stripe charge.refunded).
+    //
+    // totalRefunded is the provider's CUMULATIVE amount refunded on the
+    // payment (Stripe amount_refunded), not the size of this one refund, and
+    // a charge.refunded event carries the charge id, which is the same for
+    // every refund on that charge. So instead of recording "this event's
+    // refund", reconcile: whatever the provider has refunded beyond what we
+    // already hold (COMPLETED) or are in the middle of sending (PROCESSING,
+    // see processRefund) is new and gets one COMPLETED row. That makes the
+    // webhook for our own refund a no-op, records a dashboard refund once,
+    // and makes duplicate or out-of-order deliveries harmless.
     static async processProviderRefund(input: {
         provider: string;
-        providerRef: string;
-        amount: number;
+        providerRef: string;   // payment intent id
+        totalRefunded: number; // cumulative, minor units
+        chargeId: string;
         snapshot: any;
     }) {
-        // Find payment by provider ref
+        const provider = input.provider.toUpperCase() as PaymentProvider;
+        if (!Object.values(PaymentProvider).includes(provider)) {
+            throw new Error(`UNKNOWN_PROVIDER: ${input.provider}`);
+        }
+
         const payment = await prisma.payment.findFirst({
-            where: {
-                provider: input.provider.toUpperCase(),
-                providerRef: input.providerRef,
-            },
-            include: { refunds: true },
+            where: { provider, providerRef: input.providerRef },
+            select: { uuid: true },
         });
-    
         if (!payment) {
             throw new Error("PAYMENT_NOT_FOUND");
         }
-    
-        // Idempotency check
-        const existing = await prisma.refund.findFirst({
-            where: {
-                paymentUuid: payment.uuid,
-                providerRef: input.snapshot.id,
-            },
-        });
-    
-        if (existing) {
-            logWithContext("info", "[Refund] Already processed (idempotent)", {
-                refundUuid: existing.uuid,
-                providerRef: input.snapshot.id,
-            });
-            return existing;
-        }
-    
-        // Create refund record from webhook
-        const refund = await prisma.$transaction(async (tx) => {
+
+        const result = await prisma.$transaction(async (tx) => {
+            // Serializes concurrent refund webhooks for the same payment
+            await tx.$queryRaw`SELECT 1 FROM "Payment" WHERE "uuid" = ${payment.uuid} FOR UPDATE`;
+            const locked = await tx.payment.findUniqueOrThrow({ where: { uuid: payment.uuid } });
+
+            const sumByStatus = async (status: "COMPLETED" | "PROCESSING") =>
+                (await tx.refund.aggregate({
+                    where: { paymentUuid: locked.uuid, status },
+                    _sum: { amount: true },
+                }))._sum.amount ?? 0;
+
+            const completed = await sumByStatus("COMPLETED");
+            const inFlight = await sumByStatus("PROCESSING");
+            const newAmount = input.totalRefunded - completed - inFlight;
+
+            if (newAmount <= 0) {
+                return { refund: null, completed, inFlight };
+            }
+
+            const refundedAfter = completed + newAmount;
             const refund = await tx.refund.create({
                 data: {
-                    tenantUuid: payment.tenantUuid,
-                    paymentUuid: payment.uuid,
-                    orderUuid: payment.orderUuid,
-                    storeUuid: payment.storeUuid,
-            
-                    provider: payment.provider,
-                    providerRef: input.snapshot.id,
-            
-                    amount: input.amount,
-                    currency: payment.currency,
-            
+                    tenantUuid: locked.tenantUuid,
+                    paymentUuid: locked.uuid,
+                    orderUuid: locked.orderUuid,
+                    storeUuid: locked.storeUuid,
+
+                    provider: locked.provider ?? locked.paymentMethod,
+                    // Unique per refunded total, so it identifies this step
+                    providerRef: `${input.chargeId}:${input.totalRefunded}`,
+
+                    amount: newAmount,
+                    currency: locked.currency,
+                    type: newAmount >= locked.amount ? "FULL" : "PARTIAL",
+
                     status: "COMPLETED",
                     reason: "Refund processed by provider",
                     requestedBy: "SYSTEM",
                     processedAt: new Date(),
-        
+
                     snapshot: input.snapshot,
                 },
             });
-        
-            // Calculate total refunded
-            const totals = await tx.refund.aggregate({
-                where: {
-                    paymentUuid: payment.uuid,
-                    status: "COMPLETED",
-                },
-                _sum: { amount: true },
-            });
-    
-            const totalRefunded = totals._sum.amount || 0;
-    
-            // Update payment status
-            if (totalRefunded >= payment.amount) {
-                PaymentStateMachine.assertTransition(payment.status, "REFUNDED");
-                await tx.payment.update({
-                    where: { uuid: payment.uuid },
-                    data: { status: "REFUNDED" },
-                });
-            } else {
-                PaymentStateMachine.assertTransition(
-                    payment.status,
-                    "PARTIALLY_REFUNDED"
-                );
-                await tx.payment.update({
-                    where: { uuid: payment.uuid },
-                    data: { status: "PARTIALLY_REFUNDED" },
-                });
+
+            const nextStatus = refundedAfter >= locked.amount ? "REFUNDED" : "PARTIALLY_REFUNDED";
+            if (locked.status !== nextStatus) {
+                if (PaymentStateMachine.canTransition(locked.status, nextStatus)) {
+                    await tx.payment.update({
+                        where: { uuid: locked.uuid },
+                        data: { status: nextStatus },
+                    });
+                } else {
+                    // e.g. a refund on a payment we never saw captured. Throwing
+                    // would make the provider retry forever; flag it instead.
+                    await tx.payment.update({
+                        where: { uuid: locked.uuid },
+                        data: {
+                            flaggedForReview: true,
+                            flaggedAt: new Date(),
+                            flagReason: `PROVIDER_REFUND_ON_${locked.status}_PAYMENT: ${input.chargeId}`,
+                        },
+                    });
+                }
             }
-        
-            return refund;
+
+            return { refund, completed: refundedAfter, inFlight };
         });
-    
+
+        if (!result.refund) {
+            logWithContext("info", "[Refund] Provider refund already recorded or in flight", {
+                paymentUuid: payment.uuid,
+                totalRefunded: input.totalRefunded,
+                completed: result.completed,
+                inFlight: result.inFlight,
+            });
+            return null;
+        }
+
+        const { refund } = result;
         EventBus.emit("REFUND_COMPLETED", {
             refundUuid: refund.uuid,
-            paymentUuid: payment.uuid,
-            orderUuid: payment.orderUuid,
-            tenantUuid: payment.tenantUuid,
-            storeUuid: payment.storeUuid,
+            paymentUuid: refund.paymentUuid,
+            orderUuid: refund.orderUuid,
+            tenantUuid: refund.tenantUuid,
+            storeUuid: refund.storeUuid,
             amount: refund.amount,
         });
-    
+
         logWithContext("info", "[Refund] Processed from webhook", {
             refundUuid: refund.uuid,
-            providerRef: input.snapshot.id,
+            amount: refund.amount,
+            totalRefunded: input.totalRefunded,
         });
-    
+
         return refund;
     }
 };

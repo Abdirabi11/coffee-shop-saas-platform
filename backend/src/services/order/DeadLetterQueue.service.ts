@@ -25,7 +25,7 @@ export class DeadLetterQueue {
 
   private static categorizeError(error: string): string {
     if (error.includes("timeout")) return "TIMEOUT";
-    if (error.includes("INSUFFICIENT_STOCK")) return "VALIDATION";
+    if (error.includes("INSUFFICIENT_STOCK") || error.includes("OUT_OF_STOCK")) return "VALIDATION";
     if (error.includes("not found")) return "NOT_FOUND";
     return "EXCEPTION";
   }

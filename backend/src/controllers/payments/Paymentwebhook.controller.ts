@@ -139,10 +139,12 @@ export class PaymentWebhookController {
         const isDisputeEvent = event.type.startsWith("charge.dispute");
 
         if (event.type === "charge.refunded") {
+            // amount_refunded is the charge's cumulative refunded total
             await RefundService.processProviderRefund({
                 provider: "stripe",
                 providerRef: data.payment_intent,
-                amount: data.amount_refunded,
+                totalRefunded: data.amount_refunded,
+                chargeId: data.id,
                 snapshot: data,
             });
             MetricsService.increment("refund.webhook.processed", 1, { provider: "stripe" });
