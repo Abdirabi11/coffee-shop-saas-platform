@@ -40,6 +40,11 @@ import { registerEventHandlers } from "./events/registerEvents.ts";
 const app = express();
 const PORT: number = Number(process.env.PORT) || 5004;
 
+// Number of proxies in front of the app (default: one load balancer), so
+// req.ip is the real client. Not `true`: that would trust a client-supplied
+// X-Forwarded-For and let callers pick their own rate-limit bucket.
+app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
 app.use(helmet());
 app.use(securityHeadersMiddleware);
 

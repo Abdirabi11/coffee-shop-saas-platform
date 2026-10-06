@@ -7,7 +7,7 @@ import { MenuService } from "../menu/menu.service.ts";
 import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";
 import { OrderNumberService } from "../order/OrderNumber.service.ts";
 import { OrderPricingService } from "../order/OrderPricing.service.ts";
-import { OrderStatusService } from "../order/OrderStatus.service.ts";
+import { MANUALLY_SETTABLE_STATUSES, OrderStatusService } from "../order/OrderStatus.service.ts";
 
 const MAX_SYNC_ITEMS = 100;
 
@@ -50,15 +50,6 @@ export interface OrderSyncResult {
     error?: string;
     requiresManualReview?: boolean;
 }
-
-// Status changes a device may push. PAID is excluded: payment state only
-// comes from the payment flow, never from a client claim.
-const CLIENT_SETTABLE_STATUSES = new Set<OrderStatus>([
-    OrderStatus.PREPARING,
-    OrderStatus.READY,
-    OrderStatus.COMPLETED,
-    OrderStatus.CANCELLED,
-]);
 
 export class OrderSyncService{
     //Sync order from mobile app (offline → online)
@@ -301,7 +292,7 @@ export class OrderSyncService{
         const { serverOrder, clientOrder } = input;
         const requested = clientOrder.status as OrderStatus;
 
-        if (requested === serverOrder.status || !CLIENT_SETTABLE_STATUSES.has(requested)) {
+        if (requested === serverOrder.status || !MANUALLY_SETTABLE_STATUSES.has(requested)) {
             MetricsService.increment("order.sync.replayed", 1);
             return this.replayResult(serverOrder);
         }
@@ -317,6 +308,7 @@ export class OrderSyncService{
 
         try {
             await OrderStatusService.transition(serverOrder.uuid, requested, {
+                tenantUuid: input.tenantUuid,
                 changedBy: input.userUuid,
                 reason: "OFFLINE_SYNC",
             });

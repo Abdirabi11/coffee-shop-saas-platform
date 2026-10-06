@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma.ts"
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 type ResolvedOrderItem = {
     productUuid: string;
@@ -145,56 +146,25 @@ export class OrderPricingService{
         };
     }
 
+    // TODO: store/tenant promo codes need their own model (scoped by
+    // tenantUuid/storeUuid, with usage limits). Until it exists no code is
+    // applied. `Coupon` is SaaS subscription billing and must never discount
+    // an order, or a platform code could zero out a customer's bill.
     private static async applyPromotions(
         tenantUuid: string,
         storeUuid: string,
         items: ResolvedOrderItem[],
         subtotal: number,
         options?: { promoCode?: string; userTier?: string }
-    ) {
-        let discountAmount = 0;
-        const appliedPromos: any[] = [];
-
+    ): Promise<{ discountAmount: number; appliedPromos: any[] }> {
         if (options?.promoCode) {
-            const promo = await prisma.coupon.findFirst({
-                where: {
-                    code: options.promoCode,
-                    isActive: true,
-                    validFrom: { lte: new Date() },
-                    OR: [
-                        { validUntil: null },
-                        { validUntil: { gte: new Date() } },
-                    ],
-                },
+            logWithContext("warn", "[OrderPricing] Promo code ignored: order promos not supported", {
+                tenantUuid,
+                storeUuid,
             });
-    
-            if (promo) {
-                if (promo.minimumAmount && subtotal < promo.minimumAmount) {
-                    throw new Error(
-                        `Minimum order amount not met. Required: ${promo.minimumAmount / 100}`
-                    );
-                }
-    
-                let promoDiscount = 0;
-                if (promo.discountType === "PERCENTAGE") {
-                    promoDiscount = Math.round(subtotal * (promo.percentOff! / 100));
-                    if (promo.maxDiscountAmount) {
-                        promoDiscount = Math.min(promoDiscount, promo.maxDiscountAmount);
-                    }
-                } else if (promo.discountType === "FIXED_AMOUNT") {
-                    promoDiscount = promo.amountOff!;
-                }
-    
-                discountAmount += promoDiscount;
-                appliedPromos.push({
-                    code: promo.code,
-                    type: promo.discountType,
-                    amount: promoDiscount,
-                });
-            }
         };
-        
-        return { discountAmount, appliedPromos };
+
+        return { discountAmount: 0, appliedPromos: [] };
     }
 
     private static async calculateTax(
@@ -207,7 +177,7 @@ export class OrderPricingService{
           select: { taxRate: true },
         });
     
-        const taxRate = store?.taxRate ?? 0.1; 
+        const taxRate = store?.taxRate?.toNumber() ?? 0.1;
     
         const taxableAmount = items.reduce(
           (sum, item) => sum + item.finalPrice,
@@ -237,7 +207,7 @@ export class OrderPricingService{
           select: { serviceChargeRate: true },
         });
     
-        const rate = store?.serviceChargeRate ?? 0;
+        const rate = store?.serviceChargeRate?.toNumber() ?? 0;
         return Math.round(subtotal * rate);
     }
 

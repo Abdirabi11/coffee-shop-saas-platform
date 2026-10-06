@@ -1,8 +1,7 @@
 import express from "express"
 import { OrderController } from "../../controllers/order/Order.controller.ts";
 import { authenticate, authorize, requireStoreAccess } from "../../middlewares/auth.middleware.ts";
-import { burstProtection } from "../../middlewares/rateLimitByTenant.middleware.ts";
-import { rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts";
+import { burstProtection, rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 
 const router = express.Router();
@@ -13,8 +12,10 @@ router.use(requireTenantContext);
 // Burst protection (10 requests in 10 seconds)
 router.use(burstProtection());
 
-// Rate limiting per tenant (60 orders per hour max)
-router.use(rateLimitByTenant({ points: 60, duration: 3600 }))
+// Per user within the tenant. Reads are generous so kitchen display / order
+// screen polling doesn't starve writes; writes are capped separately.
+router.use(rateLimitByTenant({ points: 300, duration: 60, keyPrefix: "order:read", methods: ["GET"] }));
+router.use(rateLimitByTenant({ points: 60, duration: 60, keyPrefix: "order:write", methods: ["POST", "PUT", "PATCH", "DELETE"] }));
 
 //Create order
 router.post(

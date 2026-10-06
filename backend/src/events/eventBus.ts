@@ -1,4 +1,6 @@
+import type { AuditCategory } from "@prisma/client";
 import prisma from "../config/prisma.ts"
+import { logWithContext } from "../infrastructure/observability/Logger.ts";
 
 type EventPayload = Record<string, any>;
 type EventHandler = (payload: EventPayload) => Promise<void> | void;
@@ -51,22 +53,55 @@ class EventBus {
   //Persist audit trail to database
   private async persistAudit(event: string, payload: EventPayload) {
     try {
+      const scope = await this.resolveScope(payload);
+      if (!scope) {
+        // tenantUuid is a required foreign key: a row without it cannot be written
+        logWithContext("error", "[EventBus] Audit dropped: no tenant scope", { event, payload });
+        return;
+      }
+
+      const entityType = this.extractEntityType(event);
+      const entityUuid = this.extractEntityUuid(event, payload);
+      const performedBy =
+        payload.actorUuid || payload.createdBy || payload.updatedBy ||
+        payload.deletedBy || payload.cancelledBy || "SYSTEM";
+
       await prisma.auditLog.create({
         data: {
-          tenantUuid: payload.tenantUuid || "SYSTEM",
+          tenantUuid: scope.tenantUuid,
+          storeUuid: scope.storeUuid,
+          actorUuid: payload.actorUuid ?? null,
           action: event,
-          entityType: this.extractEntityType(event),
-          entityUuid: this.extractEntityUuid(payload),
-          performedBy: payload.createdBy || payload.updatedBy || payload.deletedBy || "SYSTEM",
-          metadata: payload,
-          ipAddress: payload.ipAddress,
-          userAgent: payload.userAgent,
-          createdAt: new Date(),
+          category: this.extractCategory(event),
+          entityType,
+          entityUuid,
+          targetType: entityType,
+          targetUuid: entityUuid,
+          performedBy,
+          metadata: JSON.parse(JSON.stringify(payload)),
+          ipAddress: payload.ipAddress || "SYSTEM",
+          userAgent: payload.userAgent || "SYSTEM",
         },
       });
     } catch (error: any) {
-      console.error(`[EventBus] Failed to persist audit for ${event}:`, error.message);
+      logWithContext("error", "[EventBus] Failed to persist audit", { event, error: error.message });
     }
+  }
+
+  // Webhook-originated events may carry only an orderUuid
+  private async resolveScope(
+    payload: EventPayload
+  ): Promise<{ tenantUuid: string; storeUuid: string | null } | null> {
+    if (payload.tenantUuid) {
+      return { tenantUuid: payload.tenantUuid, storeUuid: payload.storeUuid ?? null };
+    }
+    if (!payload.orderUuid) return null;
+
+    const order = await prisma.order.findUnique({
+      where: { uuid: payload.orderUuid },
+      select: { tenantUuid: true, storeUuid: true },
+    });
+    return order ? { tenantUuid: order.tenantUuid, storeUuid: order.storeUuid } : null;
   }
 
   //Log failed event handler
@@ -90,12 +125,20 @@ class EventBus {
   private extractEntityType(event: string): string {
     if (event.startsWith("PRODUCT_")) return "PRODUCT";
     if (event.startsWith("PAYMENT_")) return "PAYMENT";
+    if (event.startsWith("REFUND_")) return "REFUND";
     if (event.startsWith("ORDER_")) return "ORDER";
     return "UNKNOWN";
   }
 
+  private extractCategory(event: string): AuditCategory {
+    if (event.startsWith("PAYMENT_") || event.startsWith("REFUND_")) return "FINANCIAL";
+    if (event.startsWith("ORDER_")) return "ORDER";
+    return "DATA_MODIFICATION";
+  }
+
   //Extract entity UUID from payload
-  private extractEntityUuid(payload: EventPayload): string | undefined {
+  private extractEntityUuid(event: string, payload: EventPayload): string | undefined {
+    if (event.startsWith("REFUND_") && payload.refundUuid) return payload.refundUuid;
     return payload.productUuid || 
       payload.paymentUuid || 
       payload.orderUuid || 

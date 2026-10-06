@@ -1982,10 +1982,11 @@ model FraudIPAddress {
 }
 
 model AuditLog {
-  uuid       String @id @default(uuid())
+  uuid       String  @id @default(uuid())
   tenantUuid String
-  storeUuid  String
-  actorUuid  String
+  // Null for tenant-level events and for system actors (webhooks, jobs)
+  storeUuid  String?
+  actorUuid  String?
 
   // Action details 
   action     String
@@ -2003,6 +2004,7 @@ model AuditLog {
   changesBefore Json?
   changesAfter  Json?
   changeSummary String?
+  metadata      Json?
 
   // Context
   ipAddress         String
@@ -2020,9 +2022,9 @@ model AuditLog {
   approved         Boolean?
   approvedBy       String?
 
-  tenant Tenant     @relation(fields: [tenantUuid], references: [uuid])
-  store  Store      @relation(fields: [storeUuid], references: [uuid])
-  actor  TenantUser @relation(fields: [actorUuid], references: [uuid])
+  tenant Tenant      @relation(fields: [tenantUuid], references: [uuid])
+  store  Store?      @relation(fields: [storeUuid], references: [uuid])
+  actor  TenantUser? @relation(fields: [actorUuid], references: [uuid])
 
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userUuid], references: [uuid])

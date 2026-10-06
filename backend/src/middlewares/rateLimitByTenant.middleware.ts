@@ -2,24 +2,35 @@ import type { Request, Response, NextFunction } from "express";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { hitRateLimitWindow } from "../lib/rateLimitWindow.ts";
 
+// Each caller gets its own bucket inside its tenant: keying on the tenant
+// alone let one busy client (e.g. a kitchen display polling) exhaust the
+// limit for every user of the store. The caller is the authenticated user,
+// else the IP. The client-sent x-device-id is not used, since rotating it
+// would hand out fresh buckets.
 export const rateLimitByTenant = ({
     points,
     duration,
     keyPrefix = "order",
+    methods,
   }: {
-    points: number; // Max requests
+    points: number; // Max requests per caller
     duration: number; // Window in seconds
     keyPrefix?: string;
+    methods?: string[]; // Only count these HTTP methods (default: all)
 }) => {
     return async (req: Request, res: Response, next: NextFunction) => {
+        if (methods && !methods.includes(req.method)) {
+            return next();
+        }
+
         try {
             // Get tenant UUID (should be set by requireTenantContext middleware)
             const tenantUuid = req.tenant?.uuid;
-            const userUuid = req.user?.userUuid;
-            const ip = req.ip;
+            const caller = req.user?.userUuid
+                ? `user:${req.user.userUuid}`
+                : req.ip ? `ip:${req.ip}` : undefined;
 
-            // Build identifier (prefer tenant > user > IP)
-            const identifier = tenantUuid || userUuid || ip;
+            const identifier = caller && `${tenantUuid ?? "public"}:${caller}`;
 
             if (!identifier) {
                 logWithContext("warn", "[RateLimit] No identifier found, allowing request", {});

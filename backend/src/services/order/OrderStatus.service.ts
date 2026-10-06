@@ -21,6 +21,15 @@ const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 // Cancelling an order in one of these states means the customer has paid
 export const REFUND_ON_CANCEL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(["PAID", "PREPARING"]);
 
+// Statuses staff (PATCH /orders/:uuid/status) and offline sync may request.
+// PAID and PAYMENT_FAILED are owned by the payment flow and are never set by hand.
+export const MANUALLY_SETTABLE_STATUSES: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
+  "PREPARING",
+  "READY",
+  "COMPLETED",
+  "CANCELLED",
+]);
+
 export class OrderStatusService{
   static canTransition(from: OrderStatus, to: OrderStatus): boolean {
     return ORDER_TRANSITIONS[from]?.includes(to) ?? false;
@@ -30,10 +39,14 @@ export class OrderStatusService{
   // concurrent writers (a status update, a cancellation, a payment
   // confirmation) serialize and each one re-checks the state machine against
   // the status the previous one committed.
+  //
+  // Request-driven callers must pass tenantUuid: an order belonging to another
+  // tenant is then reported as not found rather than modified.
   static async transition(
     orderUuid: string, 
     to: OrderStatus,
     context?: {
+      tenantUuid?: string;
       changedBy?: string;
       reason?: string;
       notes?: string;
@@ -42,13 +55,18 @@ export class OrderStatusService{
     const transitionedAt = new Date();
 
     const { before, updated } = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT 1 FROM "Order" WHERE "uuid" = ${orderUuid} FOR UPDATE`;
+      const tenantUuid = context?.tenantUuid;
+      if (tenantUuid) {
+        await tx.$queryRaw`SELECT 1 FROM "Order" WHERE "uuid" = ${orderUuid} AND "tenantUuid" = ${tenantUuid} FOR UPDATE`;
+      } else {
+        await tx.$queryRaw`SELECT 1 FROM "Order" WHERE "uuid" = ${orderUuid} FOR UPDATE`;
+      }
 
-      const before = await tx.order.findUnique({
-        where: { uuid: orderUuid },
+      const before = await tx.order.findFirst({
+        where: { uuid: orderUuid, ...(tenantUuid && { tenantUuid }) },
       });
       if (!before) {
-        throw new Error("Order not found");
+        throw new Error("ORDER_NOT_FOUND");
       };
 
       if (!this.canTransition(before.status, to)) {

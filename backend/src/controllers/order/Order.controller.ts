@@ -6,7 +6,7 @@ import { OrderCommandService } from "../../services/order/OrderCommand.service.t
 import { OrderCancellationService } from "../../services/order/OrderCancellation.service.ts";
 import { OrderModificationService } from "../../services/order/OrderModification.service.ts";
 import { OrderQueryService } from "../../services/order/OrderQuery.service.ts";
-import { OrderStatusService } from "../../services/order/OrderStatus.service.ts";
+import { MANUALLY_SETTABLE_STATUSES, OrderStatusService } from "../../services/order/OrderStatus.service.ts";
 import { OrderValidationService } from "../../services/order/OrderValidation.service.ts";
 import { createOrderSchema } from "../../validators/order.validator.ts";
 
@@ -261,7 +261,16 @@ export class OrderController {
         });
       }
 
+      // PAID / PAYMENT_FAILED are set only by the payment flow
+      if (!MANUALLY_SETTABLE_STATUSES.has(status)) {
+        return res.status(403).json({
+          error: "STATUS_NOT_ALLOWED",
+          message: `Status ${status} cannot be set manually`,
+        });
+      }
+
       const order = await OrderStatusService.transition(orderUuid, status, {
+        tenantUuid,
         changedBy,
         reason,
         notes,
@@ -287,6 +296,20 @@ export class OrderController {
         traceId,
         error: error.message,
       });
+
+      if (error.message === "ORDER_NOT_FOUND") {
+        return res.status(404).json({
+          error: "ORDER_NOT_FOUND",
+          message: "Order not found",
+        });
+      }
+
+      if (error.message.includes("CANNOT_CANCEL_PAID_ORDER_HERE")) {
+        return res.status(409).json({
+          error: "USE_CANCEL_ENDPOINT",
+          message: "Paid orders must be cancelled via POST /orders/:orderUuid/cancel so the refund is issued",
+        });
+      }
 
       if (error.message.includes("Invalid transition")) {
         return res.status(400).json({
