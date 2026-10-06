@@ -177,14 +177,15 @@ export class OrderPricingService{
           select: { taxRate: true },
         });
     
-        const taxRate = store?.taxRate?.toNumber() ?? 0.1;
+        // Stored as a percentage: 5.0 means 5%
+        const taxRate = store?.taxRate?.toNumber() ?? 10;
     
         const taxableAmount = items.reduce(
           (sum, item) => sum + item.finalPrice,
           0
         );
     
-        const taxAmount = Math.round(taxableAmount * taxRate);
+        const taxAmount = Math.round(taxableAmount * (taxRate / 100));
     
         const taxBreakdown = [
           {
@@ -207,8 +208,9 @@ export class OrderPricingService{
           select: { serviceChargeRate: true },
         });
     
+        // Stored as a percentage: 5.0 means 5%
         const rate = store?.serviceChargeRate?.toNumber() ?? 0;
-        return Math.round(subtotal * rate);
+        return Math.round(subtotal * (rate / 100));
     }
 
     private static distributeDiscount(

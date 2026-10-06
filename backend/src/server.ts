@@ -88,7 +88,6 @@ app.use(corsMiddleware);
 //   requireTenantContext,
 //   ensureTenantIsolation,
 //   trackTenantUsage,
-//   auditLogMiddleware,
 //   protectedRoutes,
 // ]);
 

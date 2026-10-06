@@ -75,17 +75,11 @@ export class ProductService{
         await MenuCacheService.invalidate(input.storeUuid);
 
         // Emit event
-        EventBus.on("PRODUCT_CREATED", async (payload) => {
-            await prisma.auditLog.create({
-                data: {
-                    tenantUuid: payload.tenantUuid,
-                    action: "PRODUCT_CREATED",
-                    entityType: "PRODUCT",
-                    entityUuid: payload.productUuid,
-                    performedBy: payload.createdBy,
-                    metadata: payload,
-                },
-            });
+        EventBus.emit("PRODUCT_CREATED", {
+            tenantUuid: input.tenantUuid,
+            storeUuid: input.storeUuid,
+            productUuid: product.uuid,
+            createdBy: input.createdBy,
         });
 
         // Metrics
