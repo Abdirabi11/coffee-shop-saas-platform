@@ -278,10 +278,18 @@ export class RefundService{
     
         RefundStateMachine.assertTransition(refund.status, "PROCESSING");
     
-        await prisma.refund.update({
-            where: { uuid: refund.uuid },
+        // Claim it: only one caller can move REQUESTED -> PROCESSING. The
+        // status check above is a fast path; two instances can both pass it.
+        const claimed = await prisma.refund.updateMany({
+            where: { uuid: refund.uuid, status: "REQUESTED" },
             data: { status: "PROCESSING" },
         });
+        if (claimed.count === 0) {
+            logWithContext("warn", "[Refund] Already claimed by another processor", {
+                refundUuid: refund.uuid,
+            });
+            return prisma.refund.findUniqueOrThrow({ where: { uuid: refund.uuid } });
+        }
     
         EventBus.emit("REFUND_PROCESSING", {
             refundUuid: refund.uuid,
@@ -295,6 +303,9 @@ export class RefundService{
                 provider: refund.provider,
                 providerRef: refund.payment.providerRef!,
                 amount: refund.amount,
+                // One provider refund per Refund row, whatever retries or
+                // races happen on our side
+                idempotencyKey: `refund-${refund.uuid}`,
             });
     
             // Update refund and payment status in transaction

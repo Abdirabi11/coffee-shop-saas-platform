@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { trackJobExecution } from "../lib/jobMonitor.ts";
+import { withJobLock } from "./jobLock.ts";
 import { PaymentExpiryCleanupJob } from "./Payment/PaymentExpiryCleanup.job.ts";
 import { DashboardCacheWarmingJob } from "./dashboard/dashboardCacheWarming.Job.ts";
 import { ShiftReminderJob } from "./staff/ShiftReminder.job.ts";
@@ -65,10 +66,13 @@ import { CohortRetentionJob } from "./Analytics/cohortRetention.job.ts";
 
 
 
+// Every instance registers every job; withJobLock makes sure each run
+// executes on one instance only, and skips a tick while the previous run of
+// the same job is still going. Skipped ticks don't touch the heartbeat.
 function schedule(cronExpr: string, jobName: string, fn: () => Promise<unknown>) {
   cron.schedule(cronExpr, async () => {
     try {
-      await trackJobExecution(jobName, fn);
+      await withJobLock(jobName, () => trackJobExecution(jobName, fn));
     } catch (error: any) {
       console.error(`[CRON] ${jobName} failed:`, error.message);
     }

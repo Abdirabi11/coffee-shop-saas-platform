@@ -93,7 +93,7 @@ export class EVCPlusProvider implements PaymentProvider {
         }
     }
     
-    async refund(input: { providerRef: string; amount: number }) {
+    async refund(input: { providerRef: string; amount: number; idempotencyKey: string }) {
         try {
             const response = await axios.post(
                 `${this.baseURL}/refunds`,
@@ -107,6 +107,8 @@ export class EVCPlusProvider implements PaymentProvider {
                     headers: {
                         "Authorization": `Bearer ${this.apiKey}`,
                         "Content-Type": "application/json",
+                        // As createIntent does; TODO: confirm EVC dedupes refunds on it
+                        "Idempotency-Key": input.idempotencyKey,
                     },
                 }
             );

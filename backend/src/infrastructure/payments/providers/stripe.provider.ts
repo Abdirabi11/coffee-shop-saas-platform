@@ -71,12 +71,17 @@ export class StripeProvider implements PaymentProvider {
         }
     }
  
-    async refund(input: { providerRef: string; amount: number }) {
+    async refund(input: { providerRef: string; amount: number; idempotencyKey: string }) {
         try {
-            const refund = await stripe.refunds.create({
-                payment_intent: input.providerRef,
-                amount: input.amount,
-            });
+            // Stripe returns the original refund for a repeated key instead
+            // of refunding again
+            const refund = await stripe.refunds.create(
+                {
+                    payment_intent: input.providerRef,
+                    amount: input.amount,
+                },
+                { idempotencyKey: input.idempotencyKey }
+            );
         
             logWithContext("info", "[Stripe] Refund created", {
                 refundId: refund.id,

@@ -24,6 +24,8 @@ export interface PaymentProvider {
   refund(input: {
     providerRef: string;
     amount: number;
+    // Same key => same refund. Must be stable per Refund row.
+    idempotencyKey: string;
   }): Promise<{
     providerRef: string;
     snapshot?: any;

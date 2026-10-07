@@ -4454,6 +4454,18 @@ model PaymentReconciliation {
   @@index([status])
 }
 
+// Lease that lets exactly one server instance run a scheduled job at a time
+// (see jobs/jobLock.ts). Held while lockedUntil is in the future; the holder
+// renews it while the job runs, and an expired lease (crashed instance) can
+// be taken over.
+model JobLock {
+  jobName     String   @id
+  lockToken   String // Random per acquisition: only the holder can renew or release
+  lockedBy    String // hostname:pid, for diagnostics
+  lockedUntil DateTime
+  acquiredAt  DateTime
+}
+
 model IdempotencyKey {
   uuid       String @id @default(uuid())
   tenantUuid String
@@ -6429,6 +6441,10 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // One invoice per subscription, type and billing period: generateMonthlyInvoices
+  // can't bill a period twice even if two instances race. periodStart is
+  // null for non-period invoices, and NULLs never conflict.
+  @@unique([tenantUuid, subscriptionUuid, type, periodStart])
   @@index([tenantUuid, status, dueDate])
   @@index([subscriptionUuid, status])
   @@index([invoiceNumber])

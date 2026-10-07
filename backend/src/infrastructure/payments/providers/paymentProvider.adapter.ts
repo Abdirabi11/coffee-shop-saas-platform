@@ -36,11 +36,13 @@ export class PaymentProviderAdapter {
         provider: string;
         providerRef: string;
         amount: number;
+        idempotencyKey: string;
     }) {
         const provider = getProvider(input.provider);
         return provider.refund({
             providerRef: input.providerRef,
             amount: input.amount,
+            idempotencyKey: input.idempotencyKey,
         });
     }
  
