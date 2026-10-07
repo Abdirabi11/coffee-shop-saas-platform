@@ -70,7 +70,8 @@ export class RefundService{
             );
         
             if (requiresReview) {
-                // Create refund marked as requiring approval
+                // Parked as PENDING_APPROVAL, not REQUESTED: the processor
+                // only picks up REQUESTED, so this waits for approveRefund
                 const refund = await prisma.refund.create({
                     data: {
                         tenantUuid: order.tenantUuid,
@@ -80,7 +81,7 @@ export class RefundService{
                         amount: refundAmount,
                         currency: payment.currency,
                         type: refundType,
-                        status: "REQUESTED",
+                        status: "PENDING_APPROVAL",
                         reason: input.reason,
                         requestedBy: input.requestedBy,
                         provider: refundProvider,
@@ -173,6 +174,93 @@ export class RefundService{
         return refund;
     }
  
+    // Manager decisions on a refund parked as PENDING_APPROVAL. The status
+    // change is conditional, so of two concurrent decisions only one applies.
+    // The requester can't approve their own refund.
+    static async approveRefund(input: {
+        tenantUuid: string;
+        refundUuid: string;
+        approvedBy: string;
+    }) {
+        const refund = await this.findPendingApproval(input.tenantUuid, input.refundUuid, "REQUESTED");
+
+        if (refund.requestedBy && refund.requestedBy === input.approvedBy) {
+            throw new Error("REFUND_SELF_APPROVAL_NOT_ALLOWED");
+        }
+
+        const claimed = await prisma.refund.updateMany({
+            where: { uuid: refund.uuid, tenantUuid: input.tenantUuid, status: "PENDING_APPROVAL" },
+            data: { status: "REQUESTED", approvedBy: input.approvedBy, approvedAt: new Date() },
+        });
+        if (claimed.count === 0) throw new Error("REFUND_ALREADY_DECIDED");
+
+        // Now queued for RefundProcessorJob, like a refund that never needed review
+        EventBus.emit("REFUND_REQUESTED", {
+            refundUuid: refund.uuid,
+            paymentUuid: refund.paymentUuid,
+            orderUuid: refund.orderUuid,
+            tenantUuid: refund.tenantUuid,
+            storeUuid: refund.storeUuid,
+            amount: refund.amount,
+            currency: refund.currency,
+            reason: refund.reason,
+            requestedBy: refund.requestedBy,
+            approvedBy: input.approvedBy,
+        });
+
+        logWithContext("info", "[Refund] Approved", {
+            refundUuid: refund.uuid,
+            approvedBy: input.approvedBy,
+            amount: refund.amount,
+        });
+
+        return prisma.refund.findUniqueOrThrow({ where: { uuid: refund.uuid } });
+    }
+
+    static async rejectRefund(input: {
+        tenantUuid: string;
+        refundUuid: string;
+        rejectedBy: string;
+        reason: string;
+    }) {
+        const refund = await this.findPendingApproval(input.tenantUuid, input.refundUuid, "REJECTED");
+
+        const claimed = await prisma.refund.updateMany({
+            where: { uuid: refund.uuid, tenantUuid: input.tenantUuid, status: "PENDING_APPROVAL" },
+            data: {
+                status: "REJECTED",
+                // Refund has no rejection columns; keep the decision with it
+                metadata: {
+                    ...((refund.metadata as Record<string, unknown> | null) ?? {}),
+                    rejection: {
+                        rejectedBy: input.rejectedBy,
+                        rejectedAt: new Date().toISOString(),
+                        reason: input.reason,
+                    },
+                },
+            },
+        });
+        if (claimed.count === 0) throw new Error("REFUND_ALREADY_DECIDED");
+
+        logWithContext("warn", "[Refund] Rejected", {
+            refundUuid: refund.uuid,
+            rejectedBy: input.rejectedBy,
+            reason: input.reason,
+        });
+
+        return prisma.refund.findUniqueOrThrow({ where: { uuid: refund.uuid } });
+    }
+
+    private static async findPendingApproval(tenantUuid: string, refundUuid: string, to: "REQUESTED" | "REJECTED") {
+        const refund = await prisma.refund.findFirst({ where: { uuid: refundUuid, tenantUuid } });
+        if (!refund) throw new Error("REFUND_NOT_FOUND");
+        if (refund.status !== "PENDING_APPROVAL") {
+            throw new Error(`REFUND_NOT_PENDING_APPROVAL: ${refund.status}`);
+        }
+        RefundStateMachine.assertTransition(refund.status, to);
+        return refund;
+    }
+
     static async processRefund(refundUuid: string) {
         const refund = await prisma.refund.findUnique({
             where: { uuid: refundUuid },

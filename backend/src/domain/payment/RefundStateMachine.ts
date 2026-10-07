@@ -1,16 +1,22 @@
 export type RefundStatus =
+  | "PENDING_APPROVAL"
   | "REQUESTED"
   | "PROCESSING"
   | "COMPLETED"
   | "FAILED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "REJECTED";
  
 const transitions: Record<RefundStatus, RefundStatus[]> = {
+  // High-risk refunds wait here for a manager; approval queues them for
+  // the processor (REQUESTED), rejection ends them
+  PENDING_APPROVAL: ["REQUESTED", "REJECTED"],
   REQUESTED: ["PROCESSING", "CANCELLED"],
   PROCESSING: ["COMPLETED", "FAILED"],
   COMPLETED: [],
   FAILED: [],
   CANCELLED: [],
+  REJECTED: [],
 };
  
 export class RefundStateMachine {
@@ -28,6 +34,6 @@ export class RefundStateMachine {
   }
  
   static isTerminal(state: string): boolean {
-    return ["COMPLETED", "FAILED", "CANCELLED"].includes(state);
+    return ["COMPLETED", "FAILED", "CANCELLED", "REJECTED"].includes(state);
   }
 }

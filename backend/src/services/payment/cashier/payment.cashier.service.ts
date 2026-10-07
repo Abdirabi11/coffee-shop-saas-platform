@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import type { Payment } from "@prisma/client";
 import prisma from "../../../config/prisma.ts"
 import { EventBus } from "../../../events/eventBus.ts";
 import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
@@ -34,7 +35,9 @@ export class CashierPaymentService{
             },
         });
         if (existingIdempotency) {
-            return JSON.parse(existingIdempotency.response as string);
+            // response is a Json column: Prisma already returns the stored
+            // payment as an object (dates as ISO strings), not a string
+            return existingIdempotency.response as unknown as Payment;
         };
  
         const order = await prisma.order.findFirst({
@@ -322,14 +325,25 @@ export class CashierPaymentService{
         }
 
         const updated = await prisma.$transaction(async (tx) => {
-            const updated = await tx.payment.update({
-                where: { uuid: input.paymentUuid },
+            // Claim the void atomically: the COMPLETED check above is only a
+            // fast path. Of two concurrent voids exactly one matches here; the
+            // other throws and rolls back before touching the drawer, so the
+            // drawer is reversed and PAYMENT_VOIDED (stock restore) emitted once.
+            const claimed = await tx.payment.updateMany({
+                where: { uuid: input.paymentUuid, tenantUuid: input.tenantUuid, status: "COMPLETED" },
                 data: {
                     status: "VOIDED",
                     voidedBy: input.voidedBy,
                     voidedAt: new Date(),
                     voidReason: input.voidReason,
                 },
+            });
+            if (claimed.count === 0) {
+                throw new Error("CANNOT_VOID_STATUS: already voided or changed");
+            }
+
+            const updated = await tx.payment.findUniqueOrThrow({
+                where: { uuid: input.paymentUuid },
             });
 
             const updatedOrder = await tx.order.update({

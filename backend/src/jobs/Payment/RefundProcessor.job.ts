@@ -8,6 +8,8 @@ export class RefundProcessorJob {
     static async run() {
         logWithContext("info", "[RefundProcessor] Starting");
     
+        // REQUESTED only: refunds parked as PENDING_APPROVAL (high fraud
+        // risk) must wait for RefundService.approveRefund, never auto-process
         const pendingRefunds = await prisma.refund.findMany({
             where: { status: "REQUESTED" },
             orderBy: { requestedAt: "asc" },

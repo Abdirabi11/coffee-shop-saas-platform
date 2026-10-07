@@ -979,6 +979,7 @@ enum ReconciliationStatus {
 }
 
 enum RefundStatus {
+  PENDING_APPROVAL // Parked for manager review (high fraud risk); the processor ignores it
   REQUESTED
   PROCESSING
   REFUNDED
