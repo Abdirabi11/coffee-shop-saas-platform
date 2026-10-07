@@ -26,68 +26,13 @@
 // Exits non-zero if any check fails. Local databases only.
 import "dotenv/config";
 import crypto from "node:crypto";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import { PrismaClient } from "@prisma/client";
+import { useFakeUpstashIfUnreachable } from "./lib/fake-upstash.ts";
 
-// The menu load behind order pricing reads a cache version from Redis with no
-// fallback (getCacheVersion), so an unreachable Redis fails every order with
-// MENU_FETCH_FAILED. This test is about database atomicity, so in that case
-// point the app's Upstash client at a minimal in-memory Upstash REST server.
-// Must run before src/lib/redis.ts is imported.
-async function upstashReachable(): Promise<boolean> {
-    try {
-        const res = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/ping`, {
-            headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
-            signal: AbortSignal.timeout(3000),
-        });
-        return res.ok;
-    } catch {
-        return false;
-    }
-}
-
-async function startFakeUpstash(): Promise<http.Server> {
-    const data = new Map<string, string>();
-    const run = ([cmd, ...args]: string[]): unknown => {
-        switch (cmd.toUpperCase()) {
-            case "PING": return "PONG";
-            case "GET": return data.get(args[0]) ?? null;
-            case "SET": data.set(args[0], String(args[1])); return "OK";
-            case "DEL": return args.filter((k) => data.delete(k)).length;
-            case "INCR": {
-                const next = Number(data.get(args[0]) ?? 0) + 1;
-                data.set(args[0], String(next));
-                return next;
-            }
-            default: return 1; // SADD / EXPIRE: tag bookkeeping, irrelevant here
-        }
-    };
-    // The client asks for base64 responses and decodes every string but "OK"
-    const encode = (v: unknown) => (typeof v === "string" && v !== "OK" ? Buffer.from(v).toString("base64") : v);
-
-    const server = http.createServer((req, res) => {
-        let body = "";
-        req.on("data", (chunk) => (body += chunk));
-        req.on("end", () => {
-            const parsed = JSON.parse(body || "[]");
-            const batch = req.url?.startsWith("/pipeline") || req.url?.startsWith("/multi-exec");
-            const out = batch
-                ? parsed.map((c: string[]) => ({ result: encode(run(c)) }))
-                : { result: encode(run(parsed)) };
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(out));
-        });
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    return server;
-}
-
-let fakeUpstash: http.Server | undefined;
-if (!process.argv.includes("--real-redis") && !(await upstashReachable())) {
-    fakeUpstash = await startFakeUpstash();
-    process.env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${(fakeUpstash.address() as AddressInfo).port}`;
-}
+// Unreachable Upstash fails every order (MENU_FETCH_FAILED before the
+// Redis fallback fix, slow after it); this test is about database atomicity,
+// so stand in for it unless --real-redis.
+const fakeUpstash = await useFakeUpstashIfUnreachable();
 
 // Quiet the app's logging; must be set before the app modules load, hence the
 // dynamic imports. Prisma logging stays off because the expected OUT_OF_STOCK
