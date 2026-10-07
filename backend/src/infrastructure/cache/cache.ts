@@ -30,7 +30,7 @@ function tagsForKey(key: string): string[] {
     return tags;
 }
 
-async function withTimeout<T>(op: Promise<T>, label: string): Promise<T> {
+export async function withTimeout<T>(op: Promise<T>, label: string): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(
