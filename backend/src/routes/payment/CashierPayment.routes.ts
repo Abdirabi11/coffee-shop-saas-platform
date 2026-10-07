@@ -1,5 +1,5 @@
 import express from "express"
-import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
+import { authenticate, authorize, storeOf } from "../../middlewares/auth.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { CashierPaymentController } from "../../controllers/payments/CashierPayment.controller.ts";
 import { checkRole } from "../../middlewares/checkRole.middleware.ts";
@@ -22,9 +22,11 @@ router.use(requireTenantContext);
 //   amount?, amountTendered?, changeGiven?,
 //   terminalId?, receiptNumber?, notes?
 // }
+// Roles are checked at the order's own store (not a client-supplied
+// storeUuid), so a cashier can only take payments for their stores' orders
 router.post(
     "/process",
-    checkRole(["CASHIER", "MANAGER", "ADMIN"]),
+    checkRole(["CASHIER", "MANAGER", "ADMIN"], storeOf.order("orderUuid", "body")),
     CashierPaymentController.processPayment
 );
  
@@ -32,7 +34,7 @@ router.post(
 // Body: { voidReason: string, managerPin: string }
 router.post(
     "/:paymentUuid/void",
-    checkRole(["MANAGER", "ADMIN"]),
+    checkRole(["MANAGER", "ADMIN"], storeOf.payment()),
     CashierPaymentController.voidPayment
 );
  
@@ -40,7 +42,7 @@ router.post(
 // Body: { correctAmount: number, correctionReason: string }
 router.post(
     "/:paymentUuid/correct",
-    checkRole(["ADMIN"]),
+    checkRole(["ADMIN"], storeOf.payment()),
     CashierPaymentController.correctPayment
 );
  

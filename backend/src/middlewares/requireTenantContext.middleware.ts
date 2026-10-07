@@ -13,7 +13,8 @@ export const requireTenantContext = async (
             return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
         }
 
-        if (user.role === "SUPER_ADMIN") {
+        // globalRole as read from the DB by authenticate, not the token claim
+        if (user.globalRole === "SUPER_ADMIN") {
             const tenantUuid = 
                 req.params.tenantUuid || 
                 req.headers["x-tenant-uuid"] as string;

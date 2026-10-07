@@ -10,10 +10,19 @@ declare global {
       // `req.tenantUser.uuid` instead, set separately below.
       user?: {
         userUuid: string;
-        role: string;
+        role: string; // globalRole at login; never use it to authorize
+        globalRole?: string; // from the DB, set by authenticate
         tenantUuid?: string;
         storeUuid?: string;
         tokenVersion: number;
+      };
+
+      // Set by authorize / authorizeAt / authorizeOrder / checkRole: the
+      // roles verified for this request (tenant + store in context), and
+      // whether they amount to staff access rather than plain membership
+      access?: {
+        roles: string[];
+        staff: boolean;
       };
 
       // Set by middlewares/requireTenantContext.middleware.ts — only present

@@ -190,10 +190,13 @@ export class StoreHoursService {
     }
  
     // Delete exception
-    static async removeException(exceptionUuid: string) {
-        return prisma.storeHourException.update({
-            where: { uuid: exceptionUuid },
+    // Scoped to the tenant and store, so an exception uuid from another
+    // store can't be deactivated. Returns false if nothing matched.
+    static async removeException(tenantUuid: string, storeUuid: string, exceptionUuid: string) {
+        const result = await prisma.storeHourException.updateMany({
+            where: { uuid: exceptionUuid, storeUuid, tenantUuid },
             data:  { isActive: false },
         });
+        return result.count > 0;
     }
 }

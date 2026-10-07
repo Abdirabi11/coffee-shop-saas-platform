@@ -1,6 +1,6 @@
 import express from "express"
 import { OrderController } from "../../controllers/order/Order.controller.ts";
-import { authenticate, authorize, requireStoreAccess } from "../../middlewares/auth.middleware.ts";
+import { authenticate, authorize, authorizeOrder, requireStoreAccess } from "../../middlewares/auth.middleware.ts";
 import { burstProtection, rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 
@@ -49,45 +49,48 @@ router.get(
   OrderController.getActive
 );
 
+// Routes on a single order use authorizeOrder: staff roles are checked at
+// the order's own store, and CUSTOMER only passes for the order's customer.
+
 //Get single order
 router.get(
   "/:orderUuid",
-  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeOrder("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
   OrderController.getOne
 );
 
 //Get order timeline
 router.get(
   "/:orderUuid/timeline",
-  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeOrder("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
   OrderController.getTimeline
 );
 
 //Update order status
 router.patch(
   "/:orderUuid/status",
-  authorize("CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeOrder("CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
   OrderController.updateStatus
 );
 
 //Cancel order
 router.post(
   "/:orderUuid/cancel",
-  authorize("CUSTOMER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeOrder("CUSTOMER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
   OrderController.cancel
 );
 
 //Add item to order (before payment)
 router.post(
   "/:orderUuid/items",
-  authorize("CUSTOMER", "CASHIER", "MANAGER", "ADMIN"),
+  authorizeOrder("CUSTOMER", "CASHIER", "MANAGER", "ADMIN"),
   OrderController.addItem
 );
 
 //Remove item from order (before payment)
 router.delete(
   "/:orderUuid/items/:itemUuid",
-  authorize("CUSTOMER", "CASHIER", "MANAGER", "ADMIN"),
+  authorizeOrder("CUSTOMER", "CASHIER", "MANAGER", "ADMIN"),
   OrderController.removeItem
 );
 

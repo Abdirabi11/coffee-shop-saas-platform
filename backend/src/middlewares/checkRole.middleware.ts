@@ -1,77 +1,16 @@
-import type { Request, Response, NextFunction } from "express";
-import prisma from "../config/prisma.ts"
+import { accessMiddleware, storeFromRequest, type StoreResolver } from "./auth.middleware.ts";
 
-export const checkRole = (allowedRoles: string[]) => {
-    return async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            const userUuid = req.user?.userUuid;
-
-            if (!userUuid) {
-                return res.status(401).json({
-                    error: "UNAUTHORIZED",
-                    message: "Authentication required",
-                });
-            }
-
-            const storeUuid =
-                req.params.storeUuid || req.body.storeUuid || req.query.storeUuid;
-
-            if (!storeUuid) {
-                return res.status(400).json({
-                    error: "MISSING_STORE_CONTEXT",
-                    message: "Store UUID is required for role verification",
-                });
-            }
-
-            // Check global role first — SUPER_ADMIN bypasses all store-level checks
-            const user = await prisma.user.findUnique({
-                where: { uuid: userUuid },
-                select: { globalRole: true },
-            });
-
-            if (!user) {
-                return res.status(404).json({
-                    error: "USER_NOT_FOUND",
-                    message: "User not found",
-                });
-            }
-
-            if (req.user?.role === "SUPER_ADMIN") {
-                return next();
-            }
-
-        // Look up store-specific role
-        const userStore = await prisma.userStore.findUnique({
-            where: {
-                userUuid_storeUuid: { userUuid, storeUuid },
-            },
-            select: { role: true, isActive: true },
-        });
-
-            if (!userStore || !userStore.isActive) {
-                return res.status(403).json({
-                    error: "NO_STORE_ACCESS",
-                    message: "You do not have access to this store",
-                });
-            }
-
-            if (!allowedRoles.includes(userStore.role)) {
-                return res.status(403).json({
-                    error: "INSUFFICIENT_ROLE",
-                    message: `Required role: ${allowedRoles.join(" or ")}. Your role: ${userStore.role}`,
-                });
-            }
-
-            // Attach store role to request for downstream use
-            req.storeRole = userStore.role;
-
-            next();
-        } catch (error) {
-            console.error("[checkRole] Error:", error);
-            return res.status(500).json({
-                error: "INTERNAL_ERROR",
-                message: "Role verification failed",
-            });
-        }
-    };
-};
+// Store-scoped role check. The user must hold one of the roles at the store
+// (or a tenant-wide role that implies it, e.g. TENANT_ADMIN → ADMIN; see
+// authorize in auth.middleware.ts), and the store must belong to the
+// verified tenant.
+//
+// By default the store is the one the request names (param, query or body).
+// That is only safe when the handler acts on that same store. For routes
+// that act on a resource (an order, a payment), pass a resolver that returns
+// the resource's own store, e.g. checkRole(["CASHIER"], storeOf.order("orderUuid", "body")):
+// otherwise a cashier at store X could name X and act on store Y's resource.
+export const checkRole = (allowedRoles: string[], storeFrom?: StoreResolver) =>
+    accessMiddleware(allowedRoles, storeFrom
+        ? { resolve: storeFrom, whenMissing: "404" }
+        : { resolve: storeFromRequest, whenMissing: "400" });

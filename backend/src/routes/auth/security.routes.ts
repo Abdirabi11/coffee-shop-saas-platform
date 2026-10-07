@@ -1,6 +1,5 @@
 import express from "express"
-import { authenticate } from "../../middlewares/auth.middleware.ts";
-import { checkRole } from "../../middlewares/checkRole.middleware.ts";
+import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 import { DeviceTrustController } from "../../controllers/security/Security.controller.ts";
 import { FraudReviewController } from "../../controllers/security/FraudReview.controller.ts";
 import { AuditLogController } from "../../controllers/security/AuditLog.controller.ts";
@@ -9,7 +8,8 @@ import { IPWhitelistController } from "../../controllers/security/IPWhitelist.co
 
 const router = express.Router();
 
-const adminOnly = [authenticate, checkRole(["SUPER_ADMIN", "ADMIN", "TENANT_ADMIN"])];
+// Tenant-level admins (no store involved), so authorize rather than checkRole
+const adminOnly = [authenticate, authorize("SUPER_ADMIN", "ADMIN", "TENANT_ADMIN")];
 
 router.get( "/security/devices",               authenticate, DeviceTrustController.listDevices);
 router.post("/security/devices/:uuid/revoke",  authenticate, DeviceTrustController.revokeDevice);

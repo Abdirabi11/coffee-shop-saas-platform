@@ -13,9 +13,7 @@ export class CashierPaymentController {
                 return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
             };
         
-            if (!["CASHIER", "MANAGER", "ADMIN"].includes(staff.role)) {
-                return res.status(403).json({ success: false, error: "FORBIDDEN" });
-            };
+            // Role at this payment's store is enforced by checkRole on the route
         
             // Verified by requireTenantContext (not the raw JWT claim)
             const tenantUuid = req.tenant?.uuid;
@@ -90,9 +88,7 @@ export class CashierPaymentController {
                 return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
             }
         
-            if (!["MANAGER", "ADMIN"].includes(staff.role)) {
-                return res.status(403).json({ success: false, error: "MANAGER_REQUIRED" });
-            }
+            // Role at this payment's store is enforced by checkRole on the route
         
             const { paymentUuid } = req.params;
         
@@ -148,9 +144,7 @@ export class CashierPaymentController {
                 return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
             }
         
-            if (staff.role !== "ADMIN") {
-                return res.status(403).json({ success: false, error: "ADMIN_REQUIRED" });
-            }
+            // Role at this payment's store is enforced by checkRole on the route
         
             const { paymentUuid } = req.params;
         

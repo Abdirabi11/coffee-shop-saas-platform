@@ -158,13 +158,14 @@ export class OrderController {
       const tenantUuid = req.tenant!.uuid;
       const storeUuid = req.query.storeUuid as string;
       const tenantUserUuid = req.tenantUser!.uuid;
-      const userRole = req.user!.role;
+      // Only staff of the requested store (or tenant admins) see everyone's
+      // orders; everyone else, staff included, sees just their own
+      const isStaff = req.access?.staff === true;
 
-      // For customers, only show their orders
       const filters: any = {
         tenantUuid,
         ...(storeUuid && { storeUuid }),
-        ...(userRole === "CUSTOMER" && { tenantUserUuid }),
+        ...(!isStaff && { tenantUserUuid }),
         status: req.query.status as string,
         paymentStatus: req.query.paymentStatus as string,
         orderType: req.query.orderType as string,
@@ -217,8 +218,6 @@ export class OrderController {
       const tenantUuid = req.tenant!.uuid;
       const { orderUuid } = req.params;
       const tenantUserUuid = req.tenantUser!.uuid;
-      const userRole = req.user!.role;
-
       const order = await OrderQueryService.getByUuid({
         tenantUuid,
         orderUuid,
@@ -226,7 +225,8 @@ export class OrderController {
       });
 
       // Check access
-      if (userRole === "CUSTOMER" && order.tenantUserUuid !== tenantUserUuid) {
+      // authorizeOrder already enforces this; kept as a second line of defence
+      if (!req.access?.staff && order.tenantUserUuid !== tenantUserUuid) {
         return res.status(403).json({
           error: "FORBIDDEN",
           message: "You don't have access to this order",
@@ -349,8 +349,6 @@ export class OrderController {
       const { orderUuid } = req.params;
       const { reason } = req.body;
       const cancelledBy = req.user!.userUuid;
-      const userRole = req.user!.role;
-
       if (!reason) {
         return res.status(400).json({
           error: "VALIDATION_ERROR",
@@ -373,8 +371,8 @@ export class OrderController {
         orderUuid,
       });
 
-      // Check permissions
-      if (userRole === "CUSTOMER" && order.tenantUserUuid !== tenantUserUuid) {
+      // Check permissions (authorizeOrder already enforces this too)
+      if (!req.access?.staff && order.tenantUserUuid !== tenantUserUuid) {
         return res.status(403).json({
           error: "FORBIDDEN",
           message: "You don't have permission to cancel this order",

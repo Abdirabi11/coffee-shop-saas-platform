@@ -63,6 +63,7 @@ export class StoreController {
  
             const orders = await prisma.order.findMany({
                 where: {
+                    tenantUuid: req.tenant!.uuid,
                     storeUuid,
                     status: { in: ["PENDING", "PAID", "PREPARING", "READY"] },
                 },
@@ -109,7 +110,7 @@ export class StoreController {
                 return res.status(400).json({ success: false, error: "DAY_OF_WEEK_REQUIRED" });
             }
  
-            const hours = await StoreHoursService.setHours(storeUuid, {
+            const hours = await StoreHoursService.setHours(req.tenant!.uuid, storeUuid, {
                 dayOfWeek, openTime, closeTime, isClosed, is24Hours,
             });
  
@@ -188,8 +189,11 @@ export class StoreController {
     // DELETE /store/:storeUuid/hours/exceptions/:exceptionUuid
     static async removeException(req: Request, res: Response) {
         try {
-            const { exceptionUuid } = req.params;
-            await StoreHoursService.removeException(exceptionUuid);
+            const { storeUuid, exceptionUuid } = req.params;
+            const removed = await StoreHoursService.removeException(req.tenant!.uuid, storeUuid, exceptionUuid);
+            if (!removed) {
+                return res.status(404).json({ success: false, error: "EXCEPTION_NOT_FOUND" });
+            }
             return res.status(200).json({ success: true, message: "Exception removed" });
         } catch (error: any) {
             return res.status(500).json({ success: false, error: "REMOVE_FAILED" });
