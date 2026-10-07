@@ -1,9 +1,9 @@
-import dayjs from "dayjs";
 import { getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
 import prisma from "../../config/prisma.ts"
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { withCache } from "../../infrastructure/cache/cache.ts";
+import { storeLocalTime } from "../../utils/date.ts";
 
 export class MenuService {
  
@@ -63,12 +63,15 @@ export class MenuService {
         // NOTE: Store model uses `active` not `isActive`
         const store = await prisma.store.findFirst({
             where: { uuid: input.storeUuid, tenantUuid: input.tenantUuid },
-            select: { uuid: true, name: true, active: true },
+            select: { uuid: true, name: true, active: true, timezone: true },
         });
  
         if (!store) {
             throw new Error("STORE_NOT_FOUND");
         }
+
+        // Day and time-slot windows are store wall-clock times
+        const local = storeLocalTime(now, store.timezone);
  
         if (!store.active) {
             return {
@@ -123,7 +126,7 @@ export class MenuService {
         const menuCategories = categories
             .filter((category) => {
                 if (!input.includeUnavailable) {
-                    return this.checkAvailability(category, now) && category.products.length > 0;
+                    return this.checkAvailability(category, now, local) && category.products.length > 0;
                 }
                 return category.products.length > 0;
             })
@@ -133,16 +136,16 @@ export class MenuService {
                 description: category.description,
                 imageUrl: category.imageUrl,
                 order: category.order,
-                isAvailable: this.checkAvailability(category, now),
+                isAvailable: this.checkAvailability(category, now, local),
                 products: category.products
-                    .filter((product) => input.includeUnavailable || this.checkAvailability(product, now))
+                    .filter((product) => input.includeUnavailable || this.checkAvailability(product, now, local))
                     .map((product) => ({
                         uuid: product.uuid,
                         name: product.name,
                         description: product.description,
                         imageUrl: product.imageUrl,
                         basePrice: product.basePrice,
-                        isAvailable: this.checkAvailability(product, now),
+                        isAvailable: this.checkAvailability(product, now, local),
                         isFeatured: product.isFeatured,
                         tags: product.tags,
                         calories: product.calories,
@@ -181,7 +184,9 @@ export class MenuService {
         };
     }
  
-    // Check time-based availability
+    // Check time-based availability. availableFrom/Until are absolute instants;
+    // availableDays and timeSlots are store-local wall-clock rules, checked
+    // against `local` (the store's timezone), not the server's clock.
     private static checkAvailability(
         entity: {
             availableFrom?: Date | null;
@@ -189,18 +194,18 @@ export class MenuService {
             availableDays?: string[];
             timeSlots?: any;
         },
-        now: Date
+        now: Date,
+        local: { dayName: string; time: string }
     ): boolean {
         if (entity.availableFrom && now < entity.availableFrom) return false;
         if (entity.availableUntil && now > entity.availableUntil) return false;
  
         if (entity.availableDays && entity.availableDays.length > 0) {
-            const dayName = dayjs(now).format("dddd").toUpperCase();
-            if (!entity.availableDays.includes(dayName)) return false;
+            if (!entity.availableDays.includes(local.dayName)) return false;
         }
  
         if (entity.timeSlots && Array.isArray(entity.timeSlots)) {
-            const currentTime = dayjs(now).format("HH:mm");
+            const currentTime = local.time;
             const isInSlot = entity.timeSlots.some((slot: any) =>
                 currentTime >= slot.start && currentTime <= slot.end
             );
@@ -246,6 +251,7 @@ export class MenuService {
                 where: { uuid: input.productUuid },
                 include: {
                     category: { select: { uuid: true, name: true } },
+                    store: { select: { timezone: true } },
                     optionGroups: {
                         orderBy: { displayOrder: "asc" },
                         include: {
@@ -267,7 +273,7 @@ export class MenuService {
             }
  
             const now = new Date();
-            const isAvailable = this.checkAvailability(product, now);
+            const isAvailable = this.checkAvailability(product, now, storeLocalTime(now, product.store.timezone));
  
             let isFavorite = false;
             if (input.userUuid) {

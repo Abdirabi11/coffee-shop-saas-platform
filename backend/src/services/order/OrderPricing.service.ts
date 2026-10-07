@@ -65,27 +65,34 @@ export class OrderPricingService{
             let optionsCost = 0;
             const selectedOptions: any[] = [];
 
-            if (inputItem.modifiers?.length) {
-                for(const mod of inputItem.modifiers){
-                    const option = product.optionGroups
-                        ?.flatMap((g: any) => g.options)
-                        .find((o: any) => o.uuid === mod.optionUuid);
-        
-                    if (!option) {
-                        throw new Error(`Modifier option not found`);
-                    }
+            const groups: any[] = product.optionGroups ?? [];
+            const selectedPerGroup = new Map<string, number>();
 
-                    const modCost = option.extraCost * (mod.quantity ?? 1);
-                    optionsCost += modCost;
+            for (const mod of inputItem.modifiers ?? []) {
+                const group = groups.find((g) => g.options.some((o: any) => o.uuid === mod.optionUuid));
+                const option = group?.options.find((o: any) => o.uuid === mod.optionUuid);
 
-                    selectedOptions.push({
-                        groupName: option.groupName,
-                        optionName: option.name,
-                        optionUuid: option.uuid,
-                        cost: modCost,
-                    });
+                if (!option) {
+                    throw new Error(
+                        `INVALID_MODIFIERS: option ${mod.optionUuid} is not available for ${product.name}`
+                    );
                 }
-            };
+
+                const quantity = mod.quantity ?? 1;
+                selectedPerGroup.set(group.uuid, (selectedPerGroup.get(group.uuid) ?? 0) + quantity);
+
+                const modCost = option.extraCost * quantity;
+                optionsCost += modCost;
+
+                selectedOptions.push({
+                    groupName: group.name,
+                    optionName: option.name,
+                    optionUuid: option.uuid,
+                    cost: modCost,
+                });
+            }
+
+            this.assertModifierLimits(product.name, groups, selectedPerGroup);
 
             const unitPrice = basePrice + optionsCost;
             const itemSubtotal = unitPrice * inputItem.quantity;
@@ -241,6 +248,35 @@ export class OrderPricingService{
         });
     }
     
+    // Enforce each option group's selection rules, as resolved by the menu
+    // (product-level overrides already applied). A selection counts its
+    // quantity: two "extra shot" counts as 2 toward maxSelections. Groups the
+    // customer didn't touch are checked too, so required groups can't be
+    // skipped.
+    private static assertModifierLimits(
+        productName: string,
+        groups: any[],
+        selectedPerGroup: Map<string, number>
+    ) {
+        for (const group of groups) {
+            const selected = selectedPerGroup.get(group.uuid) ?? 0;
+            const min = Math.max(group.minSelections ?? 0, group.isRequired ? 1 : 0);
+            // A single-choice group without an explicit max allows one
+            const max = group.maxSelections ?? (group.selectionType === "SINGLE" ? 1 : null);
+
+            if (selected < min) {
+                throw new Error(
+                    `INVALID_MODIFIERS: "${group.name}" on ${productName} requires at least ${min} selection(s), got ${selected}`
+                );
+            }
+            if (max !== null && selected > max) {
+                throw new Error(
+                    `INVALID_MODIFIERS: "${group.name}" on ${productName} allows at most ${max} selection(s), got ${selected}`
+                );
+            }
+        }
+    }
+
     private static findProduct(menu: any, productUuid: string) {
         for(const category of menu.categories ?? []){
             const product = category.products?.find(

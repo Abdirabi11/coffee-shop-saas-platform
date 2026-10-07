@@ -1,11 +1,34 @@
+import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 
+// Sorts object keys at every level so the hash doesn't depend on property
+// order; undefined fields drop out as in JSON.stringify. Array order counts.
+function canonicalJson(value: unknown): string {
+    return JSON.stringify(value, (_key, v) =>
+        v && typeof v === "object" && !Array.isArray(v)
+            ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]]))
+            : v
+    );
+}
+
 export class IdempotencyService{
+    // SHA-256 of the request payload, stored with the key so a reused key
+    // with a different payload is rejected instead of replaying a response
+    // that belongs to another request.
+    static hashRequest(payload: unknown): string {
+        return crypto.createHash("sha256").update(canonicalJson(payload)).digest("hex");
+    }
+
+    // Returns the stored response for a completed key, or null if there is
+    // none. With requestHash, throws IDEMPOTENCY_KEY_MISMATCH if the key was
+    // first used for a different payload. Keys stored before hashing existed
+    // (requestHash null) skip the comparison.
     static async check(
         tenantUuid: string,
         key: string,
-        route: string
+        route: string,
+        requestHash?: string
     ): Promise<{ response: string; statusCode: number } | null>{
         const existing = await prisma.idempotencyKey.findUnique({
             where: {
@@ -19,11 +42,16 @@ export class IdempotencyService{
 
         if (!existing) return null;
         if (existing.expiresAt < new Date()) {
-            await prisma.idempotencyKey.delete({
+            // deleteMany: a concurrent check may have removed it already
+            await prisma.idempotencyKey.deleteMany({
                 where: { uuid: existing.uuid },
             });
             return null;
         };
+
+        if (requestHash && existing.requestHash && existing.requestHash !== requestHash) {
+            throw new Error("IDEMPOTENCY_KEY_MISMATCH");
+        }
 
         return {
             response: JSON.stringify(existing.response),
@@ -42,6 +70,7 @@ export class IdempotencyService{
         tenantUuid: string,
         key: string,
         route: string,
+        requestHash: string,
         expiresInHours: number = 24
     ) {
         // An expired key may be reused
@@ -57,7 +86,7 @@ export class IdempotencyService{
                 tenantUuid,
                 key,
                 route,
-                requestHash: null,
+                requestHash,
                 response: {},
                 statusCode: 0,
                 expiresAt,

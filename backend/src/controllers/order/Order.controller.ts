@@ -127,6 +127,20 @@ export class OrderController {
           message: error.message,
         });
       };
+
+      if (error.message === "IDEMPOTENCY_KEY_MISMATCH") {
+        return res.status(400).json({
+          error: "IDEMPOTENCY_KEY_MISMATCH",
+          message: "Idempotency-Key was already used for a different order request",
+        });
+      };
+
+      if (error.message.startsWith("INVALID_MODIFIERS")) {
+        return res.status(400).json({
+          error: "INVALID_MODIFIERS",
+          message: error.message.replace(/^INVALID_MODIFIERS: /, ""),
+        });
+      };
   
       return res.status(500).json({
         error: "INTERNAL_SERVER_ERROR",
@@ -448,6 +462,13 @@ export class OrderController {
         return res.status(400).json({
           error: "CANNOT_MODIFY_ORDER",
           message: "Cannot modify a paid order",
+        });
+      }
+
+      if (error.message.startsWith("INVALID_MODIFIERS")) {
+        return res.status(400).json({
+          error: "INVALID_MODIFIERS",
+          message: error.message.replace(/^INVALID_MODIFIERS: /, ""),
         });
       }
 

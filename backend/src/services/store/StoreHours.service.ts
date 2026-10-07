@@ -1,6 +1,7 @@
-import dayjs from "dayjs";
+import type { DayOfWeek } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { storeLocalTime } from "../../utils/date.ts";
 
 
 const DAY_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
@@ -10,12 +11,24 @@ export class StoreHoursService {
     // Check if store is currently open (handles exceptions + regular hours)
     static async isStoreOpen(storeUuid: string, now?: Date): Promise<boolean> {
         const current = now || new Date();
-        const dayOfWeek = current.getDay();
-        const currentTime = current.toTimeString().slice(0, 5); // "HH:mm"
-        const todayStart = dayjs(current).startOf("day").toDate();
-        const todayEnd = dayjs(current).endOf("day").toDate();
  
         try {
+            // Opening hours are store wall-clock times: evaluate them in the
+            // store's timezone, not the server's.
+            const store = await prisma.store.findUnique({
+                where: { uuid: storeUuid },
+                select: { timezone: true },
+            });
+            if (!store) return false;
+
+            const local = storeLocalTime(current, store.timezone);
+            const currentTime = local.time; // "HH:mm"
+
+            // Exception dates are calendar dates stored as UTC midnight
+            // (new Date("2026-12-25")), so match the store's local date that way
+            const todayStart = new Date(`${local.date}T00:00:00.000Z`);
+            const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
             // 1. Check exceptions first (holidays, special hours)
             const exception = await prisma.storeHourException.findFirst({
                 where: {
@@ -37,7 +50,7 @@ export class StoreHoursService {
             const hours = await prisma.storeOpeningHour.findFirst({
                 where: {
                     storeUuid,
-                    dayOfWeek: DAY_NAMES[dayOfWeek],
+                    dayOfWeek: local.dayName as DayOfWeek,
                     isActive: true,
                 },
             });

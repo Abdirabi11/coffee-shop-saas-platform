@@ -47,11 +47,26 @@ export class OrderCommandService {
             idempotencyKey,
         } = input;
     
+        // Everything that defines the order, including who placed it: the
+        // key is only unique per tenant, so another customer reusing it must
+        // get a mismatch, not this customer's order.
+        const requestHash = IdempotencyService.hashRequest({
+            storeUuid,
+            tenantUserUuid,
+            orderType,
+            tableNumber: input.tableNumber,
+            deliveryAddress: input.deliveryAddress,
+            customerNotes: input.customerNotes,
+            promoCode: input.promoCode,
+            items,
+        });
+
         if (idempotencyKey) {
             const existing = await IdempotencyService.check(
                 tenantUuid,
                 idempotencyKey,
-                ORDER_ROUTE
+                ORDER_ROUTE,
+                requestHash
             );
             if (existing) {
                 return JSON.parse(existing.response);
@@ -105,7 +120,7 @@ export class OrderCommandService {
                 // unique violation and replays our order below; if we roll back
                 // (e.g. OUT_OF_STOCK) the claim goes with us and it proceeds.
                 if (idempotencyKey) {
-                    await IdempotencyService.claim(tx, tenantUuid, idempotencyKey, ORDER_ROUTE);
+                    await IdempotencyService.claim(tx, tenantUuid, idempotencyKey, ORDER_ROUTE, requestHash);
                 }
     
                 // Generate order number: ORD-20260328-0001 (locked inside this tx)
@@ -199,7 +214,7 @@ export class OrderCommandService {
         } catch (error) {
             // Lost the claim race: the winner committed, so replay its order
             if (idempotencyKey && IdempotencyService.isClaimConflict(error)) {
-                const existing = await IdempotencyService.check(tenantUuid, idempotencyKey, ORDER_ROUTE);
+                const existing = await IdempotencyService.check(tenantUuid, idempotencyKey, ORDER_ROUTE, requestHash);
                 if (existing) {
                     MetricsService.increment("order.idempotent_replay", 1);
                     return JSON.parse(existing.response);
