@@ -17,7 +17,8 @@
 // cashier and order access is checked at the order's own store; customers
 // only reach their own orders; store roles never satisfy tenant-wide routes
 // (even with ?storeUuid=); roles can only be assigned below the caller's own,
-// never to yourself, never over a peer or superior.
+// never to yourself, never over a peer or superior; menu admin writes and
+// staff profiles never cross tenants or stores, and profiles carry no secrets.
 //
 //   npx tsx scripts/test-rbac.ts
 //
@@ -43,6 +44,7 @@ const { default: cashierRoutes } = await import("../src/routes/payment/CashierPa
 const { default: tenantRoutes } = await import("../src/routes/tenant/tenant.routes.ts");
 const { default: staffRoutes } = await import("../src/routes/staff/staff.routes.ts");
 const { default: financialRoutes } = await import("../src/routes/payment/Financial.routes.ts");
+const { default: menuAdminRoutes } = await import("../src/routes/menu/menuAdmin.routes.ts");
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -152,6 +154,35 @@ async function setup() {
     await prisma.userPermission.create({
         data: { userUuid: storeMgrA.uuid, storeUuid: a1.uuid, permissionUuid: staffUpdate.uuid, grantedBy: ownerA.uuid },
     });
+    // Menu admin permissions aren't in any default role either: grant them at A1
+    for (const action of ["read", "create", "update", "delete"]) {
+        const perm = await prisma.permission.upsert({
+            where: { slug: `menu.${action}` },
+            update: {},
+            create: { slug: `menu.${action}`, resource: "menu", action, name: `Menu ${action}` },
+        });
+        await prisma.userPermission.create({
+            data: { userUuid: storeMgrA.uuid, storeUuid: a1.uuid, permissionUuid: perm.uuid, grantedBy: ownerA.uuid },
+        });
+    }
+    // A secret to look for in profile responses
+    await prisma.user.update({ where: { uuid: cashierA.uuid }, data: { pinHash: "$2b$10$test-pin-hash-should-never-leak", otpCode: "123456" } });
+
+    // Menu fixtures: a category + product per store, option groups at A1 and B1
+    const menu: Record<string, { category: string; product: string; group?: string }> = {};
+    for (const [key, st] of [["a1", a1], ["a2", a2], ["b1", b1]] as const) {
+        const category = await prisma.category.create({
+            data: { tenantUuid: st.tenantUuid, storeUuid: st.uuid, name: `Cat ${key}`, slug: `cat-${key}` },
+        });
+        const product = await prisma.product.create({
+            data: { tenantUuid: st.tenantUuid, storeUuid: st.uuid, categoryUuid: category.uuid, name: `Prod ${key}`, basePrice: 500 },
+        });
+        menu[key] = { category: category.uuid, product: product.uuid };
+    }
+    for (const [key, st] of [["a1", a1], ["b1", b1]] as const) {
+        const group = await prisma.optionGroup.create({ data: { tenantUuid: st.tenantUuid, storeUuid: st.uuid, name: `Group ${key}` } });
+        menu[key].group = group.uuid;
+    }
 
     const exceptionB = await prisma.storeHourException.create({
         data: { tenantUuid: tB.uuid, storeUuid: b1.uuid, exceptionDate: new Date("2030-01-01"), exceptionType: "HOLIDAY", name: "B holiday" },
@@ -171,7 +202,8 @@ async function setup() {
 
     return {
         tA, tB, a1, a2, b1, exceptionB, orders,
-        users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie },
+        users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA },
+        menu,
         members: { ownerA_A, storeAdminA_A, adminA2_A, adminA3_A, newbie_A, promotee_A },
         tokens: {
             ownerA: token(ownerA, tA.uuid),
@@ -196,6 +228,7 @@ async function main() {
     app.use("/api/tenant", tenantRoutes);
     app.use("/api/staff", staffRoutes);
     app.use("/api/financial", financialRoutes);
+    app.use("/api/admin/menu", menuAdminRoutes);
     const server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -357,6 +390,70 @@ async function main() {
             await errorOf("PATCH", `/api/staff/${u.ownerB.uuid}`, t.storeMgrA, { body: { storeUuid: a1, phoneNumber: "+15550000001" } }), "404 STAFF_NOT_FOUND");
         const ownerBPhone = (await prisma.user.findUniqueOrThrow({ where: { uuid: u.ownerB.uuid } })).phoneNumber;
         check("tenant B owner's phone unchanged", ownerBPhone === "+15550000001", false);
+
+        console.log("\n=== Menu admin: no cross-tenant / cross-store writes (Phase 24) ===");
+        const mn = ctx.menu;
+        const price = async (productUuid: string) => (await prisma.product.findUnique({ where: { uuid: productUuid } }))?.basePrice;
+        check("A1 manager reprices tenant B's product, naming A1",
+            await errorOf("PATCH", `/api/admin/menu/products/${mn.b1.product}`, t.storeMgrA, { body: { storeUuid: a1, basePrice: 1 } }), "404 NOT_FOUND");
+        check("tenant B product price unchanged", await price(mn.b1.product), 500);
+        check("A1 manager deletes tenant B's product, naming A1",
+            await errorOf("DELETE", `/api/admin/menu/products/${mn.b1.product}?storeUuid=${a1}`, t.storeMgrA), "404 NOT_FOUND");
+        check("tenant B product still exists", await price(mn.b1.product), 500);
+        check("A1 manager reprices an A2 product (no permission at A2), naming A1",
+            await errorOf("PATCH", `/api/admin/menu/products/${mn.a2.product}`, t.storeMgrA, { body: { storeUuid: a1, basePrice: 1 } }), "403 FORBIDDEN");
+        check("A2 product price unchanged", await price(mn.a2.product), 500);
+        check("A1 manager reprices an A1 product",
+            await status("PATCH", `/api/admin/menu/products/${mn.a1.product}`, t.storeMgrA, { body: { basePrice: 650 } }), 200);
+        check("A1 product price updated", await price(mn.a1.product), 650);
+        check("A1 product moved into tenant B's category",
+            await errorOf("PATCH", `/api/admin/menu/products/${mn.a1.product}`, t.storeMgrA, { body: { categoryUuid: mn.b1.category } }), "400 CATEGORY_NOT_IN_STORE");
+        check("A1 product created in tenant B's category",
+            await errorOf("POST", "/api/admin/menu/products", t.storeMgrA, { body: { storeUuid: a1, categoryUuid: mn.b1.category, name: "Sneaky", basePrice: 100 } }), "400 CATEGORY_NOT_IN_STORE");
+        check("product created at tenant B's store",
+            await errorOf("POST", "/api/admin/menu/products", t.storeMgrA, { body: { storeUuid: ctx.b1.uuid, categoryUuid: mn.b1.category, name: "Sneaky", basePrice: 100 } }), "404 STORE_NOT_FOUND");
+        check("A1 manager renames tenant B's category, naming A1",
+            await errorOf("PATCH", `/api/admin/menu/categories/${mn.b1.category}`, t.storeMgrA, { body: { storeUuid: a1, name: "pwned" } }), "404 NOT_FOUND");
+        check("A1 manager deletes tenant B's category",
+            await errorOf("DELETE", `/api/admin/menu/categories/${mn.b1.category}?storeUuid=${a1}`, t.storeMgrA), "404 NOT_FOUND");
+        const bulk = await call("POST", "/api/admin/menu/products/bulk/prices", t.storeMgrA, {
+            body: { storeUuid: a1, updates: [{ productUuid: mn.b1.product, newPrice: 1 }, { productUuid: mn.a1.product, newPrice: 700 }] },
+        });
+        const bulkResults = bulk.body?.data?.results ?? bulk.body?.results ?? [];
+        check("bulk price: tenant B product reported not found",
+            bulkResults.find((r: any) => r.productUuid === mn.b1.product)?.error, "PRODUCT_NOT_FOUND");
+        check("bulk price: tenant B product unchanged", await price(mn.b1.product), 500);
+        check("bulk price: A1 product oldPrice is the old price",
+            bulkResults.find((r: any) => r.productUuid === mn.a1.product)?.oldPrice, 650);
+        check("link tenant B's option group to an A1 product",
+            await errorOf("POST", `/api/admin/menu/products/${mn.a1.product}/option-groups/${mn.b1.group}`, t.storeMgrA), "404 OPTION_GROUP_NOT_FOUND");
+        const linked = await call("POST", `/api/admin/menu/products/${mn.a1.product}/option-groups/${mn.a1.group}`, t.storeMgrA, {
+            body: { productUuid: mn.b1.product },
+        });
+        check("link with body productUuid of tenant B: linked the URL's A1 product", linked.body?.link?.productUuid, mn.a1.product);
+        check("tenant B product has no option groups",
+            await prisma.productOptionGroup.count({ where: { productUuid: mn.b1.product } }), 0);
+
+        console.log("\n=== Staff profile: tenant-scoped, no secrets (Phase 24) ===");
+        const secretKeys = ["password", "passwordHash", "pinHash", "otpCode", "resetToken", "emailVerificationToken", "tokenVersion"];
+        const leaks = (body: unknown) => {
+            const text = JSON.stringify(body ?? {});
+            return secretKeys.filter((k) => text.includes(`"${k}"`)).concat(text.includes("test-pin-hash") ? ["<pin hash value>"] : []);
+        };
+        check("customer reads a manager's profile", await status("GET", `/api/staff/${u.managerA.uuid}`, t.customerA), 403);
+        check("cashier reads a manager's profile", await status("GET", `/api/staff/${u.managerA.uuid}`, t.cashierA), 403);
+        check("A1 store manager reads tenant B owner's profile", await errorOf("GET", `/api/staff/${u.ownerB.uuid}`, t.storeMgrA), "404 STAFF_NOT_FOUND");
+        const mgrView = await call("GET", `/api/staff/${u.cashierA.uuid}`, t.storeMgrA);
+        check("A1 store manager reads an A1 cashier's profile", mgrView.status, 200);
+        check("  ...no secret fields", leaks(mgrView.body).join(",") || "none", "none");
+        check("  ...no pay rate for a store manager", JSON.stringify(mgrView.body).includes('"payRate"'), false);
+        const ownerView = await call("GET", `/api/staff/${u.cashierA.uuid}`, t.ownerA);
+        check("owner reads the cashier's profile", ownerView.status, 200);
+        check("  ...no secret fields", leaks(ownerView.body).join(",") || "none", "none");
+        check("  ...pay rate visible to the owner", JSON.stringify(ownerView.body).includes('"payRate"'), true);
+        const selfView = await call("GET", `/api/staff/${u.cashierA.uuid}`, t.cashierA);
+        check("cashier reads own profile", selfView.status, 200);
+        check("  ...no secret fields", leaks(selfView.body).join(",") || "none", "none");
     } finally {
         server.close();
     }
