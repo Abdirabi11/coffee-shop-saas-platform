@@ -6,7 +6,8 @@ export class IPWhitelistController {
   // GET /api/v1/security/ip-whitelist
   static async list(req: Request, res: Response) {
     try {
-      const tenantUuid = (req as any).user?.tenantUuid;
+      // Verified tenant (requireTenantContext), not the login tenant on the token
+      const tenantUuid = req.tenant!.uuid;
       const ips = await IPWhitelistService.listIPs(tenantUuid);
       return res.status(200).json({ success: true, data: ips });
     } catch (error: any) {
@@ -64,7 +65,8 @@ export class IPWhitelistController {
   // POST /api/v1/security/ip-whitelist/check
   static async check(req: Request, res: Response) {
     try {
-      const tenantUuid = (req as any).user?.tenantUuid;
+      // Verified tenant (requireTenantContext), not the login tenant on the token
+      const tenantUuid = req.tenant!.uuid;
       const { ipAddress, operation } = req.body;
  
       const isWhitelisted = await IPWhitelistService.isIPWhitelisted({

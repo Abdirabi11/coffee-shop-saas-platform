@@ -7,7 +7,8 @@ export class FinancialReportController {
     // POST /api/v1/reports/daily-sales
     static async generateDailySales(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { storeUuid, from, to, format } = req.body;
         
             if (!from || !to) {
@@ -43,7 +44,8 @@ export class FinancialReportController {
     // POST /api/v1/reports/drawer-summary
     static async generateDrawerSummary(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { storeUuid, from, to, format } = req.body;
         
             if (!from || !to) {
@@ -78,7 +80,8 @@ export class FinancialReportController {
     // POST /api/v1/reports/monthly-pl
     static async generateMonthlyPL(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { month, format } = req.body;
         
             if (!month) {

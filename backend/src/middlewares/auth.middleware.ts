@@ -67,8 +67,20 @@ export const authenticate= async (
 //   ADMIN, MANAGER, CASHIER, ... UserStore.role at the store in context
 //
 // OWNER and TENANT_ADMIN also count as ADMIN (tenant-wide), STORE_MANAGER as
-// MANAGER. Store roles count only when the request names a store, that store
-// belongs to the current tenant, and the user is actively assigned to it.
+// MANAGER.
+//
+// Two scopes, chosen per route:
+//   authorize(...)       tenant scope: only tenant-level roles count. A store
+//                        role (ADMIN/MANAGER/CASHIER at some store) never
+//                        satisfies it, whatever storeUuid the request sends,
+//                        so a store ADMIN can't pass a tenant-wide
+//                        authorize("ADMIN") by naming their store.
+//   authorizeStore(...)  store scope: tenant-level roles, plus the user's
+//                        role at the store the request names. Only for routes
+//                        whose handler acts on that same store.
+// authorizeAt / authorizeOrder / checkRole are store scope with the store
+// taken from the resource being acted on. In store scope the store must
+// belong to the current tenant and the user must be actively assigned to it.
 
 type RoleList = Array<string | string[]>;
 export type StoreResolver = (req: Request) => Promise<string | null | undefined> | string | null | undefined;
@@ -106,6 +118,16 @@ export const storeOf = {
             select: { storeUuid: true },
         });
         return payment?.storeUuid ?? null;
+    },
+    // Any tenant-scoped model with uuid/tenantUuid/storeUuid columns
+    record: (model: "cashDrawer" | "dailyReconciliation", param: string): StoreResolver => async (req) => {
+        const uuid = stringParam(req.params?.[param]);
+        if (!uuid || !req.tenant) return null;
+        const row = await (prisma[model] as any).findFirst({
+            where: { uuid, tenantUuid: req.tenant.uuid },
+            select: { storeUuid: true },
+        });
+        return row?.storeUuid ?? null;
     },
 };
 
@@ -220,9 +242,15 @@ export function accessMiddleware(allowed: string[], store: StoreRule) {
     };
 }
 
-// Allow if the user holds any of the roles in the current tenant, or at the
-// store the request names (which must belong to the tenant).
+// Tenant scope: allow if the user holds any of the roles at tenant level.
+// Store roles are never consulted (no store is resolved at all).
 export const authorize = (...allowedRoles: RoleList) =>
+    accessMiddleware(flattenRoles(allowedRoles), { resolve: () => undefined, whenMissing: "optional" });
+
+// Store scope: also allow the user's role at the store the request names
+// (route param, then query, then body; it must belong to the tenant). Use
+// only where the handler reads/writes that same store and nothing wider.
+export const authorizeStore = (...allowedRoles: RoleList) =>
     accessMiddleware(flattenRoles(allowedRoles), { resolve: storeFromRequest, whenMissing: "optional" });
 
 // Same, with the store taken from a resolver, e.g. the store of the order or

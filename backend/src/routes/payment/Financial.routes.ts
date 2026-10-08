@@ -1,5 +1,5 @@
 import express from "express"
-import { authenticate } from "../../middlewares/auth.middleware.ts";
+import { authenticate, authorize, authorizeOrder, storeOf, type StoreResolver } from "../../middlewares/auth.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { ReconciliationDashboardController } from "../../controllers/dashboards/ReconciliationDashboard.controller.ts";
 import { CashDrawerReportController } from "../../controllers/dashboards/CashDrawerReport.controller.ts";
@@ -13,8 +13,17 @@ import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 
 const router = express.Router();
  
-const adminOnly = [authenticate, requireTenantContext, checkRole(["ADMIN", "TENANT_ADMIN"])];
-const managerUp = [authenticate, requireTenantContext, checkRole(["MANAGER", "ADMIN", "TENANT_ADMIN"])];
+// Tenant-wide reports: tenant-level admins only. Store roles never count here
+// (authorize is tenant scope), so a store MANAGER/ADMIN can't read tenant-wide
+// figures by sending its own storeUuid.
+const tenantAdmin = [authenticate, requireTenantContext, authorize("ADMIN", "TENANT_ADMIN")];
+
+// Store-level reports under /stores/:storeUuid: the role at that store
+const storeManagerUp = [authenticate, requireTenantContext, checkRole(["MANAGER", "ADMIN", "TENANT_ADMIN"])];
+
+// Routes on one record: the role at that record's own store
+const managerAt = (storeFrom: StoreResolver) =>
+    [authenticate, requireTenantContext, checkRole(["MANAGER", "ADMIN", "TENANT_ADMIN"], storeFrom)];
  
 // ══════════════════════════════════════════════════════════════════════════
 //  RECONCILIATION
@@ -23,49 +32,49 @@ const managerUp = [authenticate, requireTenantContext, checkRole(["MANAGER", "AD
 // Tenant-wide reconciliation overview
 router.get(
     "/reconciliation/overview",
-    ...adminOnly,
+    ...tenantAdmin,
     ReconciliationDashboardController.getOverview
 );
  
 // Store daily reconciliation report
 router.get(
     "/reconciliation/stores/:storeUuid/daily",
-    ...managerUp,
+    ...storeManagerUp,
     ReconciliationDashboardController.getDailyReport
 );
  
 // Store reconciliation history
 router.get(
     "/reconciliation/stores/:storeUuid/history",
-    ...managerUp,
+    ...storeManagerUp,
     ReconciliationDashboardController.getHistory
 );
  
 // Unresolved reconciliation variances
 router.get(
     "/reconciliation/unresolved",
-    ...adminOnly,
+    ...tenantAdmin,
     ReconciliationDashboardController.getUnresolved
 );
  
 // Resolve a reconciliation variance
 router.post(
     "/reconciliation/:reconciliationUuid/resolve",
-    ...managerUp,
+    ...managerAt(storeOf.record("dailyReconciliation", "reconciliationUuid")),
     ReconciliationDashboardController.resolveVariance
 );
  
 // Provider reconciliation (Stripe/EVC vs internal)
 router.get(
     "/reconciliation/provider",
-    ...adminOnly,
+    ...tenantAdmin,
     ReconciliationDashboardController.getProviderReconciliation
 );
  
 // Today's reconciliation metrics
 router.get(
     "/reconciliation/metrics/today",
-    ...managerUp,
+    ...tenantAdmin,
     ReconciliationDashboardController.getTodayMetrics
 );
  
@@ -76,28 +85,28 @@ router.get(
 // Shift report for a specific drawer session
 router.get(
     "/drawer-reports/:drawerUuid/shift",
-    ...managerUp,
+    ...managerAt(storeOf.record("cashDrawer", "drawerUuid")),
     CashDrawerReportController.getShiftReport
 );
  
 // Drawer session history for a store
 router.get(
     "/drawer-reports/stores/:storeUuid/sessions",
-    ...managerUp,
+    ...storeManagerUp,
     CashDrawerReportController.getSessionHistory
 );
  
 // Terminal performance for a store
 router.get(
     "/drawer-reports/stores/:storeUuid/terminals",
-    ...managerUp,
+    ...storeManagerUp,
     CashDrawerReportController.getTerminalPerformance
 );
  
 // Daily drawer summary for a store
 router.get(
     "/drawer-reports/stores/:storeUuid/daily",
-    ...managerUp,
+    ...storeManagerUp,
     CashDrawerReportController.getDailySummary
 );
  
@@ -105,25 +114,28 @@ router.get(
 //  RECEIPTS
 // ══════════════════════════════════════════════════════════════════════════
  
-// Customer gets their own receipt by order
+// Customer gets their own receipt by order. authorizeOrder: the order must be
+// in this tenant, and the caller must be its customer or staff at its store
+// (the handler looks the receipt up by orderUuid alone).
 router.get(
     "/receipts/order/:orderUuid",
     authenticate,
     requireTenantContext,
+    authorizeOrder("CUSTOMER", "CASHIER", "MANAGER", "ADMIN", "TENANT_ADMIN"),
     ReceiptController.getByOrder
 );
  
 // Staff gets receipt by payment UUID
 router.get(
     "/receipts/payment/:paymentUuid",
-    ...managerUp,
+    ...managerAt(storeOf.payment()),
     ReceiptController.getByPayment
 );
  
 // Resend receipt to customer
 router.post(
     "/receipts/:paymentUuid/resend",
-    ...managerUp,
+    ...managerAt(storeOf.payment()),
     ReceiptController.resend
 );
  
@@ -134,28 +146,28 @@ router.post(
 // Tax summary (total collected, by rate, by category)
 router.get(
     "/tax/summary",
-    ...adminOnly,
+    ...tenantAdmin,
     TaxTrackingController.getSummary
 );
  
 // Monthly tax trend
 router.get(
     "/tax/monthly",
-    ...adminOnly,
+    ...tenantAdmin,
     TaxTrackingController.getMonthlyTrend
 );
  
 // Tax breakdown by payment method
 router.get(
     "/tax/by-method",
-    ...adminOnly,
+    ...tenantAdmin,
     TaxTrackingController.getByPaymentMethod
 );
  
 // Net tax liability
 router.get(
     "/tax/liability",
-    ...adminOnly,
+    ...tenantAdmin,
     TaxTrackingController.getNetLiability
 );
  
@@ -166,21 +178,21 @@ router.get(
 // Generate daily sales report
 router.post(
     "/reports/daily-sales",
-    ...adminOnly,
+    ...tenantAdmin,
     FinancialReportController.generateDailySales
 );
  
 // Generate drawer summary report
 router.post(
     "/reports/drawer-summary",
-    ...adminOnly,
+    ...tenantAdmin,
     FinancialReportController.generateDrawerSummary
 );
  
 // Generate monthly P&L report
 router.post(
     "/reports/monthly-pl",
-    ...adminOnly,
+    ...tenantAdmin,
     FinancialReportController.generateMonthlyPL
 );
  
@@ -191,28 +203,28 @@ router.post(
 // Revenue projection (next N days)
 router.get(
     "/forecast/projection",
-    ...managerUp,
+    ...tenantAdmin,
     RevenueForecastController.getProjection
 );
  
 // Year-over-year comparison
 router.get(
     "/forecast/yoy",
-    ...managerUp,
+    ...tenantAdmin,
     RevenueForecastController.getYearOverYear
 );
  
 // Revenue velocity (daily/weekly run rate)
 router.get(
     "/forecast/velocity",
-    ...managerUp,
+    ...tenantAdmin,
     RevenueForecastController.getVelocity
 );
  
 // Forecast summary dashboard
 router.get(
     "/forecast/summary",
-    ...managerUp,
+    ...tenantAdmin,
     RevenueForecastController.getSummary
 );
  
@@ -223,21 +235,21 @@ router.get(
 // Settlement dashboard overview
 router.get(
     "/settlements/dashboard",
-    ...adminOnly,
+    ...tenantAdmin,
     SettlementController.getDashboard
 );
  
 // Settlement history
 router.get(
     "/settlements/history",
-    ...adminOnly,
+    ...tenantAdmin,
     SettlementController.getHistory
 );
  
 // Pending settlements
 router.get(
     "/settlements/pending",
-    ...adminOnly,
+    ...tenantAdmin,
     SettlementController.getPending
 );
  

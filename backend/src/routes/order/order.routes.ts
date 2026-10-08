@@ -1,6 +1,6 @@
 import express from "express"
 import { OrderController } from "../../controllers/order/Order.controller.ts";
-import { authenticate, authorize, authorizeOrder, requireStoreAccess } from "../../middlewares/auth.middleware.ts";
+import { authenticate, authorizeOrder, authorizeStore, requireStoreAccess } from "../../middlewares/auth.middleware.ts";
 import { burstProtection, rateLimitByTenant } from "../../middlewares/rateLimitByTenant.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 
@@ -17,17 +17,21 @@ router.use(burstProtection());
 router.use(rateLimitByTenant({ points: 300, duration: 60, keyPrefix: "order:read", methods: ["GET"] }));
 router.use(rateLimitByTenant({ points: 60, duration: 60, keyPrefix: "order:write", methods: ["POST", "PUT", "PATCH", "DELETE"] }));
 
+// Create / list / stats / active take the store from the request (body or
+// ?storeUuid=) and the handlers scope their data to it, so store roles count
+// there (authorizeStore). Without a store only tenant-level roles apply.
+
 //Create order
 router.post(
   "/",
-  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN",  "ADMIN"),
+  authorizeStore("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN",  "ADMIN"),
   OrderController.create
 );
 
 //List orders
 router.get(
   "/",
-  authorize("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeStore("CUSTOMER", "CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
   OrderController.list
 );
 
@@ -36,7 +40,7 @@ router.get(
 //Get order statistics
 router.get(
   "/stats",
-  authorize("MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeStore("MANAGER", "TENANT_ADMIN", "ADMIN"),
   // requireStoreAccess,
   OrderController.getStats
 );
@@ -44,7 +48,7 @@ router.get(
 //Get active orders (kitchen display)
 router.get(
   "/active",
-  authorize("CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
+  authorizeStore("CASHIER", "MANAGER", "TENANT_ADMIN", "ADMIN"),
   // requireStoreAccess,
   OrderController.getActive
 );

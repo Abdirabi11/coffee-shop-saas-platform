@@ -1,6 +1,15 @@
 import type { Request, Response } from "express";
 import { StaffManagementService } from "../../services/staff/StaffManagement.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import {
+    RoleAssignmentError,
+    assertCanAssignStoreRole,
+    assertCanAssignTenantRole,
+    assertCanModifyStaffMember,
+    assertCanModifyStoreMember,
+    assertStoreInTenant,
+    findTenantMember,
+} from "../../domain/auth/roleHierarchy.ts";
 
 export class StaffManagementController {
   
@@ -38,6 +47,14 @@ export class StaffManagementController {
                 });
             };
 
+            // Tenant role and each store role must be below the caller's own,
+            // at stores of this tenant (the service defaults a store to CASHIER)
+            assertCanAssignTenantRole(req, role ?? "STAFF");
+            for (const storeUuid of storeUuids) {
+                await assertStoreInTenant(req, storeUuid);
+                await assertCanAssignStoreRole(req, storeUuid, (storeRoles || {})[storeUuid] || "CASHIER");
+            }
+
             const user = await StaffManagementService.createStaff({
                 tenantUuid,
                 storeUuids,
@@ -67,6 +84,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             logWithContext("error", "[StaffManagement] Create staff failed", {
                 error: error.message,
             });
@@ -95,6 +115,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -115,6 +138,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -135,6 +161,10 @@ export class StaffManagementController {
                 certifications,
             } = req.body;
 
+            // Phone and email are login identifiers: only for members of this
+            // tenant who rank below the caller
+            await assertCanModifyStaffMember(req, await findTenantMember(req, { userUuid }));
+
             const user = await StaffManagementService.updateStaff({
                 userUuid,
                 firstName,
@@ -151,6 +181,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -164,6 +197,13 @@ export class StaffManagementController {
             const { userUuid } = req.params;
             const tenantUuid = req.tenant!.uuid;
             const { storeUuid, role, isPrimary } = req.body;
+
+            // Target must be a member here; caller must outrank both the
+            // target's current role at the store and the role being granted
+            await assertStoreInTenant(req, storeUuid);
+            const target = await findTenantMember(req, { userUuid });
+            await assertCanModifyStoreMember(req, target, storeUuid);
+            await assertCanAssignStoreRole(req, storeUuid, role);
 
             const userStore = await StaffManagementService.grantStoreAccess({
                 userUuid,
@@ -179,6 +219,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -190,7 +233,11 @@ export class StaffManagementController {
     static async revokeStoreAccess(req: Request, res: Response) {
         try {
             const { userUuid, storeUuid } = req.params;
-            const { reason } = req.body;
+            // Express 5 leaves req.body undefined on a bodyless DELETE
+            const { reason } = req.body ?? {};
+
+            await assertStoreInTenant(req, storeUuid);
+            await assertCanModifyStoreMember(req, await findTenantMember(req, { userUuid }), storeUuid);
 
             await StaffManagementService.revokeStoreAccess({
                 userUuid,
@@ -204,6 +251,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -272,6 +322,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -285,6 +338,8 @@ export class StaffManagementController {
             const { userUuid } = req.params;
             const tenantUuid = req.tenant!.uuid;
             const { terminationDate, reason } = req.body;
+
+            await assertCanModifyStaffMember(req, await findTenantMember(req, { userUuid }));
 
             await StaffManagementService.terminateStaff({
                 userUuid,
@@ -300,6 +355,9 @@ export class StaffManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,

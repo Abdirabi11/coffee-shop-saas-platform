@@ -6,7 +6,8 @@ export class FraudReviewController {
     // GET /api/v1/security/fraud?status=PENDING&severity=HIGH&limit=50
     static async listEvents(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
             }
@@ -63,7 +64,8 @@ export class FraudReviewController {
     static async getEvent(req: Request, res: Response) {
         try {
             const { uuid } = req.params;
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
         
             const event = await prisma.fraudEvent.findFirst({
                 where: { uuid, tenantUuid },
@@ -119,7 +121,8 @@ export class FraudReviewController {
     // GET /api/v1/security/fraud/stats
     static async getStats(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
             }

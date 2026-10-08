@@ -7,7 +7,8 @@ export class ReconciliationDashboardController {
     // Tenant-level reconciliation health card
     static async getOverview(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
             }
@@ -68,7 +69,8 @@ export class ReconciliationDashboardController {
     // All stores with unresolved variances (tenant admin view)
     static async getUnresolved(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
             }
@@ -128,7 +130,8 @@ export class ReconciliationDashboardController {
     // Provider reconciliation results (Stripe vs our records)
     static async getProviderReconciliation(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
             }
@@ -155,7 +158,8 @@ export class ReconciliationDashboardController {
     // Today's store daily metrics (populated in real-time by event handlers)
     static async getTodayMetrics(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             if (!tenantUuid) {
                 return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
             }

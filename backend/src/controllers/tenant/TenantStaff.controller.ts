@@ -2,6 +2,16 @@ import type { Request, Response } from "express";
 import prisma from "../../config/prisma.ts"
 import { TenantInvitationService } from "../../services/tenant/TenantInvitation.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import {
+    RoleAssignmentError,
+    assertCanAssignTenantRole,
+    assertCanModifyTenantMember,
+    assertStoreInTenant,
+    findTenantMember,
+} from "../../domain/auth/roleHierarchy.ts";
+
+const roleErrorResponse = (res: Response, error: RoleAssignmentError) =>
+    res.status(error.status).json({ success: false, error: error.code });
 
 export class TenantStaffController {
  
@@ -43,6 +53,13 @@ export class TenantStaffController {
             if (!email || !role) {
                 return res.status(400).json({ success: false, error: "EMAIL_AND_ROLE_REQUIRED" });
             }
+
+            // Only roles below the caller's own (see roleHierarchy), and only
+            // stores of this tenant
+            assertCanAssignTenantRole(req, role);
+            for (const storeUuid of storeUuids || []) {
+                await assertStoreInTenant(req, storeUuid);
+            }
  
             const invitation = await TenantInvitationService.inviteUser({
                 tenantUuid,
@@ -54,6 +71,7 @@ export class TenantStaffController {
  
             return res.status(201).json({ success: true, data: invitation });
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) return roleErrorResponse(res, error);
             if (error.message === "USER_ALREADY_MEMBER") {
                 return res.status(409).json({ success: false, error: "USER_ALREADY_MEMBER" });
             }
@@ -68,6 +86,12 @@ export class TenantStaffController {
             const tenantUuid = req.tenant!.uuid;
             const { staffUuid } = req.params;
             const { role, isActive } = req.body;
+
+            // Not yourself, not the owner, not a peer or superior; and only
+            // roles below your own
+            const target = await findTenantMember(req, { uuid: staffUuid });
+            assertCanModifyTenantMember(req, target);
+            if (role !== undefined) assertCanAssignTenantRole(req, role);
  
             const updated = await prisma.tenantUser.update({
                 where: { uuid: staffUuid, tenantUuid },
@@ -77,6 +101,7 @@ export class TenantStaffController {
             logWithContext("info", "[TenantStaff] Updated", { staffUuid, role, isActive });
             return res.status(200).json({ success: true, data: updated });
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) return roleErrorResponse(res, error);
             logWithContext("error", "[TenantStaff] Update failed", { error: error.message });
             return res.status(500).json({ success: false, error: "UPDATE_FAILED" });
         }
@@ -88,6 +113,9 @@ export class TenantStaffController {
             const tenantUuid = req.tenant!.uuid;
             const { staffUuid } = req.params;
             const actor = (req as any).user;
+
+            const target = await findTenantMember(req, { uuid: staffUuid });
+            assertCanModifyTenantMember(req, target);
  
             // Soft delete
             const staff = await prisma.tenantUser.update({
@@ -111,6 +139,7 @@ export class TenantStaffController {
             logWithContext("info", "[TenantStaff] Removed", { staffUuid, by: actor.userUuid });
             return res.status(200).json({ success: true, message: "Staff member removed" });
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) return roleErrorResponse(res, error);
             logWithContext("error", "[TenantStaff] Remove failed", { error: error.message });
             return res.status(500).json({ success: false, error: "REMOVE_FAILED" });
         }

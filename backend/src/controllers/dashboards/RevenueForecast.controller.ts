@@ -5,7 +5,8 @@ export class RevenueForecastController {
     // GET /api/v1/forecast/projection?period=month&storeUuid=
     static async getProjection(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { period, storeUuid } = req.query;
         
             const data = await RevenueForecastService.getCurrentPeriodProjection({
@@ -23,7 +24,8 @@ export class RevenueForecastController {
     // GET /api/v1/forecast/yoy?period=month&storeUuid=
     static async getYearOverYear(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { period, storeUuid } = req.query;
         
             const data = await RevenueForecastService.getYearOverYearComparison({
@@ -41,7 +43,8 @@ export class RevenueForecastController {
     // GET /api/v1/forecast/velocity?storeUuid=
     static async getVelocity(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { storeUuid } = req.query;
         
             const data = await RevenueForecastService.getTrendVelocity({
@@ -58,7 +61,8 @@ export class RevenueForecastController {
     // GET /api/v1/forecast/summary?storeUuid=
     static async getSummary(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { storeUuid } = req.query;
         
             const data = await RevenueForecastService.getForecastSummary({

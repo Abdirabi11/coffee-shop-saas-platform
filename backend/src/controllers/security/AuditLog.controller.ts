@@ -6,7 +6,8 @@ export class AuditLogController {
   // GET /api/v1/security/audit?action=&entityType=&actorUuid=&from=&to=
   static async search(req: Request, res: Response) {
     try {
-      const tenantUuid = (req as any).user?.tenantUuid;
+      // Verified tenant (requireTenantContext), not the login tenant on the token
+      const tenantUuid = req.tenant!.uuid;
       if (!tenantUuid) {
         return res.status(400).json({ success: false, error: "TENANT_REQUIRED" });
       }
@@ -69,7 +70,8 @@ export class AuditLogController {
   // GET /api/v1/security/audit/:uuid
   static async getDetail(req: Request, res: Response) {
     try {
-      const tenantUuid = (req as any).user?.tenantUuid;
+      // Verified tenant (requireTenantContext), not the login tenant on the token
+      const tenantUuid = req.tenant!.uuid;
       const { uuid } = req.params;
  
       const log = await prisma.auditLog.findFirst({
@@ -89,7 +91,8 @@ export class AuditLogController {
   // GET /api/v1/security/audit/summary
   static async getSummary(req: Request, res: Response) {
     try {
-      const tenantUuid = (req as any).user?.tenantUuid;
+      // Verified tenant (requireTenantContext), not the login tenant on the token
+      const tenantUuid = req.tenant!.uuid;
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
  
       const [byCategory, byRisk, total] = await Promise.all([

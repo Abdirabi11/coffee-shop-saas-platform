@@ -5,7 +5,8 @@ export class SettlementController {
     // GET /api/v1/settlements/dashboard
     static async getDashboard(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const data = await SettlementService.getDashboard(tenantUuid);
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
@@ -16,7 +17,8 @@ export class SettlementController {
     // GET /api/v1/settlements/history?provider=&status=&from=&to=&limit=&offset=
     static async getHistory(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const { provider, status, from, to, limit, offset } = req.query;
         
             const data = await SettlementService.getHistory({
@@ -38,7 +40,8 @@ export class SettlementController {
     // GET /api/v1/settlements/pending
     static async getPending(req: Request, res: Response) {
         try {
-            const tenantUuid = (req as any).user?.tenantUuid;
+            // Verified tenant (requireTenantContext), not the login tenant on the token
+            const tenantUuid = req.tenant!.uuid;
             const data = await SettlementService.getHistory({
                 tenantUuid,
                 status: "PENDING",
