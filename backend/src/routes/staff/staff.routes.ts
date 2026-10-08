@@ -86,15 +86,18 @@ router.get(
   TimeEntryController.getActiveTimeEntries
 );
  
-router.get(
-    "/time-entry/user/:userUuid",
-    checkAnyPermission(["payroll.read", "time_entry.read"]),
-    TimeEntryController.getUserTimeEntries
-);
+// Access is checked in the handler (tenant member; the user themselves, a
+// tenant admin, or time_entry.read / payroll.read at the entries' stores).
+// Pay only to the user themselves and tenant admins.
+router.get("/time-entry/user/:userUuid", TimeEntryController.getUserTimeEntries);
  
+// Staff record routes check roles and permissions at the record's own store
+// (storeOf.record), never a client-supplied storeUuid
+const SUPERVISOR_ROLES = ["SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN"];
+
 router.post(
     "/time-entry/:timeEntryUuid/approve",
-    checkStoreRole(["STORE_MANAGER", "SHIFT_SUPERVISOR"]),
+    checkRole(SUPERVISOR_ROLES, storeOf.record("timeEntry", "timeEntryUuid")),
     TimeEntryController.approveTimeEntry
 );
  
@@ -122,13 +125,13 @@ router.get("/shifts/user/:userUuid", ShiftManagementController.getUserShifts);
  
 router.patch(
   "/shifts/:shiftUuid",
-  checkPermission("shift.update"),
+  checkPermission("shift.update", storeOf.record("shift", "shiftUuid")),
   ShiftManagementController.updateShift
 );
  
 router.delete(
   "/shifts/:shiftUuid",
-  checkPermission("shift.cancel"),
+  checkPermission("shift.cancel", storeOf.record("shift", "shiftUuid")),
   ShiftManagementController.cancelShift
 );
  
@@ -151,6 +154,9 @@ const DRAWER_ROLES = [
     "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN",
 ];
 const DROP_VERIFIER_ROLES = ["SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN"];
+// Signing off a cash variance: managers and up only (STORE_MANAGER implies
+// MANAGER, OWNER implies ADMIN)
+const VARIANCE_APPROVER_ROLES = ["MANAGER", "ADMIN", "TENANT_ADMIN"];
 const drawerStore = storeOf.record("cashDrawer", "drawerUuid");
 
 router.post("/cash-drawer/open", warnIfNotClockedIn, checkRole(DRAWER_ROLES), CashDrawerController.openDrawer );
@@ -165,6 +171,12 @@ router.get(
  
 router.post("/cash-drawer/:drawerUuid/close", checkRole(DRAWER_ROLES, drawerStore), CashDrawerController.closeDrawer);
 router.post("/cash-drawer/:drawerUuid/drop", checkRole(DRAWER_ROLES, drawerStore), CashDrawerController.cashDrop);
+ 
+router.post(
+  "/cash-drawer/:drawerUuid/approve-variance",
+  checkRole(VARIANCE_APPROVER_ROLES, drawerStore),
+  CashDrawerController.approveCashVariance
+);
  
 router.post(
   "/cash-drawer/drop/:cashDropUuid/verify",
@@ -185,15 +197,19 @@ router.get(
   ApprovalRequestController.getPendingRequests
 );
  
+// Roles at the request's own store; money and access requests also need a
+// manager (checked in the handler)
+const approvalStore = storeOf.record("staffApprovalRequest", "requestUuid");
+
 router.post(
   "/approvals/:requestUuid/approve",
-  checkStoreRole(["STORE_MANAGER", "SHIFT_SUPERVISOR"]),
+  checkRole(SUPERVISOR_ROLES, approvalStore),
   ApprovalRequestController.approveRequest
 );
  
 router.post(
   "/approvals/:requestUuid/reject",
-  checkStoreRole(["STORE_MANAGER", "SHIFT_SUPERVISOR"]),
+  checkRole(SUPERVISOR_ROLES, approvalStore),
   ApprovalRequestController.rejectRequest
 );
  

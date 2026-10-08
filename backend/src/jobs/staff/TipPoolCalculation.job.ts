@@ -1,4 +1,5 @@
 import dayjs from "dayjs";
+import prisma from "../../config/prisma.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.ts";
 
@@ -8,7 +9,7 @@ export class TipPoolCalculationJob {
     static async run() {
         const startTime = Date.now();
         
-        logWithContext("info", "[TipPoolJob] Starting daily tip pool calculation");
+        logWithContext("info", "[TipPoolJob] Starting daily tip pool calculation", {});
 
         try {
             const yesterday = dayjs().subtract(1, "day");

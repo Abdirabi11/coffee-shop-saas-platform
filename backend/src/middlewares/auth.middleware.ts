@@ -131,7 +131,9 @@ export const storeOf = {
     },
     // Any tenant-scoped model with uuid/tenantUuid/storeUuid columns
     record: (
-        model: "cashDrawer" | "dailyReconciliation" | "product" | "category" | "optionGroup",
+        model:
+            | "cashDrawer" | "dailyReconciliation" | "product" | "category" | "optionGroup"
+            | "shift" | "timeEntry" | "staffApprovalRequest",
         param: string
     ): StoreResolver => async (req) => {
         const uuid = stringParam(req.params?.[param]);

@@ -202,6 +202,7 @@ export class ShiftManagementService {
     }
 
     static async updateShift(input: {
+        tenantUuid: string;
         shiftUuid: string;
         scheduledStart?: Date;
         scheduledEnd?: Date;
@@ -209,8 +210,8 @@ export class ShiftManagementService {
         status?: string;
         notes?: string;
     }) {
-        const shift = await prisma.shift.findUnique({
-            where: { uuid: input.shiftUuid },
+        const shift = await prisma.shift.findFirst({
+            where: { uuid: input.shiftUuid, tenantUuid: input.tenantUuid },
         });
 
         if (!shift) {
@@ -250,9 +251,18 @@ export class ShiftManagementService {
     }
 
     static async cancelShift(input: {
+        tenantUuid: string;
         shiftUuid: string;
         reason?: string;
     }) {
+        const existing = await prisma.shift.findFirst({
+            where: { uuid: input.shiftUuid, tenantUuid: input.tenantUuid },
+            select: { uuid: true },
+        });
+        if (!existing) {
+            throw new Error("SHIFT_NOT_FOUND");
+        }
+
         const shift = await prisma.shift.update({
             where: { uuid: input.shiftUuid },
             data: {

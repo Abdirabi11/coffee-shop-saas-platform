@@ -391,9 +391,22 @@ export class TimeEntryService {
 
     //Approve time entry (for late clock-ins, etc.)
     static async approveTimeEntry(input: {
+        tenantUuid: string;
         timeEntryUuid: string;
         approvedBy: string;
     }) {
+        const existing = await prisma.timeEntry.findFirst({
+            where: { uuid: input.timeEntryUuid, tenantUuid: input.tenantUuid },
+            select: { userUuid: true },
+        });
+        if (!existing) {
+            throw new Error("TIME_ENTRY_NOT_FOUND");
+        }
+        // Nobody signs off their own hours
+        if (existing.userUuid === input.approvedBy) {
+            throw new Error("TIME_ENTRY_SELF_APPROVE");
+        }
+
         const timeEntry = await prisma.timeEntry.update({
             where: { uuid: input.timeEntryUuid },
             data: {
@@ -499,14 +512,21 @@ export class TimeEntryService {
     }
 
     //Get time entries for user (for payroll)
+    // storeUuids limits the result to those stores (undefined = every store in
+    // the tenant). Pay (payRate snapshot, totalPay) only when includePay.
     static async getUserTimeEntries(input: {
+        tenantUuid: string;
         userUuid: string;
         periodStart: Date;
         periodEnd: Date;
+        storeUuids?: string[];
+        includePay: boolean;
     }) {
         return prisma.timeEntry.findMany({
             where: {
+                tenantUuid: input.tenantUuid,
                 userUuid: input.userUuid,
+                ...(input.storeUuids && { storeUuid: { in: input.storeUuids } }),
                 clockInAt: {
                     gte: input.periodStart,
                     lte: input.periodEnd,
@@ -522,6 +542,7 @@ export class TimeEntryService {
                     },
                 },
             },
+            omit: { payRate: !input.includePay, totalPay: !input.includePay },
             orderBy: { clockInAt: "asc" },
         });
     }

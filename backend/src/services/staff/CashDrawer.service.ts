@@ -461,26 +461,59 @@ export class CashDrawerService{
         return cashDrop;
     }
 
+    // Signs off a variance over the threshold: RECONCILING -> CLOSED, once,
+    // by someone other than the drawer's owner. Also resolves the drawer's
+    // pending CASH_VARIANCE approval request (when approved from the drawer
+    // route; from the approvals route that request is already claimed).
     static async approveCashVariance(input: {
+        tenantUuid: string;
         drawerUuid: string;
         approvedBy: string;
+        notes?: string;
     }) {
-        const drawer = await prisma.cashDrawer.update({
-            where: { uuid: input.drawerUuid },
-            data: {
-                status: "CLOSED",
-                varianceApproved: true,
-                varianceApprovedBy: input.approvedBy,
-            },
+        const drawer = await prisma.cashDrawer.findFirst({
+            where: { uuid: input.drawerUuid, tenantUuid: input.tenantUuid },
+            select: { userUuid: true },
+        });
+        if (!drawer) throw new Error("DRAWER_NOT_FOUND");
+        if (drawer.userUuid === input.approvedBy) throw new Error("VARIANCE_SELF_APPROVE");
+
+        const updated = await prisma.$transaction(async (tx) => {
+            const { count } = await tx.cashDrawer.updateMany({
+                where: { uuid: input.drawerUuid, tenantUuid: input.tenantUuid, status: "RECONCILING" },
+                data: {
+                    status: "CLOSED",
+                    varianceApproved: true,
+                    varianceApprovedBy: input.approvedBy,
+                },
+            });
+            if (count === 0) throw new Error("DRAWER_NOT_RECONCILING");
+
+            await tx.staffApprovalRequest.updateMany({
+                where: {
+                    tenantUuid: input.tenantUuid,
+                    approvalType: "CASH_VARIANCE",
+                    status: "PENDING",
+                    requestData: { path: ["drawerUuid"], equals: input.drawerUuid },
+                },
+                data: {
+                    status: "APPROVED",
+                    approvedBy: input.approvedBy,
+                    approvalNotes: input.notes,
+                    respondedAt: new Date(),
+                },
+            });
+
+            return tx.cashDrawer.findUniqueOrThrow({ where: { uuid: input.drawerUuid } });
         });
 
         logWithContext("info", "[CashDrawer] Cash variance approved", {
             drawerUuid: input.drawerUuid,
-            variance: drawer.variance,
+            variance: updated.variance,
             approvedBy: input.approvedBy,
         });
 
-        return drawer;
+        return updated;
     }
 
     static async getActiveDrawer(input: {

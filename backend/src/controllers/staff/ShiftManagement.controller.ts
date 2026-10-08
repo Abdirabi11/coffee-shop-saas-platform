@@ -120,6 +120,7 @@ export class ShiftManagementController {
             const { scheduledStart, scheduledEnd, role, status, notes } = req.body;
 
             const shift = await ShiftManagementService.updateShift({
+                tenantUuid: req.tenant!.uuid,
                 shiftUuid,
                 scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined,
                 scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined,
@@ -134,6 +135,9 @@ export class ShiftManagementController {
             });
 
         } catch (error: any) {
+            if (error.message === "SHIFT_NOT_FOUND") {
+                return res.status(404).json({ error: "SHIFT_NOT_FOUND", message: "Shift not found" });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -145,9 +149,11 @@ export class ShiftManagementController {
     static async cancelShift(req: Request, res: Response) {
         try {
             const { shiftUuid } = req.params;
-            const { reason } = req.body;
+            // Express 5 leaves req.body undefined on a bodyless DELETE
+            const { reason } = req.body ?? {};
 
             const shift = await ShiftManagementService.cancelShift({
+                tenantUuid: req.tenant!.uuid,
                 shiftUuid,
                 reason,
             });
@@ -158,6 +164,9 @@ export class ShiftManagementController {
             });
 
         } catch (error: any) {
+            if (error.message === "SHIFT_NOT_FOUND") {
+                return res.status(404).json({ error: "SHIFT_NOT_FOUND", message: "Shift not found" });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,

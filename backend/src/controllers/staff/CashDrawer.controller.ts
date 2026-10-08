@@ -15,9 +15,11 @@ const DRAWER_ERRORS: Record<string, number> = {
     CASH_DROP_NOT_FOUND: 404,
     DRAWER_NOT_YOURS: 403,
     DROP_SELF_VERIFY: 403,
+    VARIANCE_SELF_APPROVE: 403,
     NO_PERMISSION_OPEN_DRAWER: 403,
     DRAWER_NOT_OPEN: 409,
     DROP_ALREADY_VERIFIED: 409,
+    DRAWER_NOT_RECONCILING: 409,
 };
 
 function drawerError(res: Response, error: any, fallback: string) {
@@ -146,6 +148,29 @@ export class CashDrawerController {
 
         } catch (error: any) {
             return drawerError(res, error, "Failed to verify cash drop");
+        }
+    }
+
+    //POST /api/cash-drawer/:drawerUuid/approve-variance
+    static async approveCashVariance(req: Request, res: Response) {
+        try {
+            const { drawerUuid } = req.params;
+            const { notes } = req.body ?? {};
+
+            const drawer = await CashDrawerService.approveCashVariance({
+                tenantUuid: req.tenant!.uuid,
+                drawerUuid,
+                approvedBy: req.user!.userUuid,
+                notes,
+            });
+
+            return res.status(200).json({
+                success: true,
+                drawer,
+            });
+
+        } catch (error: any) {
+            return drawerError(res, error, "Failed to approve cash variance");
         }
     }
 

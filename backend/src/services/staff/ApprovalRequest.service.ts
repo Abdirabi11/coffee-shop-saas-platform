@@ -43,23 +43,60 @@ export class ApprovalRequestService {
         return request;
     }
 
-    static async approveRequest(input: {
+    // The request if it belongs to the tenant; throws APPROVAL_NOT_FOUND
+    static async findRequest(tenantUuid: string, requestUuid: string) {
+        const request = await prisma.staffApprovalRequest.findFirst({
+            where: { uuid: requestUuid, tenantUuid },
+        });
+        if (!request) throw new Error("APPROVAL_NOT_FOUND");
+        return request;
+    }
+
+    // Claim a PENDING request for this responder (one response per request;
+    // nobody answers their own request)
+    private static async claim(input: {
+        tenantUuid: string;
         requestUuid: string;
         approvedBy: string;
         notes?: string;
+        status: "APPROVED" | "REJECTED";
     }) {
-        const request = await prisma.staffApprovalRequest.update({
-            where: { uuid: input.requestUuid },
+        const request = await this.findRequest(input.tenantUuid, input.requestUuid);
+        if (request.requestedBy === input.approvedBy) throw new Error("APPROVAL_SELF");
+
+        const { count } = await prisma.staffApprovalRequest.updateMany({
+            where: { uuid: input.requestUuid, tenantUuid: input.tenantUuid, status: "PENDING" },
             data: {
-                status: "APPROVED",
+                status: input.status,
                 approvedBy: input.approvedBy,
                 approvalNotes: input.notes,
                 respondedAt: new Date(),
             },
         });
+        if (count === 0) throw new Error("APPROVAL_NOT_PENDING");
 
-        // Execute approval action
-        await this.executeApproval(request);
+        return prisma.staffApprovalRequest.findUniqueOrThrow({ where: { uuid: input.requestUuid } });
+    }
+
+    static async approveRequest(input: {
+        tenantUuid: string;
+        requestUuid: string;
+        approvedBy: string;
+        notes?: string;
+    }) {
+        const request = await this.claim({ ...input, status: "APPROVED" });
+
+        // Execute approval action; if it fails the request goes back to
+        // PENDING so it can be retried
+        try {
+            await this.executeApproval(request, input.approvedBy);
+        } catch (error) {
+            await prisma.staffApprovalRequest.updateMany({
+                where: { uuid: request.uuid, status: "APPROVED", approvedBy: input.approvedBy },
+                data: { status: "PENDING", approvedBy: null, approvalNotes: null, respondedAt: null },
+            });
+            throw error;
+        }
 
         logWithContext("info", "[Approval] Request approved", {
             requestUuid: input.requestUuid,
@@ -80,19 +117,12 @@ export class ApprovalRequestService {
     }
 
     static async rejectRequest(input: {
+        tenantUuid: string;
         requestUuid: string;
         approvedBy: string;
         notes?: string;
     }) {
-        const request = await prisma.staffApprovalRequest.update({
-            where: { uuid: input.requestUuid },
-            data: {
-                status: "REJECTED",
-                approvedBy: input.approvedBy,
-                approvalNotes: input.notes,
-                respondedAt: new Date(),
-            },
-        });
+        const request = await this.claim({ ...input, status: "REJECTED" });
 
         logWithContext("info", "[Approval] Request rejected", {
             requestUuid: input.requestUuid,
@@ -107,12 +137,14 @@ export class ApprovalRequestService {
         return request;
     }
 
-    private static async executeApproval(request: any) {
-        const { approvalType, requestData } = request;
+    // approvedBy is the responder, never a value from requestData (written
+    // by the requester). Services are imported lazily: they import this one.
+    private static async executeApproval(request: any, approvedBy: string) {
+        const { approvalType, requestData, tenantUuid } = request;
 
         switch (approvalType) {
             case "LATE_CLOCK_IN":
-                await this.approveLateClockIn(requestData);
+                await this.approveLateClockIn(tenantUuid, requestData, approvedBy);
                 break;
 
             case "MISSED_CLOCK_OUT":
@@ -120,7 +152,7 @@ export class ApprovalRequestService {
                 break;
 
             case "CASH_VARIANCE":
-                await this.approveCashVariance(requestData);
+                await this.approveCashVariance(tenantUuid, requestData, approvedBy);
                 break;
 
             case "REFUND":
@@ -132,7 +164,7 @@ export class ApprovalRequestService {
                 break;
 
             case "TEMP_PERMISSION":
-                await this.approveTempPermission(requestData);
+                await this.approveTempPermission(request, approvedBy);
                 break;
 
             default:
@@ -142,11 +174,12 @@ export class ApprovalRequestService {
         }
     }
 
-    private static async approveLateClockIn(data: any) {
-        const { TimeEntryService } = require("./TimeEntry.service");
+    private static async approveLateClockIn(tenantUuid: string, data: any, approvedBy: string) {
+        const { TimeEntryService } = await import("./TimeEntry.service.ts");
         await TimeEntryService.approveTimeEntry({
+            tenantUuid,
             timeEntryUuid: data.timeEntryUuid,
-            approvedBy: data.approvedBy,
+            approvedBy,
         });
     }
 
@@ -155,11 +188,12 @@ export class ApprovalRequestService {
         logWithContext("info", "[Approval] Missed clock-out approved", data);
     }
 
-    private static async approveCashVariance(data: any) {
-        const { CashDrawerService } = require("./CashDrawer.service");
+    private static async approveCashVariance(tenantUuid: string, data: any, approvedBy: string) {
+        const { CashDrawerService } = await import("./CashDrawer.service.ts");
         await CashDrawerService.approveCashVariance({
+            tenantUuid,
             drawerUuid: data.drawerUuid,
-            approvedBy: data.approvedBy,
+            approvedBy,
         });
     }
 
@@ -173,14 +207,16 @@ export class ApprovalRequestService {
         logWithContext("info", "[Approval] Void approved", data);
     }
 
-    private static async approveTempPermission(data: any) {
-        const { PermissionManagementService } = require("./PermissionManagement.service");
+    // Granted at the request's own store, never a store named in requestData
+    private static async approveTempPermission(request: any, approvedBy: string) {
+        const data = request.requestData;
+        const { PermissionManagementService } = await import("./PermissionManagement.service.ts");
         await PermissionManagementService.grantTemporaryPermission({
-            userUuid: data.userUuid,
-            storeUuid: data.storeUuid,
+            userUuid: request.requestedBy,
+            storeUuid: request.storeUuid,
             permissionSlug: data.permissionSlug,
             validUntilMinutes: data.validUntilMinutes,
-            grantedBy: data.approvedBy,
+            grantedBy: approvedBy,
             reason: data.reason,
         });
     }
