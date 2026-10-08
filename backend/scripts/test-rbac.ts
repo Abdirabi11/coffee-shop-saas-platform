@@ -169,6 +169,25 @@ async function setup() {
             data: { userUuid: storeMgrA.uuid, storeUuid: a1.uuid, permissionUuid: perm.uuid, grantedBy: ownerA.uuid },
         });
     }
+    // Phase 26: staff record permissions aren't in any default role (the
+    // defaults use shift.manage): grant them to the A1 manager at A1 only
+    for (const slug of ["shift.update", "shift.cancel", "time_entry.read"]) {
+        const [resource, action] = slug.split(".");
+        const perm = await prisma.permission.upsert({
+            where: { slug },
+            update: {},
+            create: { slug, resource, action, name: slug },
+        });
+        await prisma.userPermission.create({
+            data: { userUuid: managerA.uuid, storeUuid: a1.uuid, permissionUuid: perm.uuid, grantedBy: ownerA.uuid },
+        });
+    }
+    const supervisorA = await user("SupervisorA", "CUSTOMER");
+    const supervisorA_A = await member(tA.uuid, supervisorA.uuid, "STAFF", "supervisor-a");
+    await prisma.userStore.create({
+        data: { userUuid: supervisorA.uuid, tenantUserUuid: supervisorA_A.uuid, tenantUuid: tA.uuid, storeUuid: a1.uuid, role: "SHIFT_SUPERVISOR" },
+    });
+
     // A secret to look for in profile responses
     await prisma.user.update({ where: { uuid: cashierA.uuid }, data: { pinHash: "$2b$10$test-pin-hash-should-never-leak", otpCode: "123456" } });
 
@@ -207,13 +226,68 @@ async function setup() {
         b1Order: await order(tB.uuid, b1.uuid, ownerB_B.uuid),
     };
 
+    // Phase 26 staff records: shifts, time entries, reconciling drawers, approval requests
+    const shiftAt = (st: { uuid: string; tenantUuid: string }, userUuid: string) => prisma.shift.create({
+        data: {
+            tenantUuid: st.tenantUuid, storeUuid: st.uuid, userUuid, role: "CASHIER",
+            scheduledStart: new Date("2030-02-01T08:00:00Z"), scheduledEnd: new Date("2030-02-01T16:00:00Z"),
+        },
+    });
+    const entryAt = (st: { uuid: string; tenantUuid: string }, userUuid: string, day: number) => prisma.timeEntry.create({
+        data: {
+            tenantUuid: st.tenantUuid, storeUuid: st.uuid, userUuid, clockInDevice: "test-device",
+            clockInAt: new Date(`2030-02-0${day}T08:00:00Z`), clockOutAt: new Date(`2030-02-0${day}T16:00:00Z`),
+            hoursWorked: 8, payRate: 1500, totalPay: 12000, requiresApproval: true,
+        },
+    });
+    const reconciling = (st: { uuid: string; tenantUuid: string }, userUuid: string) => prisma.cashDrawer.create({
+        data: {
+            tenantUuid: st.tenantUuid, storeUuid: st.uuid, userUuid, status: "RECONCILING",
+            openedAt: new Date(), closedAt: new Date(), startingCash: 10000, expectedCash: 10000, actualCash: 8000, variance: -2000,
+        },
+    });
+    const request = (st: { uuid: string; tenantUuid: string }, requestedBy: string, approvalType: "CASH_VARIANCE" | "LATE_CLOCK_IN" | "MISSED_CLOCK_OUT", requestData: object) =>
+        prisma.staffApprovalRequest.create({ data: { tenantUuid: st.tenantUuid, storeUuid: st.uuid, requestedBy, approvalType, requestData, status: "PENDING" } });
+
+    const entries = {
+        cashierA1: await entryAt(a1, cashierA.uuid, 1),
+        cashierA2: await entryAt(a2, cashierA.uuid, 2),
+        managerA1: await entryAt(a1, managerA.uuid, 1),
+        ownerA_B1: await entryAt(b1, ownerA.uuid, 3),   // A's owner also works at tenant B
+        ownerB_B1: await entryAt(b1, ownerB.uuid, 1),
+    };
+    const drawers = {
+        varA1: await reconciling(a1, cashierA.uuid),
+        varA1b: await reconciling(a1, cashierA.uuid),
+        varA2: await reconciling(a2, cashierA.uuid),
+        varMgr: await reconciling(a1, managerA.uuid),
+        openA1: await prisma.cashDrawer.create({
+            data: { tenantUuid: tA.uuid, storeUuid: a1.uuid, userUuid: storeAdminA.uuid, status: "OPEN", openedAt: new Date(), startingCash: 5000 },
+        }),
+    };
+    const p26 = {
+        shifts: { a1: await shiftAt(a1, cashierA.uuid), a1b: await shiftAt(a1, cashierA.uuid), a2: await shiftAt(a2, cashierA.uuid), b1: await shiftAt(b1, ownerB.uuid) },
+        entries,
+        drawers,
+        requests: {
+            varA1: await request(a1, cashierA.uuid, "CASH_VARIANCE", { drawerUuid: drawers.varA1.uuid }),
+            varA1b: await request(a1, cashierA.uuid, "CASH_VARIANCE", { drawerUuid: drawers.varA1b.uuid }),
+            varA2: await request(a2, cashierA.uuid, "CASH_VARIANCE", { drawerUuid: drawers.varA2.uuid }),
+            // approvedBy in requestData is written by the requester: must be ignored
+            lateA1: await request(a1, cashierA.uuid, "LATE_CLOCK_IN", { timeEntryUuid: entries.cashierA1.uuid, approvedBy: cashierA.uuid }),
+            lateMgr: await request(a1, managerA.uuid, "LATE_CLOCK_IN", { timeEntryUuid: entries.managerA1.uuid }),
+            missedA1: await request(a1, cashierA.uuid, "MISSED_CLOCK_OUT", {}),
+            b1: await request(b1, ownerB.uuid, "MISSED_CLOCK_OUT", {}),
+        },
+    };
+
     // Tokens carry the global role and login tenant, exactly as TokenService issues them
     const token = (u: { uuid: string; globalRole: string; tokenVersion: number }, tenantUuid: string) =>
         signAccessToken({ userUuid: u.uuid, role: u.globalRole as any, tenantUuid, tokenVersion: u.tokenVersion });
 
     return {
-        tA, tB, a1, a2, b1, exceptionB, orders, drawerB,
-        users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA },
+        tA, tB, a1, a2, b1, exceptionB, orders, drawerB, p26,
+        users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA, supervisorA },
         menu,
         members: { ownerA_A, storeAdminA_A, adminA2_A, adminA3_A, newbie_A, promotee_A },
         tokens: {
@@ -225,6 +299,7 @@ async function setup() {
             storeMgrA: token(storeMgrA, tA.uuid),
             adminA2: token(adminA2, tA.uuid),
             newbie: token(newbie, tA.uuid),
+            supervisorA: token(supervisorA, tA.uuid),
         },
     };
 }
@@ -546,6 +621,106 @@ async function main() {
             (await errorOf("POST", "/api/staff/time-entry/break/end", t.cashierA, { body: { breakEntryUuid: brk.body?.breakEntry?.uuid } })).split(" ")[0], "200");
         check("manager clocks the cashier out", await clock("clock-out", t.managerA, { userUuid: u.cashierA.uuid, storeUuid: a1 }), "403 CANNOT_CLOCK_OTHERS");
         check("cashier clocks self out", (await clock("clock-out", t.cashierA, { storeUuid: a1 })).split(" ")[0], "200");
+
+        const { shifts, entries, drawers, requests } = ctx.p26;
+        const a2 = ctx.a2.uuid;
+
+        console.log("\n=== Shifts: store from the shift itself (Phase 26) ===");
+        const patchShift = (token: string, shiftUuid: string, query = "") =>
+            errorOf("PATCH", `/api/staff/shifts/${shiftUuid}${query}`, token, { body: { notes: "moved" } });
+        check("A1 manager edits an A2 shift, naming A1", (await patchShift(t.managerA, shifts.a2.uuid, `?storeUuid=${a1}`)).split(" ")[0], "403");
+        check("A1 manager edits tenant B's shift", (await patchShift(t.managerA, shifts.b1.uuid, `?storeUuid=${a1}`)).split(" ")[0], "404");
+        check("cashier edits an A1 shift", (await patchShift(t.cashierA, shifts.a1.uuid)).split(" ")[0], "403");
+        check("A1 manager edits an A1 shift", (await patchShift(t.managerA, shifts.a1.uuid)).split(" ")[0], "200");
+        const cancelShift = (token: string, shiftUuid: string, query = "") =>
+            errorOf("DELETE", `/api/staff/shifts/${shiftUuid}${query}`, token);
+        check("A1 manager cancels an A2 shift, naming A1", (await cancelShift(t.managerA, shifts.a2.uuid, `?storeUuid=${a1}`)).split(" ")[0], "403");
+        check("A1 manager cancels tenant B's shift", (await cancelShift(t.managerA, shifts.b1.uuid, `?storeUuid=${a1}`)).split(" ")[0], "404");
+        check("A1 manager cancels an A1 shift (no body)", (await cancelShift(t.managerA, shifts.a1b.uuid)).split(" ")[0], "200");
+        const untouched = await prisma.shift.findMany({ where: { uuid: { in: [shifts.a2.uuid, shifts.b1.uuid] } } });
+        check("  ...A2 and B shifts untouched", untouched.every((sh) => sh.status === "SCHEDULED" && sh.notes === null), true);
+
+        console.log("\n=== Time entries: tenant-bound, pay hidden (Phase 26) ===");
+        const period = "periodStart=2030-01-01&periodEnd=2030-03-01";
+        const entriesOf = (token: string, userUuid: string, extra = "") =>
+            call("GET", `/api/staff/time-entry/user/${userUuid}?${period}${extra}`, token);
+        const stores = (r: { body: any }) => (r.body?.entries ?? []).map((e: any) => e.storeUuid === a1 ? "A1" : e.storeUuid === a2 ? "A2" : "OTHER").sort().join(",");
+        const hasPay = (r: { body: any }) => (r.body?.entries ?? []).some((e: any) => "payRate" in e || "totalPay" in e);
+
+        const own = await entriesOf(t.cashierA, u.cashierA.uuid);
+        check("cashier reads own entries", `${own.status} ${stores(own)}`, "200 A1,A2");
+        check("  ...with own pay", hasPay(own), true);
+        const ownerOwn = await entriesOf(t.ownerA, u.ownerA.uuid);
+        check("A owner's own entries leave out tenant B's", `${ownerOwn.status} ${(ownerOwn.body?.entries ?? []).length}`, "200 0");
+        const asAdmin = await entriesOf(t.ownerA, u.cashierA.uuid);
+        check("owner reads the cashier's entries", `${asAdmin.status} ${stores(asAdmin)}`, "200 A1,A2");
+        check("  ...with pay", hasPay(asAdmin), true);
+        const asManager = await entriesOf(t.managerA, u.cashierA.uuid);
+        check("A1 manager reads the cashier's entries", `${asManager.status} ${stores(asManager)}`, "200 A1");
+        check("  ...without pay", hasPay(asManager), false);
+        check("A1 manager asks for A2 entries", (await entriesOf(t.managerA, u.cashierA.uuid, `&storeUuid=${a2}`)).status, 403);
+        check("cashier reads the manager's entries", (await entriesOf(t.cashierA, u.managerA.uuid)).status, 403);
+        check("A1 manager reads tenant B's owner", (await entriesOf(t.managerA, u.ownerB.uuid, `&storeUuid=${a1}`)).status, 404);
+        check("bad period", (await call("GET", `/api/staff/time-entry/user/${u.cashierA.uuid}?periodStart=x&periodEnd=y`, t.cashierA)).status, 400);
+
+        const approveEntry = (token: string, entryUuid: string, query = "") =>
+            errorOf("POST", `/api/staff/time-entry/${entryUuid}/approve${query}`, token);
+        check("A1 supervisor approves an A2 entry, naming A1", (await approveEntry(t.supervisorA, entries.cashierA2.uuid, `?storeUuid=${a1}`)).split(" ")[0], "403");
+        check("A1 supervisor approves tenant B's entry", (await approveEntry(t.supervisorA, entries.ownerB_B1.uuid, `?storeUuid=${a1}`)).split(" ")[0], "404");
+        check("manager approves own entry", await approveEntry(t.managerA, entries.managerA1.uuid), "403 TIME_ENTRY_SELF_APPROVE");
+
+        console.log("\n=== Approvals: store from the request itself (Phase 26) ===");
+        const respond = (action: "approve" | "reject", token: string, requestUuid: string, query = "") =>
+            errorOf("POST", `/api/staff/approvals/${requestUuid}/${action}${query}`, token, { body: { notes: "ok" } });
+        check("A1 manager approves tenant B's request", (await respond("approve", t.managerA, requests.b1.uuid, `?storeUuid=${a1}`)).split(" ")[0], "404");
+        check("A1 manager approves an A2 request, naming A1", (await respond("approve", t.managerA, requests.varA2.uuid, `?storeUuid=${a1}`)).split(" ")[0], "403");
+        check("cashier approves own request", (await respond("approve", t.cashierA, requests.lateA1.uuid)).split(" ")[0], "403");
+        check("supervisor approves a cash variance", (await respond("approve", t.supervisorA, requests.varA1.uuid)).split(" ")[0], "403");
+        check("manager approves own request", await respond("approve", t.managerA, requests.lateMgr.uuid), "403 APPROVAL_SELF");
+        check("supervisor approves a late clock-in", (await respond("approve", t.supervisorA, requests.lateA1.uuid)).split(" ")[0], "200");
+        const approvedEntry = await prisma.timeEntry.findUniqueOrThrow({ where: { uuid: entries.cashierA1.uuid } });
+        check("  ...entry approved by the supervisor, not requestData", approvedEntry.approvedBy, u.supervisorA.uuid);
+        check("  ...approving it again", await respond("approve", t.supervisorA, requests.lateA1.uuid), "409 APPROVAL_NOT_PENDING");
+        check("manager approves the A1 cash variance", (await respond("approve", t.managerA, requests.varA1.uuid)).split(" ")[0], "200");
+        const signedOff = await prisma.cashDrawer.findUniqueOrThrow({ where: { uuid: drawers.varA1.uuid } });
+        check("  ...drawer closed, signed off by the manager", `${signedOff.status} ${signedOff.varianceApprovedBy === u.managerA.uuid}`, "CLOSED true");
+        check("supervisor rejects a missed clock-out", (await respond("reject", t.supervisorA, requests.missedA1.uuid)).split(" ")[0], "200");
+        check("  ...rejecting it again", await respond("reject", t.supervisorA, requests.missedA1.uuid), "409 APPROVAL_NOT_PENDING");
+
+        console.log("\n=== Cash variance route (Phase 26) ===");
+        const approveVariance = (token: string, drawerUuid: string, query = "") =>
+            errorOf("POST", `/api/staff/cash-drawer/${drawerUuid}/approve-variance${query}`, token, { body: { notes: "counted twice" } });
+        check("cashier approves own variance", await approveVariance(t.cashierA, drawers.varA1b.uuid), "403 INSUFFICIENT_ROLE");
+        check("supervisor approves a variance", await approveVariance(t.supervisorA, drawers.varA1b.uuid), "403 INSUFFICIENT_ROLE");
+        check("A1 manager approves tenant B's drawer", (await approveVariance(t.managerA, ctx.drawerB.uuid, `?storeUuid=${a1}`)).split(" ")[0], "404");
+        check("A1 manager approves an A2 drawer, naming A1", (await approveVariance(t.managerA, drawers.varA2.uuid, `?storeUuid=${a1}`)).split(" ")[0], "403");
+        check("manager approves own drawer's variance", await approveVariance(t.managerA, drawers.varMgr.uuid), "403 VARIANCE_SELF_APPROVE");
+        check("store manager approves the variance", (await approveVariance(t.storeMgrA, drawers.varA1b.uuid)).split(" ")[0], "200");
+        const resolved = await prisma.staffApprovalRequest.findUniqueOrThrow({ where: { uuid: requests.varA1b.uuid } });
+        check("  ...pending request resolved too", `${resolved.status} ${resolved.approvedBy === u.storeMgrA.uuid}`, "APPROVED true");
+        check("  ...approving it again", await approveVariance(t.storeMgrA, drawers.varA1b.uuid), "409 DRAWER_NOT_RECONCILING");
+        check("owner approves an open drawer", await approveVariance(t.ownerA, drawers.openA1.uuid), "409 DRAWER_NOT_RECONCILING");
+
+        console.log("\n=== Tip pool job (Phase 26) ===");
+        // Production has no global prisma (config/prisma.ts sets it outside
+        // production only); the job used to read that global. Stub the per-store
+        // calculation so this stays read-only.
+        const { TipPoolCalculationJob } = await import("../src/jobs/staff/TipPoolCalculation.job.ts");
+        const { TipsAndCommissionService } = await import("../src/services/staff/TipsAndCommission.service.ts");
+        const realCalculate = TipsAndCommissionService.calculateTipPool;
+        const savedGlobal = (globalThis as any).prisma;
+        let calculated = 0;
+        (TipsAndCommissionService as any).calculateTipPool = async () => { calculated++; };
+        (globalThis as any).prisma = undefined;
+        try {
+            const result = await TipPoolCalculationJob.run().catch((e: Error) => ({ crashed: e.message }));
+            const activeStores = await prisma.store.count({ where: { active: true } });
+            check("job runs without the dev-only global", "crashed" in result ? `crashed: ${result.crashed}` : `${result.processed}/${activeStores} errors=${result.errors}`, `${activeStores}/${activeStores} errors=0`);
+            check("  ...calculated each active store", calculated, activeStores);
+        } finally {
+            (TipsAndCommissionService as any).calculateTipPool = realCalculate;
+            (globalThis as any).prisma = savedGlobal;
+        }
     } finally {
         server.close();
     }
