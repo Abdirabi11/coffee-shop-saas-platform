@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+import { sendOutboundRequest } from "../../infrastructure/http/safeOutboundRequest.ts";
 
 export class WebhookRetryJob{
     //Retry failed webhook deliveries
@@ -62,15 +63,17 @@ export class WebhookRetryJob{
                     });
 
                     // Retry the delivery
-                    const response = await fetch(delivery.requestUrl, {
-                        method: "POST",
+                    // Same guard as the first send: the stored URL is re-checked
+                    // at connect time, redirects are not followed
+                    const response = await sendOutboundRequest({
+                        url: delivery.requestUrl,
                         headers: delivery.requestHeaders as any,
                         body: JSON.stringify(delivery.requestBody),
-                        signal: AbortSignal.timeout(30000),
+                        timeoutMs: 30000,
                     });
 
                     const duration = Date.now() - startTime;
-                    const responseBody = await response.text().catch(() => null);
+                    const responseBody = response.body;
 
                     if (response.ok) {
                         // Success

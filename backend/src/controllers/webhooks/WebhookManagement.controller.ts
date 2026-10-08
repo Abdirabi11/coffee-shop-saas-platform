@@ -1,7 +1,21 @@
 import type { Request, Response } from "express";
-import prisma from "../../config/prisma.ts"
 import { WebhookManagementService } from "../../services/webhooks/WebhookManagement.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { OutboundUrlError } from "../../infrastructure/http/safeOutboundRequest.ts";
+
+// Every lookup is by { uuid, tenantUuid }: another tenant's webhook is a 404
+function webhookError(res: Response, error: any) {
+    if (error instanceof OutboundUrlError) {
+        return res.status(400).json({ error: "INVALID_WEBHOOK_URL", message: error.message });
+    }
+    if (error.message === "WEBHOOK_NOT_FOUND" || error.message === "STORE_NOT_FOUND") {
+        return res.status(404).json({ error: error.message });
+    }
+    return res.status(500).json({
+        error: "INTERNAL_SERVER_ERROR",
+        message: error.message,
+    });
+}
 
 export class WebhookManagementController {
 
@@ -9,7 +23,7 @@ export class WebhookManagementController {
     static async createWebhook(req: Request, res: Response) {
         try {
             const tenantUuid = req.tenant!.uuid;
-            const { url, events, description, storeUuid, ipWhitelist, headers } = req.body;
+            const { name, url, events, description, storeUuid, ipWhitelist, headers } = req.body;
 
             if (!url || !events || events.length === 0) {
                 return res.status(400).json({
@@ -21,6 +35,7 @@ export class WebhookManagementController {
             const webhook = await WebhookManagementService.createWebhook({
                 tenantUuid,
                 storeUuid,
+                name,
                 url,
                 events,
                 description,
@@ -38,10 +53,7 @@ export class WebhookManagementController {
                 error: error.message,
             });
 
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -51,13 +63,10 @@ export class WebhookManagementController {
             const tenantUuid = req.tenant!.uuid;
             const { storeUuid } = req.query;
 
-            const where: any = { tenantUuid };
-            if (storeUuid) where.storeUuid = storeUuid;
-
-            const webhooks = await prisma.webhook.findMany({
-                where,
-                orderBy: { createdAt: "desc" },
-            });
+            const webhooks = await WebhookManagementService.listWebhooks(
+                tenantUuid,
+                typeof storeUuid === "string" ? storeUuid : undefined
+            );
 
             return res.status(200).json({
                 success: true,
@@ -65,10 +74,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -77,16 +83,7 @@ export class WebhookManagementController {
         try {
             const { webhookUuid } = req.params;
 
-            const webhook = await prisma.webhook.findUnique({
-                where: { uuid: webhookUuid },
-            });
-
-            if (!webhook) {
-                return res.status(404).json({
-                    error: "WEBHOOK_NOT_FOUND",
-                    message: "Webhook not found",
-                });
-            }
+            const webhook = await WebhookManagementService.getWebhook(req.tenant!.uuid, webhookUuid);
 
             return res.status(200).json({
                 success: true,
@@ -94,10 +91,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -108,6 +102,7 @@ export class WebhookManagementController {
             const { url, events, description, isActive, ipWhitelist, headers } = req.body;
 
             const webhook = await WebhookManagementService.updateWebhook({
+                tenantUuid: req.tenant!.uuid,
                 webhookUuid,
                 url,
                 events,
@@ -123,10 +118,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -135,7 +127,7 @@ export class WebhookManagementController {
         try {
             const { webhookUuid } = req.params;
 
-            await WebhookManagementService.deleteWebhook(webhookUuid);
+            await WebhookManagementService.deleteWebhook(req.tenant!.uuid, webhookUuid);
 
             return res.status(200).json({
                 success: true,
@@ -143,10 +135,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -155,7 +144,7 @@ export class WebhookManagementController {
         try {
             const { webhookUuid } = req.params;
 
-            const result = await WebhookManagementService.testWebhook(webhookUuid);
+            const result = await WebhookManagementService.testWebhook(req.tenant!.uuid, webhookUuid);
 
             return res.status(200).json({
                 success: true,
@@ -163,10 +152,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -176,7 +162,7 @@ export class WebhookManagementController {
         try {
             const { webhookUuid } = req.params;
 
-            const webhook = await WebhookManagementService.rotateSecret(webhookUuid);
+            const webhook = await WebhookManagementService.rotateSecret(req.tenant!.uuid, webhookUuid);
 
             return res.status(200).json({
                 success: true,
@@ -184,10 +170,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -198,6 +181,7 @@ export class WebhookManagementController {
             const { status, page, limit } = req.query;
 
             const result = await WebhookManagementService.getDeliveries({
+                tenantUuid: req.tenant!.uuid,
                 webhookUuid,
                 status: status as string,
                 page: page ? parseInt(page as string) : undefined,
@@ -210,10 +194,7 @@ export class WebhookManagementController {
             });
     
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 
@@ -225,6 +206,7 @@ export class WebhookManagementController {
             const { days } = req.query;
 
             const stats = await WebhookManagementService.getStatistics(
+                req.tenant!.uuid,
                 webhookUuid,
                 days ? parseInt(days as string) : 7
             );
@@ -235,10 +217,7 @@ export class WebhookManagementController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return webhookError(res, error);
         }
     }
 }

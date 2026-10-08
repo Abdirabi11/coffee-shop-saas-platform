@@ -5,6 +5,7 @@ import { requireTenantContext } from "../../middlewares/requireTenantContext.mid
 import { authenticate, storeOf } from "../../middlewares/auth.middleware.ts";
 import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 import { checkStoreRole } from "../../middlewares/staff/checkRole.middleware.ts";
+import { checkPayrollPermission } from "../../middlewares/staff/payrollAccess.middleware.ts";
 import { validateGeofence } from "../../middlewares/staff/validateGeofence.ts";
 import { TimeEntryController } from "../../controllers/staff/TimeEntry.controller.ts";
 import { ShiftManagementController } from "../../controllers/staff/ShiftManagement.controller.ts";
@@ -253,15 +254,17 @@ router.post(
   PayrollExportController.calculatePayroll
 );
  
+// Checked at the period's own store (tenant admins for tenant-wide periods),
+// never a client-supplied storeUuid
 router.post(
   "/payroll/:payrollPeriodUuid/approve",
-  checkPermission("payroll.approve"),
+  checkPayrollPermission("payroll.approve"),
   PayrollExportController.approvePayroll
 );
  
 router.post(
   "/payroll/:payrollPeriodUuid/export",
-  checkPermission("payroll.export"),
+  checkPayrollPermission("payroll.export"),
   PayrollExportController.exportPayroll
 );
  

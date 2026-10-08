@@ -28,7 +28,7 @@ describe("Webhook System", () => {
                 createdBy: "test-user",
             });
 
-            const result = await WebhookManagementService.testWebhook(webhook.uuid);
+            const result = await WebhookManagementService.testWebhook("test-tenant", webhook.uuid);
 
             expect(result.success).toBeDefined();
         });
@@ -43,7 +43,7 @@ describe("Webhook System", () => {
 
             const oldSecret = webhook.secret;
 
-            const updated = await WebhookManagementService.rotateSecret(webhook.uuid);
+            const updated = await WebhookManagementService.rotateSecret("test-tenant", webhook.uuid);
 
             expect(updated.secret).not.toBe(oldSecret);
         });

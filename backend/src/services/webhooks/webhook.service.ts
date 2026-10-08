@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
+import { sendOutboundRequest } from "../../infrastructure/http/safeOutboundRequest.ts";
 
 
 function signPayload(payload: any, secret: string): string {
@@ -47,8 +48,8 @@ export const dispatchWebhook= async (
     });
 
     for (const hook of webhooks){
-        await fetch(hook.url, {
-            method: "POST",
+        await sendOutboundRequest({
+            url: hook.url,
             headers: {
               "Content-Type": "application/json",
               "X-Signature": signPayload(payload, hook.secret),

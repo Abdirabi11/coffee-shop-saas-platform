@@ -2,6 +2,7 @@ import prisma  from "../../config/prisma.ts"
 import crypto from "crypto";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { sendOutboundRequest } from "../../infrastructure/http/safeOutboundRequest.ts";
 
 export class WebhookDispatcherService {
     //Dispatch webhook to all subscribed endpoints
@@ -112,15 +113,17 @@ export class WebhookDispatcherService {
         const startTime = Date.now();
 
         try {
-            const response = await fetch(delivery.requestUrl, {
-                method: "POST",
+            // Refuses private/loopback/metadata addresses at connect time
+            // (the URL is re-checked on every send) and never follows redirects
+            const response = await sendOutboundRequest({
+                url: delivery.requestUrl,
                 headers: delivery.requestHeaders as any,
                 body: JSON.stringify(delivery.requestBody),
-                signal: AbortSignal.timeout(30000), // 30 second timeout
+                timeoutMs: 30000,
             });
 
             const duration = Date.now() - startTime;
-            const responseBody = await response.text().catch(() => null);
+            const responseBody = response.body;
 
             // Update delivery
             await prisma.webhookDelivery.update({
@@ -128,7 +131,7 @@ export class WebhookDispatcherService {
                 data: {
                     status: response.ok ? "SUCCESS" : "FAILED",
                     responseStatus: response.status,
-                    responseHeaders: Object.fromEntries(response.headers.entries()),
+                    responseHeaders: response.headers as any,
                     responseBody: responseBody?.substring(0, 10000), // Limit size
                     duration,
                     completedAt: new Date(),
@@ -158,7 +161,7 @@ export class WebhookDispatcherService {
         } catch (error: any) {
             const duration = Date.now() - startTime;
 
-            const isTimeout = error.name === "AbortError";
+            const isTimeout = error.name === "TimeoutError";
             const status = isTimeout ? "TIMEOUT" : "FAILED";
 
             await prisma.webhookDelivery.update({

@@ -5,6 +5,8 @@ import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
+const EXPORT_FORMATS = new Set(["QUICKBOOKS_IIF", "QUICKBOOKS_QBO", "ADP_CSV", "GUSTO_CSV", "GENERIC_CSV", "EXCEL"]);
+
 export class PayrollExportService {
 
     static async calculatePayrollPeriod(input: {
@@ -27,6 +29,18 @@ export class PayrollExportService {
                     },
                 },
             });
+
+            // Periods are unique per tenant/start/type: an existing one must be
+            // the same scope (this store, or tenant-wide), and can't be
+            // recalculated once approved
+            if (payrollPeriod) {
+                if ((payrollPeriod.storeUuid ?? null) !== (input.storeUuid ?? null)) {
+                    throw new Error("PAYROLL_PERIOD_SCOPE_MISMATCH");
+                }
+                if (!["DRAFT", "CALCULATED"].includes(payrollPeriod.status)) {
+                    throw new Error("PAYROLL_PERIOD_LOCKED");
+                }
+            }
 
             if (!payrollPeriod) {
                 payrollPeriod = await prisma.payrollPeriod.create({
@@ -518,6 +532,7 @@ export class PayrollExportService {
 
     //Main export function
     static async exportPayroll(input: {
+        tenantUuid: string;
         payrollPeriodUuid: string;
         format: string;
         exportedBy: string;
@@ -527,11 +542,23 @@ export class PayrollExportService {
             let fileName: string;
             let fileSize: number;
 
-            const period = await prisma.payrollPeriod.findUnique({
-                where: { uuid: input.payrollPeriodUuid },
-            });
+            if (!EXPORT_FORMATS.has(input.format)) {
+                throw new Error("UNSUPPORTED_FORMAT");
+            }
 
-            const dateStr = dayjs(period!.periodStart).format("YYYY-MM-DD");
+            const period = await prisma.payrollPeriod.findFirst({
+                where: { uuid: input.payrollPeriodUuid, tenantUuid: input.tenantUuid },
+            });
+            if (!period) {
+                throw new Error("PAYROLL_PERIOD_NOT_FOUND");
+            }
+            // Only approved payroll leaves the system (re-exporting an
+            // already exported period is allowed: it was approved first)
+            if (period.status !== "APPROVED" && period.status !== "EXPORTED") {
+                throw new Error("PAYROLL_NOT_APPROVED");
+            }
+
+            const dateStr = dayjs(period.periodStart).format("YYYY-MM-DD");
 
             switch (input.format) {
                 case "QUICKBOOKS_IIF":
@@ -583,7 +610,7 @@ export class PayrollExportService {
                     fileName,
                     fileSize,
                     recordCount,
-                    totalAmount: period!.totalGrossPay,
+                    totalAmount: period.totalGrossPay,
                     exportedBy: input.exportedBy,
                 },
             });
@@ -650,18 +677,32 @@ export class PayrollExportService {
         });
     }
 
+    // CALCULATED -> APPROVED, once
     static async approvePayrollPeriod(input: {
+        tenantUuid: string;
         payrollPeriodUuid: string;
         approvedBy: string;
     }) {
-        const period = await prisma.payrollPeriod.update({
-            where: { uuid: input.payrollPeriodUuid },
+        const existing = await prisma.payrollPeriod.findFirst({
+            where: { uuid: input.payrollPeriodUuid, tenantUuid: input.tenantUuid },
+            select: { uuid: true },
+        });
+        if (!existing) {
+            throw new Error("PAYROLL_PERIOD_NOT_FOUND");
+        }
+
+        const { count } = await prisma.payrollPeriod.updateMany({
+            where: { uuid: input.payrollPeriodUuid, tenantUuid: input.tenantUuid, status: "CALCULATED" },
             data: {
                 status: "APPROVED",
                 approvedAt: new Date(),
                 approvedBy: input.approvedBy,
             },
         });
+        if (count === 0) {
+            throw new Error("PAYROLL_NOT_CALCULATED");
+        }
+        const period = await prisma.payrollPeriod.findUniqueOrThrow({ where: { uuid: input.payrollPeriodUuid } });
 
         logWithContext("info", "[Payroll] Period approved", {
             payrollPeriodUuid: input.payrollPeriodUuid,

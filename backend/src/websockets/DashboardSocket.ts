@@ -6,6 +6,54 @@ import prisma from "../config/prisma.ts";
 import { verifyAccessToken } from "../utils/jwt.ts";
 import type { AccessTokenPayload } from "../types/auth.types.ts";
 
+// Who the socket is, from the database at handshake (not token claims)
+export interface SocketIdentity {
+  userUuid: string;
+  isSuperAdmin: boolean;
+}
+
+// Tenant-level roles that see the tenant-wide room (every store's orders and
+// payments, billing and quota events). Plain members - customers, store
+// staff - don't; store staff use their store's room.
+const TENANT_ROOM_ROLES = ["TENANT_ADMIN", "REGIONAL_MANAGER"];
+
+// Rooms are tenant/store scoped; a client may only join rooms it has a
+// current, verified right to.
+export async function canJoinDashboardRoom(identity: SocketIdentity, room: unknown): Promise<boolean> {
+  if (typeof room !== "string") return false;
+
+  if (room === "superadmin") return identity.isSuperAdmin;
+
+  const [scope, uuid, ...rest] = room.split(":");
+  if (!uuid || rest.length > 0) return false;
+  if (identity.isSuperAdmin) return scope === "tenant" || scope === "store";
+
+  if (scope === "tenant") return isTenantLevelMember(identity.userUuid, uuid);
+
+  if (scope === "store") {
+    const store = await prisma.store.findUnique({ where: { uuid }, select: { tenantUuid: true } });
+    if (!store) return false;
+    const assignment = await prisma.userStore.findFirst({
+      where: { userUuid: identity.userUuid, storeUuid: uuid, tenantUuid: store.tenantUuid, isActive: true },
+      select: { uuid: true },
+    });
+    return !!assignment || isTenantLevelMember(identity.userUuid, store.tenantUuid);
+  }
+
+  return false;
+}
+
+async function isTenantLevelMember(userUuid: string, tenantUuid: string): Promise<boolean> {
+  const tenant = await prisma.tenant.findUnique({ where: { uuid: tenantUuid }, select: { ownerUuid: true } });
+  if (!tenant) return false;
+  if (tenant.ownerUuid === userUuid) return true;
+  const membership = await prisma.tenantUser.findFirst({
+    where: { userUuid, tenantUuid, isActive: true, role: { in: TENANT_ROOM_ROLES as any } },
+    select: { uuid: true },
+  });
+  return !!membership;
+}
+
 export class DashboardSocket {
   private io: SocketIOServer;
 
@@ -37,7 +85,7 @@ export class DashboardSocket {
         // Same revocation checks as the HTTP `authenticate` middleware
         const user = await prisma.user.findUnique({
           where: { uuid: payload.userUuid },
-          select: { tokenVersion: true, isBanned: true },
+          select: { tokenVersion: true, isBanned: true, globalRole: true },
         });
 
         if (!user || user.isBanned || payload.tokenVersion !== user.tokenVersion) {
@@ -45,6 +93,12 @@ export class DashboardSocket {
         }
 
         socket.data.user = payload;
+        // Super admin from the database, like the HTTP routes (a token's
+        // role claim outlives a demotion)
+        socket.data.identity = {
+          userUuid: payload.userUuid,
+          isSuperAdmin: user.globalRole === "SUPER_ADMIN",
+        } satisfies SocketIdentity;
         next();
       } catch (error) {
         next(new Error("Invalid token"));
@@ -53,31 +107,19 @@ export class DashboardSocket {
   }
 
   private setupConnectionHandlers() {
-    this.io.on("connection", (socket) => {
+    this.io.on("connection", async (socket) => {
       const user = socket.data.user as AccessTokenPayload;
+      const identity = socket.data.identity as SocketIdentity;
 
       logWithContext("info", "[DashboardSocket] Client connected", {
         socketId: socket.id,
         userUuid: user.userUuid,
       });
 
-      // Join appropriate rooms based on role
-      if (user.role === "SUPER_ADMIN") {
-        socket.join("superadmin");
-      }
-
-      if (user.tenantUuid) {
-        socket.join(`tenant:${user.tenantUuid}`);
-      }
-
-      if (user.storeUuid) {
-        socket.join(`store:${user.storeUuid}`);
-      }
-
       // Handle room subscriptions
       socket.on("subscribe", async (room: string) => {
         try {
-          if (!(await this.canJoinRoom(user, room))) {
+          if (!(await canJoinDashboardRoom(identity, room))) {
             logWithContext("warn", "[DashboardSocket] Room subscription denied", {
               socketId: socket.id,
               userUuid: user.userUuid,
@@ -109,41 +151,27 @@ export class DashboardSocket {
           socketId: socket.id,
         });
       });
+
+      // Default rooms, each through the same check as an explicit subscribe
+      // (the token's tenant/store only suggest which rooms to try)
+      const defaults = [
+        "superadmin",
+        user.tenantUuid ? `tenant:${user.tenantUuid}` : null,
+        user.storeUuid ? `store:${user.storeUuid}` : null,
+      ];
+      for (const room of defaults) {
+        try {
+          if (room && (await canJoinDashboardRoom(identity, room))) socket.join(room);
+        } catch (error: any) {
+          logWithContext("error", "[DashboardSocket] Default room check failed", {
+            socketId: socket.id,
+            error: error.message,
+          });
+        }
+      }
     });
   }
 
-  // Rooms are tenant/store scoped; a client may only join rooms it has an
-  // active membership for.
-  private async canJoinRoom(user: AccessTokenPayload, room: string): Promise<boolean> {
-    if (typeof room !== "string") return false;
-
-    if (room === "superadmin") {
-      return user.role === "SUPER_ADMIN";
-    }
-
-    const [scope, uuid, ...rest] = room.split(":");
-    if (!uuid || rest.length > 0) return false;
-
-    if (scope === "tenant") {
-      if (user.role === "SUPER_ADMIN") return true;
-      const membership = await prisma.tenantUser.findFirst({
-        where: { userUuid: user.userUuid, tenantUuid: uuid, isActive: true },
-        select: { uuid: true },
-      });
-      return !!membership;
-    }
-
-    if (scope === "store") {
-      if (user.role === "SUPER_ADMIN") return true;
-      const membership = await prisma.userStore.findFirst({
-        where: { userUuid: user.userUuid, storeUuid: uuid, isActive: true },
-        select: { uuid: true },
-      });
-      return !!membership;
-    }
-
-    return false;
-  }
 
   private setupEventListeners() {
     // Order events
