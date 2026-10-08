@@ -2,7 +2,21 @@ import prisma from "../../config/prisma.ts";
 import { MenuCacheService } from "../menu/menuCache.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
+// Every lookup and write is scoped to the caller's verified tenant (and store
+// where one is given): a product or category of another tenant is simply not
+// found. Routes already check the permission at the record's own store; this
+// is the second layer.
 export class ProductAdminService {
+
+    // The category must be in the same tenant and store as the product, or the
+    // product would show up in another store's (or tenant's) menu
+    private static async assertCategoryInStore(tenantUuid: string, storeUuid: string, categoryUuid: string) {
+        const category = await prisma.category.findFirst({
+            where: { uuid: categoryUuid, tenantUuid, storeUuid },
+            select: { uuid: true },
+        });
+        if (!category) throw new Error("CATEGORY_NOT_IN_STORE");
+    }
 
     static async createProduct(input: {
         tenantUuid: string;
@@ -23,6 +37,8 @@ export class ProductAdminService {
         preparationTime?: number;
         triggeredBy: string;
     }) {
+        await this.assertCategoryInStore(input.tenantUuid, input.storeUuid, input.categoryUuid);
+
         const product = await prisma.product.create({
             data: {
                 tenantUuid: input.tenantUuid,
@@ -61,22 +77,27 @@ export class ProductAdminService {
     }
 
     static async updateProduct(input: {
+        tenantUuid: string;
         productUuid: string;
         updateData: Record<string, any>;
         triggeredBy: string;
     }) {
-        const product = await prisma.product.findUnique({
-            where: { uuid: input.productUuid },
+        const product = await prisma.product.findFirst({
+            where: { uuid: input.productUuid, tenantUuid: input.tenantUuid },
         });
 
         if (!product) {
             throw new Error("PRODUCT_NOT_FOUND");
         }
 
+        if (input.updateData.categoryUuid !== undefined) {
+            await this.assertCategoryInStore(product.tenantUuid, product.storeUuid, input.updateData.categoryUuid);
+        }
+
         const priceChanged = input.updateData.basePrice && input.updateData.basePrice !== product.basePrice;
 
         const updated = await prisma.product.update({
-            where: { uuid: input.productUuid },
+            where: { uuid: input.productUuid, tenantUuid: input.tenantUuid },
             data: input.updateData,
         });
 
@@ -97,11 +118,12 @@ export class ProductAdminService {
     }
 
     static async deleteProduct(input: {
+        tenantUuid: string;
         productUuid: string;
         triggeredBy: string;
     }) {
-        const product = await prisma.product.findUnique({
-            where: { uuid: input.productUuid },
+        const product = await prisma.product.findFirst({
+            where: { uuid: input.productUuid, tenantUuid: input.tenantUuid },
         });
 
         if (!product) {
@@ -109,7 +131,7 @@ export class ProductAdminService {
         }
 
         await prisma.product.delete({
-            where: { uuid: input.productUuid },
+            where: { uuid: input.productUuid, tenantUuid: input.tenantUuid },
         });
 
         await MenuCacheService.invalidate({
@@ -138,15 +160,25 @@ export class ProductAdminService {
 
         for (const update of input.updates) {
             try {
-                const product = await prisma.product.update({
-                    where: { uuid: update.productUuid },
+                // Only products of this tenant and store; others report NOT_FOUND
+                const product = await prisma.product.findFirst({
+                    where: { uuid: update.productUuid, tenantUuid: input.tenantUuid, storeUuid: input.storeUuid },
+                    select: { basePrice: true },
+                });
+                if (!product) {
+                    results.push({ productUuid: update.productUuid, success: false, error: "PRODUCT_NOT_FOUND" });
+                    continue;
+                }
+
+                await prisma.product.update({
+                    where: { uuid: update.productUuid, tenantUuid: input.tenantUuid, storeUuid: input.storeUuid },
                     data: { basePrice: update.newPrice },
                 });
 
                 results.push({
                     productUuid: update.productUuid,
                     success: true,
-                    oldPrice: product.basePrice,
+                    oldPrice: product.basePrice, // read before the update (was the new price)
                     newPrice: update.newPrice,
                 });
             } catch {
@@ -189,9 +221,10 @@ export class ProductAdminService {
         reason?: string;
         triggeredBy: string;
     }) {
-        await prisma.product.updateMany({
+        const { count } = await prisma.product.updateMany({
             where: {
                 uuid: { in: input.productUuids },
+                tenantUuid: input.tenantUuid,
                 storeUuid: input.storeUuid,
             },
             data: { isAvailable: input.isAvailable },
@@ -210,6 +243,6 @@ export class ProductAdminService {
             isAvailable: input.isAvailable,
         });
 
-        return { updated: input.productUuids.length, isAvailable: input.isAvailable };
+        return { updated: count, isAvailable: input.isAvailable };
     }
 }

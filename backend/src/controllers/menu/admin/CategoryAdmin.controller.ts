@@ -7,7 +7,7 @@ export class CategoryAdminController {
     static async getCategories(req: Request, res: Response) {
         try {
             const { storeUuid } = req.params;
-            const categories = await CategoryAdminService.getCategories(storeUuid);
+            const categories = await CategoryAdminService.getCategories(req.tenant!.uuid, storeUuid);
             return res.status(200).json({ success: true, categories });
         } catch (error: any) {
             return res.status(500).json({ error: "INTERNAL_SERVER_ERROR", message: "Failed to retrieve categories" });
@@ -16,9 +16,10 @@ export class CategoryAdminController {
 
     static async createCategory(req: Request, res: Response) {
         try {
+            // Verified tenant last, so nothing in the body can replace it
             const category = await CategoryAdminService.createCategory({
-                tenantUuid: req.tenant!.uuid,
                 ...req.body,
+                tenantUuid: req.tenant!.uuid,
                 triggeredBy: req.user!.userUuid,
             });
             return res.status(201).json({ success: true, category });
@@ -33,6 +34,7 @@ export class CategoryAdminController {
     static async updateCategory(req: Request, res: Response) {
         try {
             const category = await CategoryAdminService.updateCategory({
+                tenantUuid: req.tenant!.uuid,
                 categoryUuid: req.params.categoryUuid,
                 updateData: req.body,
                 triggeredBy: req.user!.userUuid,
@@ -49,6 +51,7 @@ export class CategoryAdminController {
     static async deleteCategory(req: Request, res: Response) {
         try {
             await CategoryAdminService.deleteCategory({
+                tenantUuid: req.tenant!.uuid,
                 categoryUuid: req.params.categoryUuid,
                 triggeredBy: req.user!.userUuid,
             });

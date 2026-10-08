@@ -113,6 +113,7 @@ export class StaffManagementService {
     }
 
     static async updateStaff(input: {
+        tenantUuid: string;
         userUuid: string;
         firstName?: string;
         lastName?: string;
@@ -121,8 +122,26 @@ export class StaffManagementService {
         employmentStatus?: string;
         certifications?: any;
     }) {
+        // Phone and email are login identifiers: never edit a user outside
+        // the caller's tenant (the controller also enforces rank)
+        const member = await prisma.tenantUser.findFirst({
+            where: { tenantUuid: input.tenantUuid, userUuid: input.userUuid },
+            select: { uuid: true },
+        });
+        if (!member) throw new Error("STAFF_NOT_FOUND");
+
         const user = await prisma.user.update({
             where: { uuid: input.userUuid },
+            select: {
+                uuid: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phoneNumber: true,
+                employmentStatus: true,
+                certifications: true,
+                updatedAt: true,
+            },
             data: {
                 firstName: input.firstName,
                 lastName: input.lastName,
@@ -375,44 +394,58 @@ export class StaffManagementService {
         });
     }
 
-    static async getStaffProfile(userUuid: string) {
-        const cacheKey = `staff:user:${userUuid}`;
-
-        return withCache(cacheKey, 300, async () => {
-            const user = await prisma.user.findUnique({
-                where: { uuid: userUuid },
-                include: {
-                    tenantUsers: {
-                        where: { active: true },
-                        include: {
-                            tenant: {
-                                select: {
-                                    uuid: true,
-                                    name: true,
-                                },
-                            },
-                        },
-                    },
-                    userStores: {
-                        where: { active: true },
-                        include: {
-                            store: {
-                                select: {
-                                    uuid: true,
-                                    name: true,
-                                },
-                            },
-                        },
+    // Profile of a member of this tenant, with safe fields only: no password
+    // or PIN hashes, OTP/reset/verification tokens, token version, ban or
+    // login-tracking data. Memberships and store assignments are limited to
+    // this tenant, and payRate is included only when includePay is set.
+    // Not cached: the old cache held the full User row in Redis.
+    static async getStaffProfile(input: { tenantUuid: string; userUuid: string; includePay: boolean }) {
+        const user = await prisma.user.findFirst({
+            where: {
+                uuid: input.userUuid,
+                tenantUsers: { some: { tenantUuid: input.tenantUuid } },
+            },
+            select: {
+                uuid: true,
+                firstName: true,
+                lastName: true,
+                name: true,
+                email: true,
+                phoneNumber: true,
+                profilePhoto: true,
+                employmentStatus: true,
+                hireDate: true,
+                terminationDate: true,
+                certifications: true,
+                preferredLanguage: true,
+                timezone: true,
+                createdAt: true,
+                tenantUsers: {
+                    where: { tenantUuid: input.tenantUuid, isActive: true },
+                    select: {
+                        uuid: true,
+                        role: true,
+                        employmentType: true,
+                        startDate: true,
+                        payRate: input.includePay,
                     },
                 },
-            });
-
-            if (!user) {
-                throw new Error("STAFF_NOT_FOUND");
-            }
-
-            return user;
+                userStores: {
+                    where: { tenantUuid: input.tenantUuid, isActive: true },
+                    select: {
+                        role: true,
+                        isPrimary: true,
+                        store: { select: { uuid: true, name: true } },
+                    },
+                },
+            },
         });
+
+        if (!user) {
+            throw new Error("STAFF_NOT_FOUND");
+        }
+
+        return user;
     }
 
     static async authenticateWithPIN(input: {

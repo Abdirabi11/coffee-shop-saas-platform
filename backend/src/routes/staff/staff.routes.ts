@@ -67,6 +67,9 @@ router.post(
   StaffManagementController.terminateStaff
 );
  
+// Access is checked in the handler: the target must be a member of this
+// tenant, and the caller themselves, a tenant admin, or hold staff.read at a
+// store the target works at. Returns safe profile fields only.
 router.get( "/:userUuid", StaffManagementController.getStaffProfile );
  
 // ─── TIME ENTRY 

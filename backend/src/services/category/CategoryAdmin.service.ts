@@ -4,11 +4,13 @@ import { MenuCacheService } from "../menu/menuCache.service.ts";
 
 
 
+// Lookups and writes are scoped to the caller's verified tenant: another
+// tenant's category is not found (404), never modified.
 export class CategoryAdminService {
 
-    static async getCategories(storeUuid: string) {
+    static async getCategories(tenantUuid: string, storeUuid: string) {
         return prisma.category.findMany({
-            where: { storeUuid },
+            where: { tenantUuid, storeUuid },
             orderBy: { order: "asc" },
             include: {
                 products: {
@@ -67,12 +69,13 @@ export class CategoryAdminService {
     }
 
     static async updateCategory(input: {
+        tenantUuid: string;
         categoryUuid: string;
         updateData: Record<string, any>;
         triggeredBy: string;
     }) {
-        const category = await prisma.category.findUnique({
-            where: { uuid: input.categoryUuid },
+        const category = await prisma.category.findFirst({
+            where: { uuid: input.categoryUuid, tenantUuid: input.tenantUuid },
         });
 
         if (!category) {
@@ -80,7 +83,7 @@ export class CategoryAdminService {
         }
 
         const updated = await prisma.category.update({
-            where: { uuid: input.categoryUuid },
+            where: { uuid: input.categoryUuid, tenantUuid: input.tenantUuid },
             data: input.updateData,
         });
 
@@ -100,11 +103,12 @@ export class CategoryAdminService {
     }
 
     static async deleteCategory(input: {
+        tenantUuid: string;
         categoryUuid: string;
         triggeredBy: string;
     }) {
-        const category = await prisma.category.findUnique({
-            where: { uuid: input.categoryUuid },
+        const category = await prisma.category.findFirst({
+            where: { uuid: input.categoryUuid, tenantUuid: input.tenantUuid },
             include: { products: { select: { uuid: true } } },
         });
 
@@ -117,7 +121,7 @@ export class CategoryAdminService {
         }
 
         await prisma.category.delete({
-            where: { uuid: input.categoryUuid },
+            where: { uuid: input.categoryUuid, tenantUuid: input.tenantUuid },
         });
 
         await MenuCacheService.invalidate({

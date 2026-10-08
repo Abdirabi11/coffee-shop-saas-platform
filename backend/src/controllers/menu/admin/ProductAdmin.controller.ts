@@ -6,13 +6,17 @@ export class ProductAdminController {
 
     static async createProduct(req: Request, res: Response) {
         try {
+            // Verified tenant last, so nothing in the body can replace it
             const product = await ProductAdminService.createProduct({
-                tenantUuid: req.tenant!.uuid,
                 ...req.body,
+                tenantUuid: req.tenant!.uuid,
                 triggeredBy: req.user!.userUuid,
             });
             return res.status(201).json({ success: true, product });
         } catch (error: any) {
+            if (error.message === "CATEGORY_NOT_IN_STORE") {
+                return res.status(400).json({ error: "CATEGORY_NOT_IN_STORE", message: "Category does not belong to this store" });
+            }
             if (error.code === "P2002") {
                 return res.status(400).json({ error: "DUPLICATE_PRODUCT", message: "A product with this name already exists in this category" });
             }
@@ -23,6 +27,7 @@ export class ProductAdminController {
     static async updateProduct(req: Request, res: Response) {
         try {
             const product = await ProductAdminService.updateProduct({
+                tenantUuid: req.tenant!.uuid,
                 productUuid: req.params.productUuid,
                 updateData: req.body,
                 triggeredBy: req.user!.userUuid,
@@ -32,6 +37,9 @@ export class ProductAdminController {
             if (error.message === "PRODUCT_NOT_FOUND") {
                 return res.status(404).json({ error: "PRODUCT_NOT_FOUND", message: "Product not found" });
             }
+            if (error.message === "CATEGORY_NOT_IN_STORE") {
+                return res.status(400).json({ error: "CATEGORY_NOT_IN_STORE", message: "Category does not belong to this store" });
+            }
             return res.status(500).json({ error: "INTERNAL_SERVER_ERROR", message: "Failed to update product" });
         }
     }
@@ -39,6 +47,7 @@ export class ProductAdminController {
     static async deleteProduct(req: Request, res: Response) {
         try {
             await ProductAdminService.deleteProduct({
+                tenantUuid: req.tenant!.uuid,
                 productUuid: req.params.productUuid,
                 triggeredBy: req.user!.userUuid,
             });

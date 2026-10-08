@@ -2,7 +2,21 @@ import prisma from "../../config/prisma.ts";
 import { MenuCacheService } from "./menuCache.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
+// Option groups and products are looked up within the caller's verified
+// tenant, and a group can only be linked to a product of the same store.
 export class OptionGroupAdminService {
+
+    private static async findGroup(tenantUuid: string, groupUuid: string) {
+        const group = await prisma.optionGroup.findFirst({ where: { uuid: groupUuid, tenantUuid } });
+        if (!group) throw new Error("OPTION_GROUP_NOT_FOUND");
+        return group;
+    }
+
+    private static async findProduct(tenantUuid: string, productUuid: string) {
+        const product = await prisma.product.findFirst({ where: { uuid: productUuid, tenantUuid } });
+        if (!product) throw new Error("PRODUCT_NOT_FOUND");
+        return product;
+    }
 
     static async createOptionGroup(input: {
         tenantUuid: string;
@@ -45,6 +59,8 @@ export class OptionGroupAdminService {
         triggeredBy: string;
         tenantUuid: string;
     }) {
+        await this.findGroup(input.tenantUuid, input.groupUuid);
+
         const option = await prisma.productOption.create({
             data: {
                 tenantUuid: input.tenantUuid,
@@ -80,6 +96,7 @@ export class OptionGroupAdminService {
     }
 
     static async linkToProduct(input: {
+        tenantUuid: string;
         productUuid: string;
         groupUuid: string;
         required?: boolean;
@@ -88,9 +105,11 @@ export class OptionGroupAdminService {
         description?: string;
         triggeredBy: string;
     }) {
-        const optionGroup = await prisma.optionGroup.findUniqueOrThrow({
-            where: { uuid: input.groupUuid },
-        });
+        const product = await this.findProduct(input.tenantUuid, input.productUuid);
+        const optionGroup = await this.findGroup(input.tenantUuid, input.groupUuid);
+        if (optionGroup.storeUuid !== product.storeUuid) {
+            throw new Error("OPTION_GROUP_STORE_MISMATCH");
+        }
 
         const link = await prisma.productOptionGroup.create({
             data: {
@@ -105,18 +124,12 @@ export class OptionGroupAdminService {
             },
         });
 
-        const product = await prisma.product.findUnique({
-            where: { uuid: input.productUuid },
+        await MenuCacheService.invalidate({
+            tenantUuid: product.tenantUuid,
+            storeUuid: product.storeUuid,
+            reason: "PRODUCT_UPDATED",
+            triggeredBy: input.triggeredBy,
         });
-
-        if (product) {
-            await MenuCacheService.invalidate({
-                tenantUuid: product.tenantUuid,
-                storeUuid: product.storeUuid,
-                reason: "PRODUCT_UPDATED",
-                triggeredBy: input.triggeredBy,
-            });
-        }
 
         logWithContext("info", "[OptionGroupAdmin] Linked to product", {
             productUuid: input.productUuid,
@@ -127,12 +140,16 @@ export class OptionGroupAdminService {
     }
 
     static async unlinkFromProduct(input: {
+        tenantUuid: string;
         productUuid: string;
         groupUuid: string;
         triggeredBy: string;
     }) {
+        const product = await this.findProduct(input.tenantUuid, input.productUuid);
+
         const links = await prisma.productOptionGroup.findMany({
             where: {
+                tenantUuid: input.tenantUuid,
                 productUuid: input.productUuid,
                 optionGroupUuid: input.groupUuid,
             },
@@ -151,23 +168,18 @@ export class OptionGroupAdminService {
 
         await prisma.productOptionGroup.deleteMany({
             where: {
+                tenantUuid: input.tenantUuid,
                 productUuid: input.productUuid,
                 optionGroupUuid: input.groupUuid,
             },
         });
 
-        const product = await prisma.product.findUnique({
-            where: { uuid: input.productUuid },
+        await MenuCacheService.invalidate({
+            tenantUuid: product.tenantUuid,
+            storeUuid: product.storeUuid,
+            reason: "PRODUCT_UPDATED",
+            triggeredBy: input.triggeredBy,
         });
-
-        if (product) {
-            await MenuCacheService.invalidate({
-                tenantUuid: product.tenantUuid,
-                storeUuid: product.storeUuid,
-                reason: "PRODUCT_UPDATED",
-                triggeredBy: input.triggeredBy,
-            });
-        }
 
         logWithContext("info", "[OptionGroupAdmin] Unlinked from product", {
             productUuid: input.productUuid,

@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 import { StaffManagementService } from "../../services/staff/StaffManagement.service.ts";
+import { PermissionManagementService } from "../../services/staff/PermissionManagement.service.ts";
+import prisma from "../../config/prisma.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import {
     RoleAssignmentError,
@@ -8,8 +10,11 @@ import {
     assertCanModifyStaffMember,
     assertCanModifyStoreMember,
     assertStoreInTenant,
+    callerTenantRank,
     findTenantMember,
 } from "../../domain/auth/roleHierarchy.ts";
+
+const TENANT_ADMIN_RANK = 2;
 
 export class StaffManagementController {
   
@@ -129,8 +134,41 @@ export class StaffManagementController {
     static async getStaffProfile(req: Request, res: Response) {
         try {
             const { userUuid } = req.params;
+            const tenantUuid = req.tenant!.uuid;
 
-            const profile = await StaffManagementService.getStaffProfile(userUuid);
+            // Target must be a member of this tenant (404 otherwise). Visible
+            // to the user themselves, tenant admins, and anyone holding
+            // staff.read at a store the target works at; pay only to the first two.
+            await findTenantMember(req, { userUuid });
+            const isSelf = userUuid === req.user!.userUuid;
+            const isTenantAdmin = callerTenantRank(req) >= TENANT_ADMIN_RANK;
+
+            if (!isSelf && !isTenantAdmin) {
+                const stores = await prisma.userStore.findMany({
+                    where: { tenantUuid, userUuid, isActive: true },
+                    select: { storeUuid: true },
+                });
+                let canRead = false;
+                for (const { storeUuid } of stores) {
+                    if (await PermissionManagementService.hasPermission({
+                        userUuid: req.user!.userUuid,
+                        storeUuid,
+                        permissionSlug: "staff.read",
+                    })) {
+                        canRead = true;
+                        break;
+                    }
+                }
+                if (!canRead) {
+                    return res.status(403).json({ error: "FORBIDDEN", message: "You do not have permission: staff.read" });
+                }
+            }
+
+            const profile = await StaffManagementService.getStaffProfile({
+                tenantUuid,
+                userUuid,
+                includePay: isSelf || isTenantAdmin,
+            });
 
             return res.status(200).json({
                 success: true,
@@ -166,6 +204,7 @@ export class StaffManagementController {
             await assertCanModifyStaffMember(req, await findTenantMember(req, { userUuid }));
 
             const user = await StaffManagementService.updateStaff({
+                tenantUuid: req.tenant!.uuid,
                 userUuid,
                 firstName,
                 lastName,

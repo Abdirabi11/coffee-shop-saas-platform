@@ -120,7 +120,10 @@ export const storeOf = {
         return payment?.storeUuid ?? null;
     },
     // Any tenant-scoped model with uuid/tenantUuid/storeUuid columns
-    record: (model: "cashDrawer" | "dailyReconciliation", param: string): StoreResolver => async (req) => {
+    record: (
+        model: "cashDrawer" | "dailyReconciliation" | "product" | "category" | "optionGroup",
+        param: string
+    ): StoreResolver => async (req) => {
         const uuid = stringParam(req.params?.[param]);
         if (!uuid || !req.tenant) return null;
         const row = await (prisma[model] as any).findFirst({
@@ -130,6 +133,22 @@ export const storeOf = {
         return row?.storeUuid ?? null;
     },
 };
+
+// Make sure req.tenant / req.tenantUser are set and verified, running
+// requireTenantContext if the router didn't. Resolves false if it already
+// answered the request (no access, suspended tenant, ...).
+export async function ensureTenantContext(req: Request, res: Response): Promise<boolean> {
+    if (req.tenant !== undefined) return true;
+    return runMiddleware(requireTenantContext, req, res);
+}
+
+// The store if it belongs to the current tenant, else null
+export async function findStoreInTenant(req: Request, storeUuid: string) {
+    return prisma.store.findFirst({
+        where: { uuid: storeUuid, tenantUuid: req.tenant!.uuid },
+        select: { uuid: true, name: true },
+    });
+}
 
 // Run a middleware inline; resolves true if it called next(), false if it
 // answered the request itself
