@@ -112,6 +112,10 @@ export class CashierPaymentService{
             
                     amountTendered: input.amountTendered,
                     changeGiven: input.changeGiven,
+
+                    // The open drawer at this terminal: closeDrawer counts
+                    // expected cash from the payments linked here
+                    drawerUuid: drawer?.uuid,
         
                     processedBy: input.processedBy,
                     processedAt: new Date(),

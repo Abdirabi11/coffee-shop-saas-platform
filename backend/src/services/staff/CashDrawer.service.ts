@@ -12,9 +12,16 @@ export class CashDrawerService{
         userUuid: string;
         startingCash: number; // Cents
         drawerNumber?: string;
+        // POS terminal this drawer sits in: cashier payments taken on it are
+        // linked to the drawer (Payment.drawerUuid) and counted at close
+        terminalId?: string;
         openedBy: string;
     }) {
         try {
+            if (!Number.isInteger(input.startingCash) || input.startingCash < 0) {
+                throw new Error("INVALID_AMOUNT");
+            }
+
             // Check if user already has an open drawer
             const existingDrawer = await prisma.cashDrawer.findFirst({
                 where: {
@@ -48,6 +55,7 @@ export class CashDrawerService{
                     storeUuid: input.storeUuid,
                     userUuid: input.userUuid,
                     drawerNumber: input.drawerNumber,
+                    terminalId: input.terminalId,
                     status: "OPEN",
                     openedAt: new Date(),
                     openedBy: input.openedBy,
@@ -93,10 +101,30 @@ export class CashDrawerService{
         }
     }
 
+    // Close a drawer: count it against what this drawer should hold.
+    //
+    // Runs in one transaction holding the drawer's row lock, so concurrent
+    // closes (and cashier payments, which update the same row) are
+    // serialized: the second close sees the drawer no longer OPEN and fails
+    // instead of overwriting the first count. The status change is also
+    // conditional on OPEN as a second guard.
+    //
+    // Expected cash = starting cash
+    //   + cash payments taken on THIS drawer (Payment.drawerUuid; not the
+    //     whole store), still COMPLETED or PARTIALLY_REFUNDED
+    //   - completed refunds on those partially refunded payments
+    //   - VERIFIED cash drops only
+    // Fully refunded or voided payments are no longer COMPLETED, so they drop
+    // out of the sum on their own (subtracting them again double-counted).
+    // Unverified drops still count as cash that should be in the drawer, so a
+    // fake drop shows up as a shortage instead of hiding one.
     static async closeDrawer(input: {
+        tenantUuid: string;
         drawerUuid: string;
         actualCash: number; // Counted cash in cents
         closedBy: string;
+        // Supervisors may close other people's drawers; others only their own
+        actorIsSupervisor: boolean;
         cashCount?: {
             pennies?: number;
             nickels?: number;
@@ -112,119 +140,128 @@ export class CashDrawerService{
         notes?: string;
     }) {
         try {
-            const drawer = await prisma.cashDrawer.findUnique({
-                where: { uuid: input.drawerUuid },
-                include: {
-                    cashDrops: true,
-                },
-            });
-
-            if (!drawer) {
-                throw new Error("DRAWER_NOT_FOUND");
-            };
-
-            if (drawer.status !== "OPEN") {
-                throw new Error("DRAWER_NOT_OPEN");
+            if (!Number.isInteger(input.actualCash) || input.actualCash < 0) {
+                throw new Error("INVALID_AMOUNT");
             }
 
-            // Calculate expected cash
-            // Get all cash transactions during this drawer session
-            const cashPayments = await prisma.payment.aggregate({
-                where: {
-                    storeUuid: drawer.storeUuid,
-                    paymentMethod: "CASH",
-                    status: "COMPLETED",
-                    createdAt: {
-                        gte: drawer.openedAt!,
-                    },
-                },
-                _sum: { amount: true },
-            });
+            const { drawer, updated, expectedCash, variance, requiresApproval, unverifiedDrops } =
+                await prisma.$transaction(async (tx) => {
+                    await tx.$queryRaw`
+                        SELECT 1 FROM "CashDrawer"
+                        WHERE "uuid" = ${input.drawerUuid} AND "tenantUuid" = ${input.tenantUuid}
+                        FOR UPDATE
+                    `;
 
-            const cashRefunds = await prisma.payment.aggregate({
-                where: {
-                    storeUuid: drawer.storeUuid,
-                    paymentMethod: "CASH",
-                    status: "REFUNDED",
-                    createdAt: {
-                        gte: drawer.openedAt!,
-                    },
-                },
-                _sum: { amount: true },
-            });
+                    const drawer = await tx.cashDrawer.findFirst({
+                        where: { uuid: input.drawerUuid, tenantUuid: input.tenantUuid },
+                        include: { cashDrops: true },
+                    });
 
-            // Calculate total cash drops
-            const totalDrops = drawer.cashDrops.reduce((sum, drop) => sum + drop.amount, 0);
+                    if (!drawer) {
+                        throw new Error("DRAWER_NOT_FOUND");
+                    }
+                    if (drawer.userUuid !== input.closedBy && !input.actorIsSupervisor) {
+                        throw new Error("DRAWER_NOT_YOURS");
+                    }
+                    if (drawer.status !== "OPEN") {
+                        throw new Error("DRAWER_NOT_OPEN");
+                    }
 
-            // Expected = Starting + Sales - Refunds - Drops
-            const expectedCash =
-                drawer.startingCash +
-                (cashPayments._sum.amount || 0) -
-                (cashRefunds._sum.amount || 0) -
-                totalDrops;
+                    const cashIn = await tx.payment.aggregate({
+                        where: {
+                            drawerUuid: drawer.uuid,
+                            paymentMethod: "CASH",
+                            status: { in: ["COMPLETED", "PARTIALLY_REFUNDED"] },
+                        },
+                        _sum: { amount: true },
+                    });
 
-            // Calculate variance
-            const variance = input.actualCash - expectedCash;
+                    const partialRefunds = await tx.refund.aggregate({
+                        where: {
+                            status: "COMPLETED",
+                            payment: { drawerUuid: drawer.uuid, paymentMethod: "CASH", status: "PARTIALLY_REFUNDED" },
+                        },
+                        _sum: { amount: true },
+                    });
 
-            // Check if variance requires approval
-            const varianceThreshold = 500; // $5.00 in cents
-            const requiresApproval = Math.abs(variance) > varianceThreshold;
+                    const verifiedDrops = drawer.cashDrops
+                        .filter((d) => d.verifiedAt)
+                        .reduce((sum, d) => sum + d.amount, 0);
+                    const unverifiedDrops = drawer.cashDrops
+                        .filter((d) => !d.verifiedAt)
+                        .reduce((sum, d) => sum + d.amount, 0);
 
-            // Update drawer
-            const updated = await prisma.cashDrawer.update({
-                where: { uuid: input.drawerUuid },
-                data: {
-                    status: requiresApproval ? "RECONCILING" : "CLOSED",
-                    closedAt: new Date(),
-                    closedBy: input.closedBy,
-                    expectedCash,
-                    actualCash: input.actualCash,
-                    variance,
-                    totalSales: (cashPayments._sum.amount || 0),
-                    cashSales: (cashPayments._sum.amount || 0),
-                    refunds: (cashRefunds._sum.amount || 0),
-                    notes: input.notes,
-                },
-            });
+                    const cashSales = cashIn._sum.amount || 0;
+                    const refunded = partialRefunds._sum.amount || 0;
+                    const expectedCash = drawer.startingCash + cashSales - refunded - verifiedDrops;
 
-            // Create closing cash count
-            if (input.cashCount) {
-                const count = input.cashCount;
-                const totalCoins =
-                (count.pennies || 0) * 1 +
-                (count.nickels || 0) * 5 +
-                (count.dimes || 0) * 10 +
-                (count.quarters || 0) * 25;
+                    const variance = input.actualCash - expectedCash;
 
-                const totalBills =
-                (count.ones || 0) * 100 +
-                (count.fives || 0) * 500 +
-                (count.tens || 0) * 1000 +
-                (count.twenties || 0) * 2000 +
-                (count.fifties || 0) * 5000 +
-                (count.hundreds || 0) * 10000;
+                    // Check if variance requires approval
+                    const varianceThreshold = 500; // $5.00 in cents
+                    const requiresApproval = Math.abs(variance) > varianceThreshold;
 
-                await prisma.cashCount.create({
-                    data: {
-                        cashDrawerUuid: drawer.uuid,
-                        countType: "CLOSE",
-                        countedBy: input.closedBy,
-                        pennies: count.pennies || 0,
-                        nickels: count.nickels || 0,
-                        dimes: count.dimes || 0,
-                        quarters: count.quarters || 0,
-                        ones: count.ones || 0,
-                        fives: count.fives || 0,
-                        tens: count.tens || 0,
-                        twenties: count.twenties || 0,
-                        fifties: count.fifties || 0,
-                        hundreds: count.hundreds || 0,
-                        totalCoins,
-                        totalBills,
-                        totalCash: totalCoins + totalBills,
-                    },
+                    const claimed = await tx.cashDrawer.updateMany({
+                        where: { uuid: drawer.uuid, tenantUuid: input.tenantUuid, status: "OPEN" },
+                        data: {
+                            status: requiresApproval ? "RECONCILING" : "CLOSED",
+                            closedAt: new Date(),
+                            closedBy: input.closedBy,
+                            expectedCash,
+                            actualCash: input.actualCash,
+                            variance,
+                            totalSales: cashSales,
+                            cashSales,
+                            refunds: refunded,
+                            notes: input.notes,
+                        },
+                    });
+                    if (claimed.count === 0) {
+                        throw new Error("DRAWER_NOT_OPEN");
+                    }
+
+                    // Closing cash count
+                    if (input.cashCount) {
+                        const count = input.cashCount;
+                        const totalCoins =
+                            (count.pennies || 0) * 1 +
+                            (count.nickels || 0) * 5 +
+                            (count.dimes || 0) * 10 +
+                            (count.quarters || 0) * 25;
+
+                        const totalBills =
+                            (count.ones || 0) * 100 +
+                            (count.fives || 0) * 500 +
+                            (count.tens || 0) * 1000 +
+                            (count.twenties || 0) * 2000 +
+                            (count.fifties || 0) * 5000 +
+                            (count.hundreds || 0) * 10000;
+
+                        await tx.cashCount.create({
+                            data: {
+                                cashDrawerUuid: drawer.uuid,
+                                countType: "CLOSE",
+                                countedBy: input.closedBy,
+                                pennies: count.pennies || 0,
+                                nickels: count.nickels || 0,
+                                dimes: count.dimes || 0,
+                                quarters: count.quarters || 0,
+                                ones: count.ones || 0,
+                                fives: count.fives || 0,
+                                tens: count.tens || 0,
+                                twenties: count.twenties || 0,
+                                fifties: count.fifties || 0,
+                                hundreds: count.hundreds || 0,
+                                totalCoins,
+                                totalBills,
+                                totalCash: totalCoins + totalBills,
+                            },
+                        });
+                    }
+
+                    const updated = await tx.cashDrawer.findUniqueOrThrow({ where: { uuid: drawer.uuid } });
+                    return { drawer, updated, expectedCash, variance, requiresApproval, unverifiedDrops };
                 });
-            }
 
             logWithContext("info", "[CashDrawer] Drawer closed", {
                 drawerUuid: drawer.uuid,
@@ -232,6 +269,7 @@ export class CashDrawerService{
                 actualCash: input.actualCash,
                 variance,
                 requiresApproval,
+                unverifiedDrops,
             });
 
             MetricsService.increment("cash_drawer.closed", 1, {
@@ -261,6 +299,7 @@ export class CashDrawerService{
                         expectedCash,
                         actualCash: input.actualCash,
                         variance,
+                        unverifiedDrops,
                         },
                         status: "PENDING",
                     },
@@ -286,6 +325,7 @@ export class CashDrawerService{
                 actualCash: input.actualCash,
                 variance,
                 requiresApproval,
+                unverifiedDrops,
             };
 
         } catch (error: any) {
@@ -297,48 +337,67 @@ export class CashDrawerService{
     }
 
     //Cash drop (move excess cash to safe)
+    //
+    // Amount must be a positive whole number of cents. A drop only reduces
+    // the drawer's expected cash once a supervisor verifies it (see
+    // closeDrawer), so recording a drop can't hide missing cash. Created
+    // under the drawer's row lock so it can't land on a drawer being closed.
     static async createCashDrop(input: {
+        tenantUuid: string;
         drawerUuid: string;
-        storeUuid: string;
         amount: number;
         droppedBy: string;
+        actorIsSupervisor: boolean;
         reason?: string;
     }) {
-        const drawer = await prisma.cashDrawer.findUnique({
-            where: { uuid: input.drawerUuid },
-        });
-
-        if (!drawer) {
-            throw new Error("DRAWER_NOT_FOUND");
+        if (!Number.isInteger(input.amount) || input.amount <= 0) {
+            throw new Error("INVALID_AMOUNT");
         }
 
-        if (drawer.status !== "OPEN") {
-            throw new Error("DRAWER_NOT_OPEN");
-        }
+        const cashDrop = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`
+                SELECT 1 FROM "CashDrawer"
+                WHERE "uuid" = ${input.drawerUuid} AND "tenantUuid" = ${input.tenantUuid}
+                FOR UPDATE
+            `;
+            const drawer = await tx.cashDrawer.findFirst({
+                where: { uuid: input.drawerUuid, tenantUuid: input.tenantUuid },
+            });
 
-        // Generate receipt number
-        const receiptNumber = `DROP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            if (!drawer) {
+                throw new Error("DRAWER_NOT_FOUND");
+            }
+            if (drawer.userUuid !== input.droppedBy && !input.actorIsSupervisor) {
+                throw new Error("DRAWER_NOT_YOURS");
+            }
+            if (drawer.status !== "OPEN") {
+                throw new Error("DRAWER_NOT_OPEN");
+            }
 
-        const cashDrop = await prisma.cashDrop.create({
-            data: {
-                cashDrawerUuid: input.drawerUuid,
-                storeUuid: input.storeUuid,
-                amount: input.amount,
-                droppedBy: input.droppedBy,
-                droppedAt: new Date(),
-                reason: input.reason || "Excess cash removal",
-                receiptNumber,
-            },
+            // Generate receipt number
+            const receiptNumber = `DROP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+            return tx.cashDrop.create({
+                data: {
+                    cashDrawerUuid: drawer.uuid,
+                    storeUuid: drawer.storeUuid, // the drawer's store, not a client value
+                    amount: input.amount,
+                    droppedBy: input.droppedBy,
+                    droppedAt: new Date(),
+                    reason: input.reason || "Excess cash removal",
+                    receiptNumber,
+                },
+            });
         });
 
         logWithContext("info", "[CashDrawer] Cash drop created", {
             cashDropUuid: cashDrop.uuid,
             amount: input.amount,
-            receiptNumber,
+            receiptNumber: cashDrop.receiptNumber,
         });
 
         MetricsService.increment("cash_drawer.drop", 1, {
-            storeUuid: input.storeUuid,
+            storeUuid: cashDrop.storeUuid,
         });
 
         MetricsService.histogram("cash_drawer.drop_amount", input.amount);
@@ -353,16 +412,45 @@ export class CashDrawerService{
     }
 
     //Verify cash drop (manager verification)
+    //
+    // Only while the drawer is still open (closing already settled the
+    // count), never by the person who made the drop, and only once.
     static async verifyCashDrop(input: {
+        tenantUuid: string;
         cashDropUuid: string;
         verifiedBy: string;
     }) {
-        const cashDrop = await prisma.cashDrop.update({
-            where: { uuid: input.cashDropUuid },
-            data: {
-                verifiedBy: input.verifiedBy,
-                verifiedAt: new Date(),
-            },
+        const cashDrop = await prisma.$transaction(async (tx) => {
+            const drop = await tx.cashDrop.findFirst({
+                where: { uuid: input.cashDropUuid, cashDrawer: { tenantUuid: input.tenantUuid } },
+                include: { cashDrawer: { select: { uuid: true, status: true } } },
+            });
+
+            if (!drop) {
+                throw new Error("CASH_DROP_NOT_FOUND");
+            }
+            if (drop.droppedBy === input.verifiedBy) {
+                throw new Error("DROP_SELF_VERIFY");
+            }
+
+            await tx.$queryRaw`SELECT 1 FROM "CashDrawer" WHERE "uuid" = ${drop.cashDrawer.uuid} FOR UPDATE`;
+            const drawer = await tx.cashDrawer.findUniqueOrThrow({
+                where: { uuid: drop.cashDrawer.uuid },
+                select: { status: true },
+            });
+            if (drawer.status !== "OPEN") {
+                throw new Error("DRAWER_NOT_OPEN");
+            }
+
+            const claimed = await tx.cashDrop.updateMany({
+                where: { uuid: drop.uuid, verifiedAt: null },
+                data: { verifiedBy: input.verifiedBy, verifiedAt: new Date() },
+            });
+            if (claimed.count === 0) {
+                throw new Error("DROP_ALREADY_VERIFIED");
+            }
+
+            return tx.cashDrop.findUniqueOrThrow({ where: { uuid: drop.uuid } });
         });
 
         logWithContext("info", "[CashDrawer] Cash drop verified", {

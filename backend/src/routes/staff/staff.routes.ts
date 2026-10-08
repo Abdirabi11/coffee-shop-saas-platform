@@ -2,7 +2,8 @@ import express from "express"
 import { StaffManagementController } from "../../controllers/staff/StaffManagement.controller.ts";
 import { checkAnyPermission, checkPermission } from "../../middlewares/staff/checkPermission.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
-import { authenticate } from "../../middlewares/auth.middleware.ts";
+import { authenticate, storeOf } from "../../middlewares/auth.middleware.ts";
+import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 import { checkStoreRole } from "../../middlewares/staff/checkRole.middleware.ts";
 import { validateGeofence } from "../../middlewares/staff/validateGeofence.ts";
 import { TimeEntryController } from "../../controllers/staff/TimeEntry.controller.ts";
@@ -141,7 +142,18 @@ router.post(
  
 // ─── CASH DRAWER
  
-router.post("/cash-drawer/open", warnIfNotClockedIn, CashDrawerController.openDrawer );
+// Drawer roles are checked at the drawer's own store (storeOf.record /
+// storeOf.cashDrop), never a client-supplied storeUuid; the handlers then
+// limit non-supervisors to their own drawer. Opening uses the body storeUuid,
+// verified to be in the tenant, and always opens the caller's own drawer.
+const DRAWER_ROLES = [
+    "CASHIER", "BARISTA", "KITCHEN_STAFF", "STAFF", "SHIFT_SUPERVISOR",
+    "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN",
+];
+const DROP_VERIFIER_ROLES = ["SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN"];
+const drawerStore = storeOf.record("cashDrawer", "drawerUuid");
+
+router.post("/cash-drawer/open", warnIfNotClockedIn, checkRole(DRAWER_ROLES), CashDrawerController.openDrawer );
  
 router.get("/cash-drawer/active", CashDrawerController.getActiveDrawer);
  
@@ -151,12 +163,12 @@ router.get(
   CashDrawerController.getDrawerHistory
 );
  
-router.post("/cash-drawer/:drawerUuid/close", CashDrawerController.closeDrawer);
-router.post("/cash-drawer/:drawerUuid/drop", CashDrawerController.cashDrop);
+router.post("/cash-drawer/:drawerUuid/close", checkRole(DRAWER_ROLES, drawerStore), CashDrawerController.closeDrawer);
+router.post("/cash-drawer/:drawerUuid/drop", checkRole(DRAWER_ROLES, drawerStore), CashDrawerController.cashDrop);
  
 router.post(
   "/cash-drawer/drop/:cashDropUuid/verify",
-  checkStoreRole(["STORE_MANAGER", "SHIFT_SUPERVISOR"]),
+  checkRole(DROP_VERIFIER_ROLES, storeOf.cashDrop()),
   CashDrawerController.verifyCashDrop
 );
  

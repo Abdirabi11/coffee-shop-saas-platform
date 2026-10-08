@@ -119,6 +119,16 @@ export const storeOf = {
         });
         return payment?.storeUuid ?? null;
     },
+    // CashDrop has no tenantUuid: its tenant is its drawer's
+    cashDrop: (param = "cashDropUuid"): StoreResolver => async (req) => {
+        const uuid = stringParam(req.params?.[param]);
+        if (!uuid || !req.tenant) return null;
+        const drop = await prisma.cashDrop.findFirst({
+            where: { uuid, cashDrawer: { tenantUuid: req.tenant.uuid } },
+            select: { cashDrawer: { select: { storeUuid: true } } },
+        });
+        return drop?.cashDrawer.storeUuid ?? null;
+    },
     // Any tenant-scoped model with uuid/tenantUuid/storeUuid columns
     record: (
         model: "cashDrawer" | "dailyReconciliation" | "product" | "category" | "optionGroup",

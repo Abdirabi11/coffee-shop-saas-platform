@@ -5,7 +5,7 @@ interface MetricTags {
 };
   
 interface MetricData {
-    type: "counter" | "timing" | "gauge";
+    type: "counter" | "timing" | "histogram" | "gauge";
     name: string;
     value: number;
     tags?: MetricTags;
@@ -88,6 +88,28 @@ export class MetricsService {
         durationMs: number,
         tags?: MetricTags
     ) {
+        this.observe("timing", name, durationMs, tags, [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000]); // milliseconds
+    }
+
+    //Record a value distribution (amounts, counts, hours)
+    //Use for: cash variances, drop amounts, hours worked, tip amounts.
+    //Several services called this before it existed, so their requests threw
+    //after the work was done (drawer close/drop, clock-out, webhook dispatch).
+    static histogram(
+        name: string,
+        value: number,
+        tags?: MetricTags
+    ) {
+        this.observe("histogram", name, value, tags, [1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000]);
+    }
+
+    private static observe(
+        type: "timing" | "histogram",
+        name: string,
+        value: number,
+        tags: MetricTags | undefined,
+        buckets: number[]
+    ) {
         this.ensureInitialized();
   
         try {
@@ -101,30 +123,29 @@ export class MetricsService {
                     name: this.sanitizeMetricName(name),
                     help: `Histogram for ${name}`,
                     labelNames,
-                    buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000], // milliseconds
+                    buckets,
                     registers: [this.registry],
                 });
                 
                 this.histograms.set(name, histogram);
             }
     
-            // Observe duration
             if (tags) {
-                histogram.observe(tags, durationMs);
+                histogram.observe(tags, value);
             } else {
-                histogram.observe(durationMs);
+                histogram.observe(value);
             }
     
             // Also log for debugging
             this.logMetric({
-                type: "timing",
+                type,
                 name,
-                value: durationMs,
+                value,
                 tags,
             });
     
         } catch (error: any) {
-            console.error(`[MetricsService] Failed to record timing ${name}:`, error.message);
+            console.error(`[MetricsService] Failed to record ${type} ${name}:`, error.message);
         }
     }
 

@@ -360,6 +360,7 @@ export class OfflineSyncService {
         await TimeEntryService.startBreak({
             timeEntryUuid: timeEntry.uuid,
             breakType: input.data.breakType,
+            userUuid: input.userUuid,
         });
 
         return { conflict: false, synced: true };
@@ -391,6 +392,7 @@ export class OfflineSyncService {
 
         await TimeEntryService.endBreak({
             breakEntryUuid: breakEntry.uuid,
+            userUuid: input.userUuid,
         });
 
         return { conflict: false, synced: true };

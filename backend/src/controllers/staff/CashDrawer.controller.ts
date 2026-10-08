@@ -2,6 +2,30 @@ import type { Request, Response } from "express";
 import { CashDrawerService } from "../../services/staff/CashDrawer.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
+// Roles that may act on someone else's drawer (close it, drop from it) and
+// verify drops. Everyone else only acts on their own drawer.
+const SUPERVISOR_ROLES = new Set([
+    "SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN", "OWNER", "SUPER_ADMIN",
+]);
+const isSupervisor = (req: Request) => (req.access?.roles ?? []).some((r) => SUPERVISOR_ROLES.has(r));
+
+const DRAWER_ERRORS: Record<string, number> = {
+    INVALID_AMOUNT: 400,
+    DRAWER_NOT_FOUND: 404,
+    CASH_DROP_NOT_FOUND: 404,
+    DRAWER_NOT_YOURS: 403,
+    DROP_SELF_VERIFY: 403,
+    NO_PERMISSION_OPEN_DRAWER: 403,
+    DRAWER_NOT_OPEN: 409,
+    DROP_ALREADY_VERIFIED: 409,
+};
+
+function drawerError(res: Response, error: any, fallback: string) {
+    const status = DRAWER_ERRORS[error.message];
+    if (status) return res.status(status).json({ error: error.message });
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR", message: fallback });
+}
+
 
 export class CashDrawerController {
   
@@ -9,14 +33,17 @@ export class CashDrawerController {
     static async openDrawer(req: Request, res: Response) {
         try {
             const tenantUuid = req.tenant!.uuid;
-            const { storeUuid, userUuid, startingCash, drawerNumber } = req.body;
+            const { startingCash, drawerNumber, terminalId } = req.body;
 
+            // The caller's own drawer, at the store checkRole verified (a
+            // body userUuid used to open drawers in other people's names)
             const drawer = await CashDrawerService.openDrawer({
                 tenantUuid,
-                storeUuid,
-                userUuid,
+                storeUuid: req.store!.uuid,
+                userUuid: req.user!.userUuid,
                 startingCash,
                 drawerNumber,
+                terminalId,
                 openedBy: req.user!.userUuid,
             });
 
@@ -37,10 +64,7 @@ export class CashDrawerController {
                 });
             }
 
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return drawerError(res, error, "Failed to open drawer");
         }
     }
 
@@ -51,9 +75,11 @@ export class CashDrawerController {
             const { actualCash, cashCount, notes } = req.body;
 
             const result = await CashDrawerService.closeDrawer({
+                tenantUuid: req.tenant!.uuid,
                 drawerUuid,
                 actualCash,
                 closedBy: req.user!.userUuid,
+                actorIsSupervisor: isSupervisor(req),
                 cashCount,
                 notes,
             });
@@ -65,6 +91,7 @@ export class CashDrawerController {
                 actualCash: result.actualCash,
                 variance: result.variance,
                 requiresApproval: result.requiresApproval,
+                unverifiedDrops: result.unverifiedDrops,
             });
 
         } catch (error: any) {
@@ -72,10 +99,7 @@ export class CashDrawerController {
                 error: error.message,
             });
 
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return drawerError(res, error, "Failed to close drawer");
         }
     }
 
@@ -83,13 +107,14 @@ export class CashDrawerController {
     static async cashDrop(req: Request, res: Response) {
         try {
             const { drawerUuid } = req.params;
-            const { storeUuid, amount, reason } = req.body;
+            const { amount, reason } = req.body;
 
             const cashDrop = await CashDrawerService.createCashDrop({
+                tenantUuid: req.tenant!.uuid,
                 drawerUuid,
-                storeUuid,
                 amount,
                 droppedBy: req.user!.userUuid,
+                actorIsSupervisor: isSupervisor(req),
                 reason,
             });
     
@@ -99,10 +124,7 @@ export class CashDrawerController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return drawerError(res, error, "Failed to record cash drop");
         }
     }
 
@@ -112,6 +134,7 @@ export class CashDrawerController {
             const { cashDropUuid } = req.params;
 
             const cashDrop = await CashDrawerService.verifyCashDrop({
+                tenantUuid: req.tenant!.uuid,
                 cashDropUuid,
                 verifiedBy: req.user!.userUuid,
             });
@@ -122,10 +145,7 @@ export class CashDrawerController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return drawerError(res, error, "Failed to verify cash drop");
         }
     }
 

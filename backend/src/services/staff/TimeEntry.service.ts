@@ -305,7 +305,17 @@ export class TimeEntryService {
     static async startBreak(input: {
         timeEntryUuid: string;
         breakType: string;
+        userUuid: string; // the caller; only their own time entry
     }) {
+        // Someone else's (or no) entry reads as not found
+        const owned = await prisma.timeEntry.findFirst({
+            where: { uuid: input.timeEntryUuid, userUuid: input.userUuid },
+            select: { uuid: true },
+        });
+        if (!owned) {
+            throw new Error("TIME_ENTRY_NOT_FOUND");
+        }
+
         // Check if already on break
         const activeBreak = await prisma.breakEntry.findFirst({
             where: {
@@ -346,9 +356,11 @@ export class TimeEntryService {
 
     static async endBreak(input: {
         breakEntryUuid: string;
+        userUuid: string; // the caller; only their own break
     }) {
-        const breakEntry = await prisma.breakEntry.findUnique({
-            where: { uuid: input.breakEntryUuid },
+        // Someone else's break reads as not found
+        const breakEntry = await prisma.breakEntry.findFirst({
+            where: { uuid: input.breakEntryUuid, timeEntry: { userUuid: input.userUuid } },
         });
 
         if (!breakEntry) {

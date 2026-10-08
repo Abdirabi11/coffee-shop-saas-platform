@@ -1,20 +1,39 @@
 import type { Request, Response } from "express";
 import { TimeEntryService } from "../../services/staff/TimeEntry.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { findStoreInTenant } from "../../middlewares/auth.middleware.ts";
+
+// Employees clock and break only themselves: the user is always the
+// authenticated caller. A body userUuid naming someone else is rejected
+// (it used to clock that person in or out), and the store must belong to
+// the verified tenant.
+async function selfClockContext(req: Request, res: Response): Promise<string | null> {
+    const { userUuid, storeUuid, deviceId } = req.body ?? {};
+    const caller = req.user!.userUuid;
+
+    if (userUuid !== undefined && userUuid !== caller) {
+        res.status(403).json({ error: "CANNOT_CLOCK_OTHERS", message: "You can only clock yourself in or out" });
+        return null;
+    }
+    if (!storeUuid || !deviceId) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: "storeUuid and deviceId are required" });
+        return null;
+    }
+    if (typeof storeUuid !== "string" || !(await findStoreInTenant(req, storeUuid))) {
+        res.status(404).json({ error: "STORE_NOT_FOUND", message: "Store not found" });
+        return null;
+    }
+    return caller;
+}
 
 export class TimeEntryController {
   
     //POST /api/time/clock-in
     static async clockIn(req: Request, res: Response) {
         try {
-            const { userUuid, storeUuid, deviceId, latitude, longitude, shiftUuid } = req.body;
-
-            if (!userUuid || !storeUuid || !deviceId) {
-                return res.status(400).json({
-                    error: "VALIDATION_ERROR",
-                    message: "userUuid, storeUuid, and deviceId are required",
-                });
-            }
+            const userUuid = await selfClockContext(req, res);
+            if (!userUuid) return;
+            const { storeUuid, deviceId, latitude, longitude, shiftUuid } = req.body;
 
             const result = await TimeEntryService.clockIn({
                 userUuid,
@@ -56,14 +75,9 @@ export class TimeEntryController {
     //POST /api/time/clock-out
     static async clockOut(req: Request, res: Response) {
         try {
-            const { userUuid, storeUuid, deviceId, latitude, longitude } = req.body;
-
-            if (!userUuid || !storeUuid || !deviceId) {
-                return res.status(400).json({
-                    error: "VALIDATION_ERROR",
-                    message: "userUuid, storeUuid, and deviceId are required",
-                });
-            }
+            const userUuid = await selfClockContext(req, res);
+            if (!userUuid) return;
+            const { storeUuid, deviceId, latitude, longitude } = req.body;
 
             const timeEntry = await TimeEntryService.clockOut({
                 userUuid,
@@ -100,11 +114,13 @@ export class TimeEntryController {
     //POST /api/time/break/start
     static async startBreak(req: Request, res: Response) {
         try {
-            const { timeEntryUuid, breakType } = req.body;
+            const { timeEntryUuid, breakType } = req.body ?? {};
 
+            // Only on the caller's own time entry
             const breakEntry = await TimeEntryService.startBreak({
                 timeEntryUuid,
                 breakType,
+                userUuid: req.user!.userUuid,
             });
 
             return res.status(201).json({
@@ -113,6 +129,9 @@ export class TimeEntryController {
             });
 
         } catch (error: any) {
+            if (error.message === "TIME_ENTRY_NOT_FOUND") {
+                return res.status(404).json({ error: error.message });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -123,10 +142,12 @@ export class TimeEntryController {
     //POST /api/time/break/end
     static async endBreak(req: Request, res: Response) {
         try {
-            const { breakEntryUuid } = req.body;
+            const { breakEntryUuid } = req.body ?? {};
 
+            // Only the caller's own break
             const breakEntry = await TimeEntryService.endBreak({
                 breakEntryUuid,
+                userUuid: req.user!.userUuid,
             });
 
             return res.status(200).json({
@@ -135,6 +156,9 @@ export class TimeEntryController {
             });
 
         } catch (error: any) {
+            if (error.message === "BREAK_NOT_FOUND") {
+                return res.status(404).json({ error: error.message });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
