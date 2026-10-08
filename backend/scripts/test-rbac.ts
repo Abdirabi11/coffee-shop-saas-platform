@@ -18,7 +18,10 @@
 // only reach their own orders; store roles never satisfy tenant-wide routes
 // (even with ?storeUuid=); roles can only be assigned below the caller's own,
 // never to yourself, never over a peer or superior; menu admin writes and
-// staff profiles never cross tenants or stores, and profiles carry no secrets.
+// staff profiles never cross tenants or stores, and profiles carry no secrets;
+// cash drawers are acted on only at their own store, by their owner or a
+// supervisor, closed exactly once, counted per drawer with only verified drops;
+// employees clock and break only themselves.
 //
 //   npx tsx scripts/test-rbac.ts
 //
@@ -127,7 +130,8 @@ async function setup() {
     await assign(ownerA.uuid, ownerA_A.uuid, tA.uuid, a1.uuid, "ADMIN");
     await assign(ownerB.uuid, ownerB_B.uuid, tB.uuid, b1.uuid, "ADMIN");
     await assign(managerA.uuid, managerA_A.uuid, tA.uuid, a1.uuid, "MANAGER");
-    await assign(cashierA.uuid, cashierA_A.uuid, tA.uuid, a1.uuid, "CASHIER");
+    const cashierA1 = await assign(cashierA.uuid, cashierA_A.uuid, tA.uuid, a1.uuid, "CASHIER");
+    await prisma.userStore.update({ where: { uuid: cashierA1.uuid }, data: { canOpenDrawer: true } });
 
     // Phase 23: escalation and hierarchy actors
     const storeAdminA = await user("StoreAdminA", "CUSTOMER");
@@ -184,6 +188,11 @@ async function setup() {
         menu[key].group = group.uuid;
     }
 
+    // A drawer in tenant B, to try from tenant A
+    const drawerB = await prisma.cashDrawer.create({
+        data: { tenantUuid: tB.uuid, storeUuid: b1.uuid, userUuid: ownerB.uuid, status: "OPEN", openedAt: new Date(), startingCash: 5000 },
+    });
+
     const exceptionB = await prisma.storeHourException.create({
         data: { tenantUuid: tB.uuid, storeUuid: b1.uuid, exceptionDate: new Date("2030-01-01"), exceptionType: "HOLIDAY", name: "B holiday" },
     });
@@ -193,6 +202,8 @@ async function setup() {
         a1Customer2: await order(tA.uuid, a1.uuid, customerA2_A.uuid),
         a1ForCashier: await order(tA.uuid, a1.uuid, customerA_A.uuid),
         a2Order: await order(tA.uuid, a2.uuid, customerA_A.uuid),
+        a1DrawerSale: await order(tA.uuid, a1.uuid, customerA_A.uuid),
+        a1OtherTerminalSale: await order(tA.uuid, a1.uuid, customerA_A.uuid),
         b1Order: await order(tB.uuid, b1.uuid, ownerB_B.uuid),
     };
 
@@ -201,7 +212,7 @@ async function setup() {
         signAccessToken({ userUuid: u.uuid, role: u.globalRole as any, tenantUuid, tokenVersion: u.tokenVersion });
 
     return {
-        tA, tB, a1, a2, b1, exceptionB, orders,
+        tA, tB, a1, a2, b1, exceptionB, orders, drawerB,
         users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA },
         menu,
         members: { ownerA_A, storeAdminA_A, adminA2_A, adminA3_A, newbie_A, promotee_A },
@@ -213,6 +224,7 @@ async function setup() {
             storeAdminA: token(storeAdminA, tA.uuid),
             storeMgrA: token(storeMgrA, tA.uuid),
             adminA2: token(adminA2, tA.uuid),
+            newbie: token(newbie, tA.uuid),
         },
     };
 }
@@ -454,6 +466,86 @@ async function main() {
         const selfView = await call("GET", `/api/staff/${u.cashierA.uuid}`, t.cashierA);
         check("cashier reads own profile", selfView.status, 200);
         check("  ...no secret fields", leaks(selfView.body).join(",") || "none", "none");
+
+        console.log("\n=== Cash drawer (Phase 25) ===");
+        const opened = await call("POST", "/api/staff/cash-drawer/open", t.cashierA, {
+            body: { storeUuid: a1, startingCash: 10000, terminalId: "T-A1", userUuid: u.managerA.uuid },
+        });
+        check("cashier opens a drawer", opened.status, 201);
+        const drawer = opened.body?.drawer;
+        check("  ...in their own name (body userUuid ignored)", drawer?.userUuid, u.cashierA.uuid);
+        check("open at tenant B's store",
+            await errorOf("POST", "/api/staff/cash-drawer/open", t.cashierA, { body: { storeUuid: ctx.b1.uuid, startingCash: 0 } }), "404 STORE_NOT_FOUND");
+
+        // One cash sale on this drawer's terminal, one on another terminal of the same store
+        const sale = (orderUuid: string, terminalId: string) => call("POST", "/api/cashier/process", t.cashierA, {
+            body: { orderUuid, paymentMethod: "CASH", amount: 400, amountTendered: 400, changeGiven: 0, terminalId },
+        });
+        const drawerSale = await sale(o.a1DrawerSale.uuid, "T-A1");
+        const elsewhere = await sale(o.a1OtherTerminalSale.uuid, "T-OTHER");
+        check("sale on the drawer's terminal", drawerSale.status, 201);
+        check("sale on another terminal", elsewhere.status, 201);
+        const linkedPayment = await prisma.payment.findUnique({ where: { uuid: drawerSale.body?.data?.uuid } });
+        check("  ...payment linked to the drawer", linkedPayment?.drawerUuid, drawer.uuid);
+
+        const drop = (token: string, amount: unknown) =>
+            call("POST", `/api/staff/cash-drawer/${drawer.uuid}/drop`, token, { body: { amount, reason: "To safe" } });
+        check("negative drop", `${(await drop(t.cashierA, -500)).status}`, "400");
+        check("zero drop", `${(await drop(t.cashierA, 0)).status}`, "400");
+        check("customer drops from the drawer", (await drop(t.customerA, 1000)).status, 403);
+        check("another cashier drops from it (not theirs)", (await drop(t.newbie, 1000)).body?.error, "DRAWER_NOT_YOURS");
+        const fakeDrop = await drop(t.cashierA, 2000);   // never verified: cash "dropped" but kept
+        const realDrop = await drop(t.cashierA, 1000);   // verified by the manager below
+        check("cashier records two drops", `${fakeDrop.status},${realDrop.status}`, "201,201");
+        const verify = (token: string, dropUuid: string) => errorOf("POST", `/api/staff/cash-drawer/drop/${dropUuid}/verify`, token);
+        check("cashier verifies own drop", await verify(t.cashierA, realDrop.body?.cashDrop?.uuid), "403 INSUFFICIENT_ROLE");
+        check("manager verifies the drop", (await verify(t.managerA, realDrop.body?.cashDrop?.uuid)).split(" ")[0], "200");
+        check("manager verifies it again", await verify(t.managerA, realDrop.body?.cashDrop?.uuid), "409 DROP_ALREADY_VERIFIED");
+
+        const close = (token: string, drawerUuid: string, actualCash: number) =>
+            call("POST", `/api/staff/cash-drawer/${drawerUuid}/close`, token, { body: { actualCash } });
+        check("A1 manager closes tenant B's drawer", (await close(t.managerA, ctx.drawerB.uuid, 0)).status, 404);
+        check("customer closes the drawer", (await close(t.customerA, drawer.uuid, 0)).status, 403);
+        check("another cashier closes it", (await close(t.newbie, drawer.uuid, 0)).body?.error, "DRAWER_NOT_YOURS");
+
+        // Starting 10000 + this drawer's 400 sale - verified 1000 drop = 9400.
+        // The cashier kept the 2000 "drop" and counts 7400: a 2000 shortage.
+        const counts = [7400, 9400, 9400, 9400, 9400];
+        const closes = await Promise.all(counts.map((c) => close(t.cashierA, drawer.uuid, c)));
+        const won = closes.filter((r) => r.status === 200);
+        console.log(`  concurrent closes: ${closes.map((r) => r.status).join(", ")}`);
+        check("concurrent closes that succeeded", won.length, 1);
+        check("  ...the rest rejected DRAWER_NOT_OPEN", closes.filter((r) => r.body?.error === "DRAWER_NOT_OPEN").length, counts.length - 1);
+        const closedRow = await prisma.cashDrawer.findUniqueOrThrow({ where: { uuid: drawer.uuid } });
+        check("stored count is the winning close's count", closedRow.actualCash, won[0]?.body?.actualCash);
+        check("expected cash: this drawer only, verified drops only", won[0]?.body?.expectedCash, 9400);
+        check("unverified drops reported", won[0]?.body?.unverifiedDrops, 2000);
+        if (won[0]?.body?.actualCash === 7400) {
+            check("fake drop shows as a 2000 shortage", won[0]?.body?.variance, -2000);
+            check("  ...and needs approval", closedRow.status, "RECONCILING");
+        }
+        check("drop after close", (await drop(t.cashierA, 500)).body?.error, "DRAWER_NOT_OPEN");
+        check("verify the fake drop after close", await verify(t.managerA, fakeDrop.body?.cashDrop?.uuid), "409 DRAWER_NOT_OPEN");
+
+        console.log("\n=== Time clock: only yourself (Phase 25) ===");
+        const clock = (path: string, token: string, body: Record<string, unknown>) =>
+            errorOf("POST", `/api/staff/time-entry/${path}`, token, { body: { deviceId: "test-device", ...body } });
+        check("manager clocks the cashier in", await clock("clock-in", t.managerA, { userUuid: u.cashierA.uuid, storeUuid: a1 }), "403 CANNOT_CLOCK_OTHERS");
+        check("cashier clocks in at tenant B's store", await clock("clock-in", t.cashierA, { storeUuid: ctx.b1.uuid }), "404 STORE_NOT_FOUND");
+        const clockedIn = await call("POST", "/api/staff/time-entry/clock-in", t.cashierA, { body: { storeUuid: a1, deviceId: "test-device" } });
+        check("cashier clocks self in", clockedIn.status, 201);
+        const entryUuid = clockedIn.body?.timeEntry?.uuid;
+        check("  ...entry is the cashier's", clockedIn.body?.timeEntry?.userUuid, u.cashierA.uuid);
+        check("manager starts a break on the cashier's entry",
+            await errorOf("POST", "/api/staff/time-entry/break/start", t.managerA, { body: { timeEntryUuid: entryUuid, breakType: "MEAL" } }), "404 TIME_ENTRY_NOT_FOUND");
+        const brk = await call("POST", "/api/staff/time-entry/break/start", t.cashierA, { body: { timeEntryUuid: entryUuid, breakType: "MEAL" } });
+        check("cashier starts own break", brk.status, 201);
+        check("manager ends the cashier's break",
+            await errorOf("POST", "/api/staff/time-entry/break/end", t.managerA, { body: { breakEntryUuid: brk.body?.breakEntry?.uuid } }), "404 BREAK_NOT_FOUND");
+        check("cashier ends own break",
+            (await errorOf("POST", "/api/staff/time-entry/break/end", t.cashierA, { body: { breakEntryUuid: brk.body?.breakEntry?.uuid } })).split(" ")[0], "200");
+        check("manager clocks the cashier out", await clock("clock-out", t.managerA, { userUuid: u.cashierA.uuid, storeUuid: a1 }), "403 CANNOT_CLOCK_OTHERS");
+        check("cashier clocks self out", (await clock("clock-out", t.cashierA, { storeUuid: a1 })).split(" ")[0], "200");
     } finally {
         server.close();
     }
