@@ -48,6 +48,7 @@ const { default: tenantRoutes } = await import("../src/routes/tenant/tenant.rout
 const { default: staffRoutes } = await import("../src/routes/staff/staff.routes.ts");
 const { default: financialRoutes } = await import("../src/routes/payment/Financial.routes.ts");
 const { default: menuAdminRoutes } = await import("../src/routes/menu/menuAdmin.routes.ts");
+const { default: webhookAdminRoutes } = await import("../src/routes/webhooks/webhookAdmin.routes.ts");
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -59,7 +60,7 @@ function check(label: string, actual: unknown, expected: unknown) {
 const runId = `${Date.now()}-${crypto.randomBytes(2).toString("hex")}`;
 let phoneSeq = 0;
 
-async function user(name: string, globalRole: "ADMIN" | "CUSTOMER") {
+async function user(name: string, globalRole: "SUPER_ADMIN" | "ADMIN" | "CUSTOMER") {
     const phoneNumber = `+1999${String(Date.now()).slice(-6)}${String(phoneSeq++).padStart(2, "0")}`;
     return prisma.user.create({ data: { phoneNumber, firstName: name, lastName: "RBAC", globalRole } });
 }
@@ -336,12 +337,31 @@ async function setup() {
         },
     };
 
+    // Phase 30: a platform super admin, and stored Stripe events to replay.
+    // "customer.created" isn't a handled type: replaying it is IGNORED, no side effects.
+    const superAdmin = await user("SuperAdmin", "SUPER_ADMIN");
+    const stripeEvent = (id: string, status: "PROCESSED" | "PROCESSING") => {
+        const payload = { id, type: "customer.created", data: { object: {} } };
+        return prisma.webhookEvent.create({
+            data: {
+                provider: "STRIPE", providerEventId: id, providerEventUuid: id, eventUuid: id, eventType: payload.type,
+                sourceIp: "127.0.0.1", payload, payloadSize: JSON.stringify(payload).length, status,
+            },
+        });
+    };
+    const p30 = {
+        events: {
+            done: await stripeEvent(`evt_rbac_done_${runId}`, "PROCESSED"),
+            busy: await stripeEvent(`evt_rbac_busy_${runId}`, "PROCESSING"),
+        },
+    };
+
     // Tokens carry the global role and login tenant, exactly as TokenService issues them
     const token = (u: { uuid: string; globalRole: string; tokenVersion: number }, tenantUuid: string) =>
         signAccessToken({ userUuid: u.uuid, role: u.globalRole as any, tenantUuid, tokenVersion: u.tokenVersion });
 
     return {
-        tA, tB, a1, a2, b1, exceptionB, orders, drawerB, p26, p29,
+        tA, tB, a1, a2, b1, exceptionB, orders, drawerB, p26, p29, p30,
         users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA, supervisorA, customerA },
         menu,
         members: { ownerA_A, storeAdminA_A, adminA2_A, adminA3_A, newbie_A, promotee_A },
@@ -355,6 +375,7 @@ async function setup() {
             adminA2: token(adminA2, tA.uuid),
             newbie: token(newbie, tA.uuid),
             supervisorA: token(supervisorA, tA.uuid),
+            superAdmin: token(superAdmin, tA.uuid),
         },
     };
 }
@@ -371,6 +392,7 @@ async function main() {
     app.use("/api/staff", staffRoutes);
     app.use("/api/financial", financialRoutes);
     app.use("/api/admin/menu", menuAdminRoutes);
+    app.use("/api/admin/webhooks", webhookAdminRoutes);
     const server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -604,6 +626,8 @@ async function main() {
         check("cashier opens a drawer", opened.status, 201);
         const drawer = opened.body?.drawer;
         check("  ...in their own name (body userUuid ignored)", drawer?.userUuid, u.cashierA.uuid);
+        check("customer opens a drawer (tenant STAFF role, no store assignment)",
+            await errorOf("POST", "/api/staff/cash-drawer/open", t.customerA, { body: { storeUuid: a1, startingCash: 0 } }), "403 INSUFFICIENT_ROLE");
         check("open at tenant B's store",
             await errorOf("POST", "/api/staff/cash-drawer/open", t.cashierA, { body: { storeUuid: ctx.b1.uuid, startingCash: 0 } }), "404 STORE_NOT_FOUND");
 
@@ -622,7 +646,8 @@ async function main() {
             call("POST", `/api/staff/cash-drawer/${drawer.uuid}/drop`, token, { body: { amount, reason: "To safe" } });
         check("negative drop", `${(await drop(t.cashierA, -500)).status}`, "400");
         check("zero drop", `${(await drop(t.cashierA, 0)).status}`, "400");
-        check("customer drops from the drawer", (await drop(t.customerA, 1000)).status, 403);
+        check("customer drops from the drawer", await errorOf("POST", `/api/staff/cash-drawer/${drawer.uuid}/drop`, t.customerA, { body: { amount: 1000, reason: "To safe" } }), "403 INSUFFICIENT_ROLE");
+        check("customer closes the drawer", await errorOf("POST", `/api/staff/cash-drawer/${drawer.uuid}/close`, t.customerA, { body: { actualCash: 0 } }), "403 INSUFFICIENT_ROLE");
         check("another cashier drops from it (not theirs)", (await drop(t.newbie, 1000)).body?.error, "DRAWER_NOT_YOURS");
         const fakeDrop = await drop(t.cashierA, 2000);   // never verified: cash "dropped" but kept
         const realDrop = await drop(t.cashierA, 1000);   // verified by the manager below
@@ -866,6 +891,27 @@ async function main() {
         check("  ...A1 order credits", `${attributed.takenBy === u.cashierA.uuid} ${attributed.servedBy === u.cashierA.uuid} ${attributed.preparedBy.join() === u.cashierA.uuid}`, "true true true");
         const untouchedOrders = await prisma.order.findMany({ where: { uuid: { in: [p29Orders.a2.uuid, p29Orders.b1.uuid] } } });
         check("  ...A2 and B orders untouched", untouchedOrders.every((o) => o.takenBy === null && o.servedBy === null), true);
+
+        console.log("\n=== Webhook replay: real ledger fields (Phase 30) ===");
+        const { events } = ctx.p30;
+        const replayOne = (token: string, eventId: string, body: unknown = { provider: "stripe" }) =>
+            call("POST", `/api/admin/webhooks/replay/${eventId}`, token, { body });
+        check("tenant owner replays an event", (await replayOne(t.ownerA, events.done.providerEventId!)).status, 403);
+        const replayed = await replayOne(t.superAdmin, events.done.providerEventId!);
+        check("super admin replays a stored event", `${replayed.status} ${replayed.body?.replay?.status}`, "200 SUCCESS");
+        check("  ...replay names the provider's event id", replayed.body?.replay?.eventUuid, events.done.providerEventId);
+        const ledgerRow = await prisma.webhookEvent.findUniqueOrThrow({ where: { uuid: events.done.uuid } });
+        check("  ...ledger updated by the handler (unhandled type)", ledgerRow.status, "IGNORED");
+        check("unknown event id", `${(await replayOne(t.superAdmin, `evt_missing_${runId}`)).status} ${(await replayOne(t.superAdmin, `evt_missing_${runId}`)).body?.error}`, "404 WEBHOOK_EVENT_NOT_FOUND");
+        check("event still processing", (await replayOne(t.superAdmin, events.busy.providerEventId!)).body?.error, "WEBHOOK_EVENT_IN_PROGRESS");
+        const busyReplays = await prisma.webhookReplay.count({ where: { webhookEventUuid: events.busy.uuid } });
+        check("  ...no replay recorded", busyReplays, 0);
+        check("unsupported provider", (await replayOne(t.superAdmin, events.done.providerEventId!, { provider: "paypal" })).body?.error, "UNSUPPORTED_PROVIDER");
+        const range = await call("POST", "/api/admin/webhooks/replay/range", t.superAdmin, {
+            body: { provider: "stripe", eventType: "customer.created", startDate: new Date(Date.now() - 3_600_000).toISOString(), endDate: new Date().toISOString() },
+        });
+        check("range route reachable (not taken as an event id)", `${range.status} ${range.body?.results?.failed >= 1 && range.body?.results?.success >= 1}`, "200 true");
+        check("range with a bad date", (await call("POST", "/api/admin/webhooks/replay/range", t.superAdmin, { body: { provider: "stripe", startDate: "x", endDate: "y" } })).status, 400);
     } finally {
         server.close();
     }
