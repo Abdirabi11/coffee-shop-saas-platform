@@ -281,13 +281,68 @@ async function setup() {
         },
     };
 
+    // Phase 29: swap requests, tip pools, break violations, upcoming shifts,
+    // attribution orders. The A1 manager gets shift.read at A1 only.
+    const shiftRead = await prisma.permission.upsert({
+        where: { slug: "shift.read" },
+        update: {},
+        create: { slug: "shift.read", resource: "shift", action: "read", name: "shift.read" },
+    });
+    await prisma.userPermission.create({
+        data: { userUuid: managerA.uuid, storeUuid: a1.uuid, permissionUuid: shiftRead.uuid, grantedBy: ownerA.uuid },
+    });
+    const swap = (shiftUuid: string, requestedBy: string, requestedWith?: string) =>
+        prisma.shiftSwapRequest.create({ data: { shiftUuid, requestedBy, requestedWith, reason: "appointment" } });
+    const pool = (st: { uuid: string; tenantUuid: string }, day: number, status: "OPEN" | "CALCULATED") => prisma.tipPool.create({
+        data: { tenantUuid: st.tenantUuid, storeUuid: st.uuid, periodStart: new Date(`2030-03-0${day}T00:00:00Z`), periodEnd: new Date(`2030-03-0${day}T23:59:59Z`), status },
+    });
+    const policyA = await prisma.breakPolicy.create({
+        data: { tenantUuid: tA.uuid, name: "Meal", minShiftHours: 6, breakType: "MEAL", breakDuration: 30, isPaid: false },
+    });
+    const policyB = await prisma.breakPolicy.create({
+        data: { tenantUuid: tB.uuid, name: "Meal", minShiftHours: 6, breakType: "MEAL", breakDuration: 30, isPaid: false },
+    });
+    const violation = (st: { uuid: string }, timeEntryUuid: string, userUuid: string, breakPolicyUuid = policyA.uuid) => prisma.breakViolation.create({
+        data: { timeEntryUuid, userUuid, storeUuid: st.uuid, breakPolicyUuid, violationType: "MISSED_BREAK", expectedBreakAt: new Date("2030-02-01T14:00:00Z"), hoursWorked: 8 },
+    });
+    const soon = (st: { uuid: string; tenantUuid: string }, userUuid: string) => prisma.shift.create({
+        data: {
+            tenantUuid: st.tenantUuid, storeUuid: st.uuid, userUuid, role: "CASHIER",
+            scheduledStart: new Date(Date.now() + 86_400_000), scheduledEnd: new Date(Date.now() + 86_400_000 + 8 * 3_600_000),
+        },
+    });
+    const supervisorEntry = await entryAt(a1, supervisorA.uuid, 4);
+    const p29 = {
+        swaps: {
+            a1: await swap(p26.shifts.a1.uuid, cashierA.uuid),
+            a1WithSupervisor: await swap(p26.shifts.a1.uuid, cashierA.uuid, supervisorA.uuid),
+            a2: await swap(p26.shifts.a2.uuid, cashierA.uuid),
+            b1: await swap(p26.shifts.b1.uuid, ownerB.uuid),
+        },
+        pools: { a1: await pool(a1, 1, "CALCULATED"), a1Open: await pool(a1, 2, "OPEN"), a2: await pool(a2, 1, "CALCULATED"), b1: await pool(b1, 1, "CALCULATED") },
+        violations: {
+            a1: await violation(a1, entries.cashierA1.uuid, cashierA.uuid),
+            a1b: await violation(a1, entries.cashierA1.uuid, cashierA.uuid),
+            a2: await violation(a2, entries.cashierA2.uuid, cashierA.uuid),
+            supervisorOwn: await violation(a1, supervisorEntry.uuid, supervisorA.uuid),
+            b1: await violation(b1, entries.ownerB_B1.uuid, ownerB.uuid, policyB.uuid),
+        },
+        upcoming: { a1: await soon(a1, cashierA.uuid), a2: await soon(a2, cashierA.uuid) },
+        orders: {
+            a1: await order(tA.uuid, a1.uuid, customerA_A.uuid),
+            a1b: await order(tA.uuid, a1.uuid, customerA_A.uuid),
+            a2: await order(tA.uuid, a2.uuid, customerA_A.uuid),
+            b1: await order(tB.uuid, b1.uuid, ownerB_B.uuid),
+        },
+    };
+
     // Tokens carry the global role and login tenant, exactly as TokenService issues them
     const token = (u: { uuid: string; globalRole: string; tokenVersion: number }, tenantUuid: string) =>
         signAccessToken({ userUuid: u.uuid, role: u.globalRole as any, tenantUuid, tokenVersion: u.tokenVersion });
 
     return {
-        tA, tB, a1, a2, b1, exceptionB, orders, drawerB, p26,
-        users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA, supervisorA },
+        tA, tB, a1, a2, b1, exceptionB, orders, drawerB, p26, p29,
+        users: { ownerA, ownerB, storeAdminA, storeMgrA, newbie, cashierA, managerA, supervisorA, customerA },
         menu,
         members: { ownerA_A, storeAdminA_A, adminA2_A, adminA3_A, newbie_A, promotee_A },
         tokens: {
@@ -721,6 +776,96 @@ async function main() {
             (TipsAndCommissionService as any).calculateTipPool = realCalculate;
             (globalThis as any).prisma = savedGlobal;
         }
+        console.log("\n=== Shift swaps: store from the swap's shift (Phase 29) ===");
+        const { swaps, pools, violations, upcoming, orders: p29Orders } = ctx.p29;
+        const respondSwap = (token: string, swapUuid: string, body: unknown = { approved: true }, query = "") =>
+            errorOf("POST", `/api/staff/shifts/swap/${swapUuid}/respond${query}`, token, { body });
+        check("A1 supervisor answers an A2 swap, naming A1", await respondSwap(t.supervisorA, swaps.a2.uuid, undefined, `?storeUuid=${a1}`), "403 INSUFFICIENT_ROLE");
+        check("A1 supervisor answers tenant B's swap", await respondSwap(t.supervisorA, swaps.b1.uuid, undefined, `?storeUuid=${a1}`), "404 NOT_FOUND");
+        check("cashier answers own swap", await respondSwap(t.cashierA, swaps.a1.uuid), "403 INSUFFICIENT_ROLE");
+        check("supervisor answers a swap they're party to", await respondSwap(t.supervisorA, swaps.a1WithSupervisor.uuid), "403 SWAP_SELF_APPROVE");
+        check("supervisor answers without approved", await respondSwap(t.supervisorA, swaps.a1.uuid, {}), "400 VALIDATION_ERROR");
+        check("supervisor approves an A1 swap", (await respondSwap(t.supervisorA, swaps.a1.uuid)).split(" ")[0], "200");
+        check("  ...answering it again", await respondSwap(t.managerA, swaps.a1.uuid, { approved: false }), "409 SWAP_NOT_PENDING");
+        const otherSwaps = await prisma.shiftSwapRequest.findMany({ where: { uuid: { in: [swaps.a2.uuid, swaps.b1.uuid] } } });
+        check("  ...A2 and B swaps still pending", otherSwaps.every((sw) => sw.status === "PENDING"), true);
+
+        console.log("\n=== Tip distribution: store from the pool (Phase 29) ===");
+        const distribute = (token: string, poolUuid: string, query = "") =>
+            errorOf("POST", `/api/staff/tips/${poolUuid}/distribute${query}`, token, { body: {} });
+        check("supervisor distributes an A1 pool", await distribute(t.supervisorA, pools.a1.uuid), "403 INSUFFICIENT_ROLE");
+        check("A1 manager distributes an A2 pool, naming A1", await distribute(t.managerA, pools.a2.uuid, `?storeUuid=${a1}`), "403 INSUFFICIENT_ROLE");
+        check("A1 manager distributes tenant B's pool", await distribute(t.managerA, pools.b1.uuid, `?storeUuid=${a1}`), "404 NOT_FOUND");
+        check("A1 manager distributes an open pool", await distribute(t.managerA, pools.a1Open.uuid), "409 TIP_POOL_NOT_CALCULATED");
+        check("A1 manager distributes the A1 pool", (await distribute(t.managerA, pools.a1.uuid)).split(" ")[0], "200");
+        check("  ...distributing it again", await distribute(t.managerA, pools.a1.uuid), "409 TIP_POOL_NOT_CALCULATED");
+        const otherPools = await prisma.tipPool.findMany({ where: { uuid: { in: [pools.a2.uuid, pools.b1.uuid] } } });
+        check("  ...A2 and B pools untouched", otherPools.every((p) => p.status === "CALCULATED"), true);
+
+        console.log("\n=== Break violations: store from the violation (Phase 29) ===");
+        const ack = (token: string, violationUuid: string, query = "") =>
+            errorOf("POST", `/api/staff/break-enforcement/violations/${violationUuid}/acknowledge${query}`, token);
+        const waive = (token: string, violationUuid: string, body: unknown = { reason: "rush hour" }) =>
+            errorOf("POST", `/api/staff/break-enforcement/violations/${violationUuid}/waive`, token, { body });
+        check("A1 supervisor acknowledges an A2 violation, naming A1", await ack(t.supervisorA, violations.a2.uuid, `?storeUuid=${a1}`), "403 INSUFFICIENT_ROLE");
+        check("A1 supervisor acknowledges tenant B's violation", await ack(t.supervisorA, violations.b1.uuid, `?storeUuid=${a1}`), "404 NOT_FOUND");
+        check("cashier acknowledges own violation", await ack(t.cashierA, violations.a1.uuid), "403 INSUFFICIENT_ROLE");
+        check("supervisor acknowledges own violation", await ack(t.supervisorA, violations.supervisorOwn.uuid), "403 VIOLATION_SELF_REVIEW");
+        check("supervisor acknowledges an A1 violation", (await ack(t.supervisorA, violations.a1.uuid)).split(" ")[0], "200");
+        check("  ...acknowledging it again", await ack(t.supervisorA, violations.a1.uuid), "409 VIOLATION_ALREADY_ACKNOWLEDGED");
+        check("supervisor waives a violation", await waive(t.supervisorA, violations.a1b.uuid), "403 INSUFFICIENT_ROLE");
+        check("manager waives without a reason", await waive(t.managerA, violations.a1b.uuid, {}), "400 VALIDATION_ERROR");
+        check("manager waives an A2 violation", await waive(t.managerA, violations.a2.uuid), "403 INSUFFICIENT_ROLE");
+        check("manager waives an A1 violation", (await waive(t.managerA, violations.a1b.uuid)).split(" ")[0], "200");
+        check("  ...waiving it again", await waive(t.managerA, violations.a1b.uuid), "409 VIOLATION_ALREADY_WAIVED");
+
+        console.log("\n=== Break check: owner or supervisor at the entry's store (Phase 29) ===");
+        const breakCheck = (token: string, entryUuid: string) => errorOf("GET", `/api/staff/break-enforcement/check/${entryUuid}`, token);
+        check("cashier checks own A2 entry", (await breakCheck(t.cashierA, entries.cashierA2.uuid)).split(" ")[0], "200");
+        check("A1 supervisor checks the cashier's A1 entry", (await breakCheck(t.supervisorA, entries.cashierA1.uuid)).split(" ")[0], "200");
+        check("A1 supervisor checks the cashier's A2 entry", await breakCheck(t.supervisorA, entries.cashierA2.uuid), "403 INSUFFICIENT_ROLE");
+        check("customer checks the cashier's entry", await breakCheck(t.customerA, entries.cashierA1.uuid), "403 INSUFFICIENT_ROLE");
+        check("A1 supervisor checks tenant B's entry", await breakCheck(t.supervisorA, entries.ownerB_B1.uuid), "404 TIME_ENTRY_NOT_FOUND");
+
+        console.log("\n=== Per-user records: shifts, tips, commission, order stats (Phase 29) ===");
+        const shiftsOf = (token: string, userUuid: string, query = "") => call("GET", `/api/staff/shifts/user/${userUuid}${query}`, token);
+        const shiftStores = (r: { body: any }) => (r.body?.shifts ?? r.body?.data ?? [])
+            .filter((sh: any) => [upcoming.a1.uuid, upcoming.a2.uuid].includes(sh.uuid))
+            .map((sh: any) => sh.storeUuid === a1 ? "A1" : "A2").sort().join(",");
+        const ownShifts = await shiftsOf(t.cashierA, u.cashierA.uuid);
+        check("cashier reads own shifts", `${ownShifts.status} ${shiftStores(ownShifts)}`, "200 A1,A2");
+        const mgrShifts = await shiftsOf(t.managerA, u.cashierA.uuid);
+        check("A1 manager reads the cashier's shifts", `${mgrShifts.status} ${shiftStores(mgrShifts)}`, "200 A1");
+        check("A1 manager asks for the cashier's A2 shifts", (await shiftsOf(t.managerA, u.cashierA.uuid, `?storeUuid=${a2}`)).status, 403);
+        check("customer reads the cashier's shifts", (await shiftsOf(t.customerA, u.cashierA.uuid)).status, 403);
+        check("A1 manager reads tenant B owner's shifts", (await shiftsOf(t.managerA, u.ownerB.uuid)).status, 404);
+        for (const [label, path] of [["tip summary", "tips/summary"], ["commission summary", "commission/summary"], ["order stats", "orders/stats"]] as const) {
+            const read = (token: string, userUuid: string, storeUuid: string) => errorOf("GET", `/api/staff/${path}/${userUuid}?storeUuid=${storeUuid}`, token);
+            check(`cashier reads own ${label}`, (await read(t.cashierA, u.cashierA.uuid, a1)).split(" ")[0], "200");
+            check(`owner reads the cashier's ${label}`, (await read(t.ownerA, u.cashierA.uuid, a1)).split(" ")[0], "200");
+            check(`customer reads the cashier's ${label}`, await read(t.customerA, u.cashierA.uuid, a1), "403 FORBIDDEN");
+            check(`cashier reads own ${label} at tenant B's store`, await read(t.cashierA, u.cashierA.uuid, ctx.b1.uuid), "404 STORE_NOT_FOUND");
+            check(`owner reads tenant B owner's ${label}`, await read(t.ownerA, u.ownerB.uuid, a1), "404 STAFF_NOT_FOUND");
+        }
+
+        console.log("\n=== Order attribution: staff at the order's store (Phase 29) ===");
+        const attr = (path: string, token: string, orderUuid: string, body: unknown = {}) =>
+            errorOf("POST", `/api/staff/orders/${orderUuid}/${path}`, token, { body });
+        check("customer takes an A1 order", await attr("taken-by", t.customerA, p29Orders.a1.uuid), "403 INSUFFICIENT_ROLE");
+        check("A1 cashier takes an A2 order", await attr("taken-by", t.cashierA, p29Orders.a2.uuid), "403 INSUFFICIENT_ROLE");
+        check("A1 cashier takes tenant B's order", await attr("taken-by", t.cashierA, p29Orders.b1.uuid), "404 NOT_FOUND");
+        check("cashier takes an A1 order", (await attr("taken-by", t.cashierA, p29Orders.a1.uuid)).split(" ")[0], "200");
+        check("  ...supervisor takes it over", await attr("taken-by", t.supervisorA, p29Orders.a1.uuid), "409 ALREADY_ATTRIBUTED");
+        check("cashier sets the full attribution", await attr("attribution", t.cashierA, p29Orders.a1.uuid, { servedBy: u.cashierA.uuid }), "403 INSUFFICIENT_ROLE");
+        check("supervisor credits tenant B's owner", await attr("attribution", t.supervisorA, p29Orders.a1.uuid, { servedBy: u.ownerB.uuid }), "400 NOT_STAFF_AT_STORE");
+        check("cashier credits a customer as preparer", await attr("prepared-by", t.cashierA, p29Orders.a1.uuid, { userUuid: u.customerA.uuid }), "400 NOT_STAFF_AT_STORE");
+        check("cashier adds self as preparer", (await attr("prepared-by", t.cashierA, p29Orders.a1.uuid, { userUuid: u.cashierA.uuid })).split(" ")[0], "200");
+        check("cashier serves the order", (await attr("served-by", t.cashierA, p29Orders.a1.uuid)).split(" ")[0], "200");
+        check("supervisor reassigns the server", (await attr("attribution", t.supervisorA, p29Orders.a1b.uuid, { servedBy: u.supervisorA.uuid, takenBy: u.cashierA.uuid })).split(" ")[0], "200");
+        const attributed = await prisma.order.findUniqueOrThrow({ where: { uuid: p29Orders.a1.uuid } });
+        check("  ...A1 order credits", `${attributed.takenBy === u.cashierA.uuid} ${attributed.servedBy === u.cashierA.uuid} ${attributed.preparedBy.join() === u.cashierA.uuid}`, "true true true");
+        const untouchedOrders = await prisma.order.findMany({ where: { uuid: { in: [p29Orders.a2.uuid, p29Orders.b1.uuid] } } });
+        check("  ...A2 and B orders untouched", untouchedOrders.every((o) => o.takenBy === null && o.servedBy === null), true);
     } finally {
         server.close();
     }
