@@ -21,6 +21,9 @@ type ResolvedOrderItem = {
     }>;
 };
 
+// The pricing fields totalsFor reads and writes
+type PricedItem = Pick<ResolvedOrderItem, "subtotal" | "discountAmount" | "finalPrice" | "taxAmount">;
+
 interface CreateOrderItemInput {
     productUuid: string;
     quantity: number;
@@ -53,7 +56,6 @@ export class OrderPricingService{
         }
     ): Promise<PricingResult> {
         const resolvedItems: ResolvedOrderItem[] = [];
-        let subtotal = 0;
 
         for(const inputItem of items){
             const product = this.findProduct(menu, inputItem.productUuid);
@@ -96,7 +98,6 @@ export class OrderPricingService{
 
             const unitPrice = basePrice + optionsCost;
             const itemSubtotal = unitPrice * inputItem.quantity;
-            subtotal += itemSubtotal;
 
             resolvedItems.push({
                 productUuid: product.uuid,
@@ -114,24 +115,51 @@ export class OrderPricingService{
             });
         };
 
+        const totals = await this.totalsFor(tenantUuid, storeUuid, resolvedItems, options);
+
+        return {
+            items: resolvedItems,
+            ...totals,
+        };
+    }
+
+    // Order-level totals for items that are already priced: promotions, tax
+    // and service charge, with the discount and tax distributed back onto the
+    // items (which are updated in place). New orders and modified orders
+    // (OrderModificationService) both total through here, so they agree.
+    static async totalsFor(
+        tenantUuid: string,
+        storeUuid: string,
+        items: PricedItem[],
+        options?: {
+          promoCode?: string;
+          userTier?: string;
+        }
+    ) {
+        for (const item of items) {
+            item.discountAmount = 0;
+            item.finalPrice = item.subtotal;
+        }
+        const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+
         const { discountAmount, appliedPromos } = await this.applyPromotions(
             tenantUuid,
             storeUuid,
-            resolvedItems,
+            items,
             subtotal,
             options
         );
         if (discountAmount > 0) {
-            this.distributeDiscount(resolvedItems, discountAmount);
+            this.distributeDiscount(items, discountAmount);
         };
 
         const { taxAmount, taxBreakdown } = await this.calculateTax(
             tenantUuid,
             storeUuid,
-            resolvedItems
+            items
         );
 
-        this.distributeTax(resolvedItems, taxAmount);
+        this.distributeTax(items, taxAmount);
 
         const serviceCharge = await this.calculateServiceCharge(
           tenantUuid,
@@ -142,7 +170,6 @@ export class OrderPricingService{
         const totalAmount = subtotal - discountAmount + taxAmount + serviceCharge;
 
         return {
-            items: resolvedItems,
             subtotal,
             taxAmount,
             discountAmount,
@@ -160,7 +187,7 @@ export class OrderPricingService{
     private static async applyPromotions(
         tenantUuid: string,
         storeUuid: string,
-        items: ResolvedOrderItem[],
+        items: PricedItem[],
         subtotal: number,
         options?: { promoCode?: string; userTier?: string }
     ): Promise<{ discountAmount: number; appliedPromos: any[] }> {
@@ -177,7 +204,7 @@ export class OrderPricingService{
     private static async calculateTax(
         tenantUuid: string,
         storeUuid: string,
-        items: ResolvedOrderItem[]
+        items: PricedItem[]
      ) {
         const store = await prisma.store.findUnique({
           where: { uuid: storeUuid },
@@ -220,31 +247,51 @@ export class OrderPricingService{
         return Math.round(subtotal * (rate / 100));
     }
 
+    // Split `total` across items in proportion to `weights`, in whole units,
+    // so the shares always add up to exactly `total` (largest remainder:
+    // round everything down, then hand the leftover units to the items with
+    // the biggest fractions). Rounding each share on its own could be off by
+    // a unit per item.
+    private static allocate(total: number, weights: number[]): number[] {
+        const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+        if (totalWeight <= 0) return weights.map(() => 0);
+
+        const exact = weights.map((w) => (total * w) / totalWeight);
+        const shares = exact.map(Math.floor);
+        let leftover = total - shares.reduce((sum, s) => sum + s, 0);
+
+        const byFraction = exact
+            .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+            .sort((a, b) => b.fraction - a.fraction);
+        for (const { index } of byFraction) {
+            if (leftover <= 0) break;
+            shares[index]++;
+            leftover--;
+        }
+
+        return shares;
+    }
+
     private static distributeDiscount(
-        items: ResolvedOrderItem[],
+        items: PricedItem[],
         totalDiscount: number
       ) {
-        const totalSubtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
-    
-        items.forEach((item) => {
-          const proportion = item.subtotal / totalSubtotal;
-          item.discountAmount = Math.round(totalDiscount * proportion);
+        const shares = this.allocate(totalDiscount, items.map((item) => item.subtotal));
+
+        items.forEach((item, i) => {
+          item.discountAmount = shares[i];
           item.finalPrice = item.subtotal - item.discountAmount;
         });
     }
 
     private static distributeTax(
-        items: ResolvedOrderItem[],
+        items: PricedItem[],
         totalTax: number
       ) {
-        const totalFinalPrice = items.reduce(
-          (sum, item) => sum + item.finalPrice,
-          0
-        );
-    
-        items.forEach((item) => {
-          const proportion = item.finalPrice / totalFinalPrice;
-          item.taxAmount = Math.round(totalTax * proportion);
+        const shares = this.allocate(totalTax, items.map((item) => item.finalPrice));
+
+        items.forEach((item, i) => {
+          item.taxAmount = shares[i];
         });
     }
     

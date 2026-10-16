@@ -193,7 +193,7 @@ export class CashierPaymentController {
     private static errorToStatus(error: any): number {
         const msg = error.message || "";
         if (msg.includes("NOT_FOUND")) return 404;
-        if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN") || msg.includes("NOT_PAYABLE")) return 409;
+        if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN") || msg.includes("NOT_PAYABLE") || msg === "ORDER_CHANGED") return 409;
         // Payment is no longer COMPLETED (e.g. lost a concurrent void)
         if (msg.includes("CANNOT_VOID_STATUS") || msg.includes("CANNOT_CORRECT_STATUS")) return 409;
         if (msg.includes("TOO_OLD") || msg.includes("INVALID") || msg.includes("MISMATCH")) return 400;

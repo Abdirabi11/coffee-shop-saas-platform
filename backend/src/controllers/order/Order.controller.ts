@@ -8,7 +8,7 @@ import { OrderModificationService } from "../../services/order/OrderModification
 import { OrderQueryService } from "../../services/order/OrderQuery.service.ts";
 import { MANUALLY_SETTABLE_STATUSES, OrderStatusService } from "../../services/order/OrderStatus.service.ts";
 import { OrderValidationService } from "../../services/order/OrderValidation.service.ts";
-import { createOrderSchema } from "../../validators/order.validator.ts";
+import { createOrderSchema, orderItemSchema } from "../../validators/order.validator.ts";
 
 export class OrderController {
   //POST /api/orders
@@ -426,6 +426,53 @@ export class OrderController {
     }
   }
 
+  // Shared error mapping for the item add/remove endpoints
+  private static modificationError(res: Response, error: any, fallback: string) {
+    const message: string = error.message ?? "";
+
+    if (message === "ORDER_NOT_FOUND" || message === "ORDER_ITEM_NOT_FOUND") {
+      return res.status(404).json({ error: message, message: "Order or item not found" });
+    }
+    if (message === "CANNOT_MODIFY_PAID_ORDER") {
+      return res.status(409).json({
+        error: "CANNOT_MODIFY_ORDER",
+        message: "The order is paid or payment has started; it can no longer be changed",
+      });
+    }
+    if (message.startsWith("ORDER_NOT_MODIFIABLE")) {
+      return res.status(409).json({ error: "CANNOT_MODIFY_ORDER", message: "The order can no longer be changed" });
+    }
+    if (message === "CANNOT_REMOVE_LAST_ITEM") {
+      return res.status(400).json({
+        error: "CANNOT_REMOVE_ITEM",
+        message: "Cannot remove the last item from order",
+      });
+    }
+    if (message.includes("OUT_OF_STOCK")) {
+      return res.status(409).json({ error: "OUT_OF_STOCK", message });
+    }
+    if (message.startsWith("ORDER_VALIDATION_FAILED")) {
+      return res.status(400).json({
+        error: "ORDER_VALIDATION_FAILED",
+        message: message.replace(/^ORDER_VALIDATION_FAILED: /, ""),
+      });
+    }
+    if (message.startsWith("INVALID_MODIFIERS")) {
+      return res.status(400).json({
+        error: "INVALID_MODIFIERS",
+        message: message.replace(/^INVALID_MODIFIERS: /, ""),
+      });
+    }
+    if (message === "INVALID_QUANTITY" || message.startsWith("Product not found")) {
+      return res.status(400).json({ error: "INVALID_ITEM", message });
+    }
+
+    return res.status(500).json({
+      error: "INTERNAL_SERVER_ERROR",
+      message: fallback,
+    });
+  }
+
   //POST /api/orders/:orderUuid/items
   //Add item to order
   static async addItem(req: Request, res: Response) {
@@ -434,15 +481,23 @@ export class OrderController {
     try {
       const tenantUuid = req.tenant!.uuid;
       const { orderUuid } = req.params;
-      const { productUuid, quantity, modifiers, specialInstructions } = req.body;
+
+      const parsed = orderItemSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: "VALIDATION_ERROR",
+          message: "Invalid item",
+          details: parsed.error.issues.map((e) => ({
+            field: e.path.join("."),
+            message: e.message,
+          })),
+        });
+      }
 
       const order = await OrderModificationService.addItem({
         tenantUuid,
         orderUuid,
-        productUuid,
-        quantity,
-        modifiers,
-        specialInstructions,
+        ...parsed.data,
       });
 
       return res.status(200).json({
@@ -456,24 +511,7 @@ export class OrderController {
         error: error.message,
       });
 
-      if (error.message === "CANNOT_MODIFY_PAID_ORDER") {
-        return res.status(400).json({
-          error: "CANNOT_MODIFY_ORDER",
-          message: "Cannot modify a paid order",
-        });
-      }
-
-      if (error.message.startsWith("INVALID_MODIFIERS")) {
-        return res.status(400).json({
-          error: "INVALID_MODIFIERS",
-          message: error.message.replace(/^INVALID_MODIFIERS: /, ""),
-        });
-      }
-
-      return res.status(500).json({
-        error: "INTERNAL_SERVER_ERROR",
-        message: "Failed to add item to order",
-      });
+      return OrderController.modificationError(res, error, "Failed to add item to order");
     }
   }
   //DELETE /api/orders/:orderUuid/items/:itemUuid
@@ -502,17 +540,7 @@ export class OrderController {
         error: error.message,
       });
 
-      if (error.message === "CANNOT_REMOVE_LAST_ITEM") {
-        return res.status(400).json({
-          error: "CANNOT_REMOVE_ITEM",
-          message: "Cannot remove the last item from order",
-        });
-      }
-
-      return res.status(500).json({
-        error: "INTERNAL_SERVER_ERROR",
-        message: "Failed to remove item",
-      });
+      return OrderController.modificationError(res, error, "Failed to remove item");
     }
   }
 

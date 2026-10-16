@@ -1,5 +1,18 @@
 import {z} from "zod"
 
+// One order line: in a new order, or added to an existing one
+export const orderItemSchema = z.object({
+  productUuid: z.string().uuid(),
+  quantity: z.number().int().min(1).max(100),
+  specialInstructions: z.string().max(200).optional(),
+  modifiers: z.array(
+    z.object({
+      optionUuid: z.string().uuid(),
+      quantity: z.number().int().min(1).optional(),
+    })
+  ).optional(),
+});
+
 export const createOrderSchema = z.object({
   storeUuid: z.string().uuid(),
   orderType: z.enum(["DINE_IN", "TAKEAWAY", "DELIVERY"]),
@@ -7,19 +20,7 @@ export const createOrderSchema = z.object({
   deliveryAddress: z.any().optional(),
   customerNotes: z.string().max(500).optional(),
   promoCode: z.string().max(50).optional(),
-  items: z.array(
-    z.object({
-      productUuid: z.string().uuid(),
-      quantity: z.number().int().min(1).max(100),
-      specialInstructions: z.string().max(200).optional(),
-      modifiers: z.array(
-        z.object({
-          optionUuid: z.string().uuid(),
-          quantity: z.number().int().min(1).optional(),
-        })
-      ).optional(),
-    })
-  ).min(1).max(50),
+  items: z.array(orderItemSchema).min(1).max(50),
 });
 
 export const updateOrderStatusSchema = z.object({

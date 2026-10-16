@@ -456,6 +456,87 @@ export class InventoryOrderService {
         return released;
     }
 
+    // Gives back part of an order's reservation for one product: an item
+    // removed, or its quantity lowered, before payment. Takes it from the
+    // order's ACTIVE reservations for that product, shrinking one when only
+    // part of it is returned. A reservation that already lapsed has nothing
+    // to give back; commitForOrder takes stock for the order's items as they
+    // stand at payment, so the two stay consistent either way.
+    static async releaseQuantity(input: {
+        orderUuid: string;
+        productUuid: string;
+        quantity: number;
+        reason: string;
+        tx?: Tx;
+    }) {
+        if (!input.orderUuid) throw new Error("ORDER_UUID_REQUIRED");
+
+        const execute = async (client: any) => {
+            await this.lockOrder(client, input.orderUuid);
+
+            const reservations = await client.inventoryReservation.findMany({
+                where: { orderUuid: input.orderUuid, productUuid: input.productUuid, status: "ACTIVE" },
+                orderBy: { createdAt: "desc" },
+            });
+
+            let remaining = input.quantity;
+            let released = 0;
+
+            for (const reservation of reservations) {
+                if (remaining <= 0) break;
+                const take = Math.min(reservation.quantity, remaining);
+
+                // Conditional on the reservation being exactly as read
+                const claim = take === reservation.quantity
+                    ? await client.inventoryReservation.updateMany({
+                        where: { uuid: reservation.uuid, status: "ACTIVE" },
+                        data: { status: "RELEASED", releasedAt: new Date() },
+                    })
+                    : await client.inventoryReservation.updateMany({
+                        where: { uuid: reservation.uuid, status: "ACTIVE", quantity: reservation.quantity },
+                        data: { quantity: { decrement: take } },
+                    });
+                if (claim.count === 0) continue;
+
+                const item = await client.inventoryItem.update({
+                    where: { uuid: reservation.inventoryItemUuid },
+                    data: {
+                        reservedStock: { decrement: take },
+                        availableStock: { increment: take },
+                        reservedQuantity: { decrement: take },
+                        lastUpdated: new Date(),
+                    },
+                    select: { availableStock: true },
+                });
+
+                await client.inventoryMovement.create({
+                    data: {
+                        tenantUuid: reservation.tenantUuid,
+                        storeUuid: reservation.storeUuid,
+                        inventoryItemUuid: reservation.inventoryItemUuid,
+                        productUuid: reservation.productUuid,
+                        type: "RETURN",
+                        quantity: take,
+                        previousStock: item.availableStock - take,
+                        newStock: item.availableStock,
+                        referenceType: "ORDER",
+                        referenceUuid: input.orderUuid,
+                        reason: input.reason,
+                    },
+                });
+
+                remaining -= take;
+                released += take;
+            }
+
+            return released;
+        };
+
+        return input.tx
+            ? execute(input.tx)
+            : prisma.$transaction(async (tx) => execute(tx));
+    }
+
     static async deductForOrder(input: {
         orderUuid: string;
         tenantUuid: string;

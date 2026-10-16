@@ -101,36 +101,48 @@ export class PaymentService{
     // Placeholder first: claims the order and holds the provider lease
     let payment;
     try {
-      payment = await prisma.payment.create({
-        data: {
-          orderUuid: order.uuid,
-          tenantUuid: order.tenantUuid,
-          storeUuid: order.storeUuid,
+      payment = await prisma.$transaction(async (tx) => {
+        // Same order lock as OrderModificationService: the total copied into
+        // the payment is the order's total right now, and no item change can
+        // land after it (modifications refuse an order that has a Payment)
+        const [locked] = await tx.$queryRaw<Array<{ totalAmount: number; status: string }>>`
+          SELECT "totalAmount", "status"::text AS "status" FROM "Order" WHERE "uuid" = ${order.uuid} FOR UPDATE
+        `;
+        if (!locked || locked.totalAmount !== order.totalAmount || locked.status !== order.status) {
+          throw new Error("ORDER_CHANGED");
+        }
 
-          amount: order.totalAmount,
-          currency: order.currency,
-          subtotal: order.subtotal,
-          tax: order.taxAmount,
-          discount: order.discountAmount,
+        return tx.payment.create({
+          data: {
+            orderUuid: order.uuid,
+            tenantUuid: order.tenantUuid,
+            storeUuid: order.storeUuid,
 
-          paymentFlow: "PROVIDER",
-          paymentMethod: input.provider,
-          provider: input.provider,
-
-          status: "PENDING",
-          expiresAt: new Date(Date.now() + PAYMENT_TTL_MS),
-          lastRetryAt: new Date(), // provider-attempt lease
-          snapshot: {},
-          orderSnapshot: {
-            orderNumber: order.orderNumber,
-            totalAmount: order.totalAmount,
-          },
-          pricingRules: {
+            amount: order.totalAmount,
+            currency: order.currency,
             subtotal: order.subtotal,
             tax: order.taxAmount,
             discount: order.discountAmount,
+
+            paymentFlow: "PROVIDER",
+            paymentMethod: input.provider,
+            provider: input.provider,
+
+            status: "PENDING",
+            expiresAt: new Date(Date.now() + PAYMENT_TTL_MS),
+            lastRetryAt: new Date(), // provider-attempt lease
+            snapshot: {},
+            orderSnapshot: {
+              orderNumber: order.orderNumber,
+              totalAmount: order.totalAmount,
+            },
+            pricingRules: {
+              subtotal: order.subtotal,
+              tax: order.taxAmount,
+              discount: order.discountAmount,
+            },
           },
-        },
+        });
       });
     } catch (error) {
       if (isUniqueViolation(error)) {

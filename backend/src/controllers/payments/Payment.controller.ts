@@ -41,7 +41,7 @@ export class PaymentController {
             const status = error.message.includes("NOT_FOUND") ? 404
                 : error.message.includes("LOCKED") || error.message.includes("REVIEW") ? 403
                 : error.message.includes("LIMIT") ? 429
-                : error.message.includes("IN_PROGRESS") || error.message.includes("ALREADY_EXISTS") ? 409
+                : error.message.includes("IN_PROGRESS") || error.message.includes("ALREADY_EXISTS") || error.message === "ORDER_CHANGED" ? 409
                 : 400;
         
             return res.status(status).json({ success: false, error: error.message });

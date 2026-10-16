@@ -94,6 +94,15 @@ export class CashierPaymentService{
     
         // Create payment in transaction
         const payment = await prisma.$transaction(async (tx) => {
+            // Same order lock as OrderModificationService: the amounts checked
+            // above must still be the order's when the payment is recorded
+            const [locked] = await tx.$queryRaw<Array<{ totalAmount: number; status: string }>>`
+                SELECT "totalAmount", "status"::text AS "status" FROM "Order" WHERE "uuid" = ${input.orderUuid} FOR UPDATE
+            `;
+            if (!locked || locked.totalAmount !== order.totalAmount || locked.status !== order.status) {
+                throw new Error("ORDER_CHANGED");
+            }
+
             const payment = await tx.payment.create({
                 data: {
                     orderUuid: input.orderUuid,
