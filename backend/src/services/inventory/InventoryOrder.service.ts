@@ -5,7 +5,14 @@ import { MetricsService } from "../../infrastructure/observability/MetricsServic
 
 
 type Tx = Prisma.TransactionClient;
-  
+
+// The status the stock on hand implies, as InventoryReconciliationJob computes it
+const STATUS_FROM_STOCK = Prisma.sql`(CASE
+    WHEN "currentStock" <= 0 THEN 'OUT_OF_STOCK'
+    WHEN "reorderPoint" IS NOT NULL AND "currentStock" <= "reorderPoint" THEN 'LOW_STOCK'
+    ELSE 'IN_STOCK'
+END)::"InventoryStatus"`;
+
 export class InventoryOrderService {
  
     static async reserveForOrder(input: {
@@ -120,143 +127,277 @@ export class InventoryOrderService {
         MetricsService.increment("inventory.reserved", input.items.length);
     }
  
+
+    // Commit, release and direct sale for one order take this lock first, so
+    // they run one at a time and whichever comes second sees what the first
+    // left behind: a payment confirmation racing the reservation expiry job
+    // can no longer both act on the same reservations.
+    private static async lockOrder(client: any, orderUuid: string) {
+        const [order] = await client.$queryRaw<Array<{
+            uuid: string;
+            tenantUuid: string;
+            storeUuid: string;
+            status: string;
+            inventoryCommitted: boolean;
+        }>>`
+            SELECT "uuid", "tenantUuid", "storeUuid", "status"::text AS "status", "inventoryCommitted"
+            FROM "Order"
+            WHERE "uuid" = ${orderUuid}
+            FOR UPDATE
+        `;
+        return order ?? null;
+    }
+
+    // Recompute the status from the row as it now stands (the caller already
+    // holds its lock) and write it only when it changes, so an item that stays
+    // below its reorder point keeps LOW_STOCK instead of being reset to
+    // IN_STOCK. DISCONTINUED and BACKORDERED are set by hand and left alone.
+    static async refreshStatus(client: any, inventoryItemUuid: string) {
+        await client.$executeRaw`
+            UPDATE "InventoryItem"
+            SET "status" = ${STATUS_FROM_STOCK}
+            WHERE "uuid" = ${inventoryItemUuid}
+              AND "status" NOT IN ('DISCONTINUED', 'BACKORDERED')
+              AND "status" <> ${STATUS_FROM_STOCK}
+        `;
+    }
+
+    private static async recordSale(client: any, sale: {
+        tenantUuid: string;
+        storeUuid: string;
+        inventoryItemUuid: string;
+        productUuid: string;
+        orderUuid: string;
+        quantity: number;
+        newStock: number;
+        reason: string;
+    }) {
+        const previousStock = sale.newStock + sale.quantity;
+
+        await client.inventoryMovement.create({
+            data: {
+                tenantUuid: sale.tenantUuid,
+                storeUuid: sale.storeUuid,
+                inventoryItemUuid: sale.inventoryItemUuid,
+                productUuid: sale.productUuid,
+                type: "SALE",
+                quantity: -sale.quantity,
+                previousStock,
+                newStock: sale.newStock,
+                referenceType: "ORDER",
+                referenceUuid: sale.orderUuid,
+                reason: sale.reason,
+            },
+        });
+
+        await client.inventoryTransaction.create({
+            data: {
+                tenantUuid: sale.tenantUuid,
+                storeUuid: sale.storeUuid,
+                inventoryItemUuid: sale.inventoryItemUuid,
+                productUuid: sale.productUuid,
+                quantity: -sale.quantity,
+                previousQuantity: previousStock,
+                newQuantity: sale.newStock,
+                reason: "ORDER_SALE",
+                orderUuid: sale.orderUuid,
+            },
+        });
+    }
+
+    // Turns the order's reservations into a sale. Safe to repeat and to run
+    // concurrently with releaseForOrder: each reservation is claimed with a
+    // conditional update (ACTIVE → COMMITTED), and an order that is already
+    // committed is left alone.
+    //
+    // A reservation can lapse before the payment lands (the expiry job, or a
+    // failed attempt released it before a retry succeeded). That quantity is
+    // taken again here, from available stock only so other orders'
+    // reservations are untouched; if it is gone the commit fails with
+    // OUT_OF_STOCK rather than recording a sale that never left stock.
     static async commitForOrder(input: { orderUuid: string; tx?: Tx }) {
+        if (!input.orderUuid) throw new Error("ORDER_UUID_REQUIRED");
+
         const execute = async (client: any) => {
+            const order = await this.lockOrder(client, input.orderUuid);
+            if (!order) throw new Error(`ORDER_NOT_FOUND: ${input.orderUuid}`);
+
+            if (order.inventoryCommitted) {
+                logWithContext("info", "[InventoryOrder] Already committed", { orderUuid: input.orderUuid });
+                return { committed: 0, retaken: 0 };
+            }
+            if (order.status === "CANCELLED") {
+                logWithContext("warn", "[InventoryOrder] Not committing a cancelled order", { orderUuid: input.orderUuid });
+                return { committed: 0, retaken: 0 };
+            }
+
             const reservations = await client.inventoryReservation.findMany({
-                where: {
-                    orderUuid: input.orderUuid,
-                    status: "ACTIVE",
-                },
-                include: {
-                    inventoryItem: {
-                        select: { uuid: true, currentStock: true, storeUuid: true },
-                    },
-                },
+                where: { orderUuid: input.orderUuid, status: "ACTIVE" },
             });
-    
-            if (reservations.length === 0) {
-                logWithContext("warn", "[InventoryOrder] No active reservations to commit", {
-                    orderUuid: input.orderUuid,
+            const ordered = await client.orderItem.groupBy({
+                by: ["productUuid"],
+                where: { orderUuid: input.orderUuid },
+                _sum: { quantity: true },
+            });
+
+            // One pass per product, in the fixed order reserveForOrder locks
+            // them, so concurrent commits can't deadlock
+            const productUuids: string[] = [...new Set<string>([
+                ...reservations.map((r: any) => r.productUuid),
+                ...ordered.map((o: any) => o.productUuid),
+            ])].sort((a, b) => a.localeCompare(b));
+
+            let committed = 0;
+            let retaken = 0;
+
+            for (const productUuid of productUuids) {
+                let covered = 0;
+
+                for (const reservation of reservations.filter((r: any) => r.productUuid === productUuid)) {
+                    const claim = await client.inventoryReservation.updateMany({
+                        where: { uuid: reservation.uuid, status: "ACTIVE" },
+                        data: { status: "COMMITTED", committedAt: new Date() },
+                    });
+                    if (claim.count === 0) continue; // committed or released meanwhile
+
+                    const item = await client.inventoryItem.update({
+                        where: { uuid: reservation.inventoryItemUuid },
+                        data: {
+                            currentStock: { decrement: reservation.quantity },
+                            reservedStock: { decrement: reservation.quantity },
+                            quantity: { decrement: reservation.quantity },
+                            reservedQuantity: { decrement: reservation.quantity },
+                            lastUpdated: new Date(),
+                        },
+                        select: { currentStock: true },
+                    });
+                    await this.refreshStatus(client, reservation.inventoryItemUuid);
+                    await this.recordSale(client, {
+                        tenantUuid: reservation.tenantUuid,
+                        storeUuid: reservation.storeUuid,
+                        inventoryItemUuid: reservation.inventoryItemUuid,
+                        productUuid,
+                        orderUuid: input.orderUuid,
+                        quantity: reservation.quantity,
+                        newStock: item.currentStock,
+                        reason: "Order paid — stock committed",
+                    });
+
+                    covered += reservation.quantity;
+                    committed++;
+                }
+
+                const orderedQuantity = ordered.find((o: any) => o.productUuid === productUuid)?._sum.quantity ?? 0;
+                const missing = orderedQuantity - covered;
+                if (missing <= 0) continue;
+
+                const inventory = await client.inventoryItem.findFirst({
+                    where: { tenantUuid: order.tenantUuid, storeUuid: order.storeUuid, productUuid },
+                    select: { uuid: true },
                 });
-                return;
-            };
-    
-            for (const reservation of reservations) {
-                const prevStock = reservation.inventoryItem.currentStock;
-                const newStock = prevStock - reservation.quantity;
-        
-                // Mark reservation as committed
-                await client.inventoryReservation.update({
-                    where: { uuid: reservation.uuid },
-                    data: { status: "COMMITTED", committedAt: new Date() },
+                if (!inventory) {
+                    const product = await client.product.findUnique({
+                        where: { uuid: productUuid },
+                        select: { trackInventory: true },
+                    });
+                    if (!product?.trackInventory) continue; // untracked: there is no stock to take
+                    throw new Error(`INVENTORY_NOT_FOUND: ${productUuid}`);
+                }
+
+                // Same check-and-decrement as reserveForOrder: Postgres
+                // re-evaluates availableStock >= missing under the row lock
+                let item;
+                try {
+                    item = await client.inventoryItem.update({
+                        where: { uuid: inventory.uuid, availableStock: { gte: missing } },
+                        data: {
+                            currentStock: { decrement: missing },
+                            availableStock: { decrement: missing },
+                            quantity: { decrement: missing },
+                            lastUpdated: new Date(),
+                        },
+                        select: { currentStock: true },
+                    });
+                } catch (error) {
+                    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+                        throw new Error(`OUT_OF_STOCK: ${productUuid} — reservation lapsed and ${missing} no longer available`);
+                    }
+                    throw error;
+                }
+                await this.refreshStatus(client, inventory.uuid);
+                await this.recordSale(client, {
+                    tenantUuid: order.tenantUuid,
+                    storeUuid: order.storeUuid,
+                    inventoryItemUuid: inventory.uuid,
+                    productUuid,
+                    orderUuid: input.orderUuid,
+                    quantity: missing,
+                    newStock: item.currentStock,
+                    reason: "Order paid after its reservation lapsed — stock taken at payment",
                 });
 
-                await client.inventoryItem.update({
-                    where: { uuid: reservation.inventoryItemUuid },
-                    data: {
-                        // New fields (reservedStock AND currentStock both decrease)
-                        currentStock: { decrement: reservation.quantity },
-                        reservedStock: { decrement: reservation.quantity },
-                        quantity: { decrement: reservation.quantity },
-                        reservedQuantity: { decrement: reservation.quantity },
-                        status: newStock <= 0 ? "OUT_OF_STOCK" : "IN_STOCK",
-                        lastUpdated: new Date(),
-                    },
-                });
-        
-                await client.inventoryMovement.create({
-                    data: {
-                        tenantUuid: reservation.tenantUuid,
-                        storeUuid: reservation.storeUuid,
-                        inventoryItemUuid: reservation.inventoryItemUuid,
-                        productUuid: reservation.productUuid,
-                        type: "SALE",
-                        quantity: -reservation.quantity,
-                        previousStock: prevStock,
-                        newStock: Math.max(0, newStock),
-                        referenceType: "ORDER",
-                        referenceUuid: input.orderUuid,
-                        reason: "Order paid — stock committed",
-                    },
-                });
-        
-                await client.inventoryTransaction.create({
-                    data: {
-                        tenantUuid: reservation.tenantUuid,
-                        storeUuid: reservation.storeUuid,
-                        inventoryItemUuid: reservation.inventoryItemUuid,
-                        productUuid: reservation.productUuid,
-                        quantity: -reservation.quantity,
-                        previousQuantity: prevStock,  // FIX: was `previousStock`
-                        newQuantity: Math.max(0, newStock), // FIX: was `newStock`
-                        reason: "ORDER_SALE",
-                        orderUuid: input.orderUuid,
-                    },
-                });
+                retaken++;
             }
-        
-            // Mark order as committed
+
             await client.order.update({
                 where: { uuid: input.orderUuid },
                 data: { inventoryCommitted: true },
             });
+
+            return { committed, retaken };
         };
-    
-        if (input.tx) {
-            await execute(input.tx);
-        } else {
-            await prisma.$transaction(async (tx) => execute(tx));
-        }
-    
+
+        const result = input.tx
+            ? await execute(input.tx)
+            : await prisma.$transaction(async (tx) => execute(tx));
+
         logWithContext("info", "[InventoryOrder] Committed", {
             orderUuid: input.orderUuid,
+            ...result,
         });
-    
+
         MetricsService.increment("inventory.committed", 1);
+        if (result.retaken > 0) MetricsService.increment("inventory.commit.retaken", result.retaken);
+
+        return result;
     }
- 
+
+    // Gives the order's ACTIVE reservations back to available stock. Safe to
+    // repeat and to run concurrently with commitForOrder: each reservation is
+    // claimed with a conditional update (ACTIVE → RELEASED), so one that was
+    // committed or released meanwhile is skipped.
     static async releaseForOrder(input: { orderUuid: string; tx?: Tx }) {
+        if (!input.orderUuid) throw new Error("ORDER_UUID_REQUIRED");
+
         const execute = async (client: any) => {
+            await this.lockOrder(client, input.orderUuid);
+
             const reservations = await client.inventoryReservation.findMany({
-                where: {
-                    orderUuid: input.orderUuid,
-                    status: "ACTIVE",
-                },
-                include: {
-                    inventoryItem: {
-                        select: { uuid: true, availableStock: true, storeUuid: true },
-                    },
-                },
+                where: { orderUuid: input.orderUuid, status: "ACTIVE" },
+                orderBy: { productUuid: "asc" },
             });
-    
-            if (reservations.length === 0) {
-                logWithContext("info", "[InventoryOrder] No active reservations to release", {
-                    orderUuid: input.orderUuid,
-                });
-                return;
-            };
-    
+
+            let released = 0;
+
             for (const reservation of reservations) {
-                const prevAvailable = reservation.inventoryItem.availableStock;
-                const newAvailable = prevAvailable + reservation.quantity;
-        
-                // Mark reservation as released
-                await client.inventoryReservation.update({
-                    where: { uuid: reservation.uuid },
+                const claim = await client.inventoryReservation.updateMany({
+                    where: { uuid: reservation.uuid, status: "ACTIVE" },
                     data: { status: "RELEASED", releasedAt: new Date() },
                 });
-        
-                await client.inventoryItem.update({
+                if (claim.count === 0) continue;
+
+                // currentStock is unchanged, so the status is too
+                const item = await client.inventoryItem.update({
                     where: { uuid: reservation.inventoryItemUuid },
                     data: {
                         reservedStock: { decrement: reservation.quantity },
                         availableStock: { increment: reservation.quantity },
                         reservedQuantity: { decrement: reservation.quantity },
-                        status: newAvailable > 0 ? "IN_STOCK" : "OUT_OF_STOCK",
                         lastUpdated: new Date(),
                     },
+                    select: { availableStock: true },
                 });
-        
+
                 await client.inventoryMovement.create({
                     data: {
                         tenantUuid: reservation.tenantUuid,
@@ -265,15 +406,14 @@ export class InventoryOrderService {
                         productUuid: reservation.productUuid,
                         type: "RETURN",
                         quantity: reservation.quantity,
-                        previousStock: prevAvailable,
-                        newStock: newAvailable,
+                        previousStock: item.availableStock - reservation.quantity,
+                        newStock: item.availableStock,
                         referenceType: "ORDER",
                         referenceUuid: input.orderUuid,
                         reason: "Reservation released — order cancelled/expired",
                     },
                 });
-        
-                // Mark order items as released
+
                 await client.orderItem.updateMany({
                     where: {
                         orderUuid: input.orderUuid,
@@ -282,28 +422,40 @@ export class InventoryOrderService {
                     },
                     data: { inventoryReleased: true },
                 });
+
+                released++;
             }
-    
-            // Mark order as released
-            await client.order.update({
-                where: { uuid: input.orderUuid },
-                data: { inventoryReleased: true },
-            });
+
+            if (released > 0) {
+                await client.order.update({
+                    where: { uuid: input.orderUuid },
+                    data: { inventoryReleased: true },
+                });
+            }
+
+            return released;
         };
-    
-        if (input.tx) {
-            await execute(input.tx);
-        } else {
-            await prisma.$transaction(async (tx) => execute(tx));
+
+        const released = input.tx
+            ? await execute(input.tx)
+            : await prisma.$transaction(async (tx) => execute(tx));
+
+        if (released === 0) {
+            logWithContext("info", "[InventoryOrder] No active reservations to release", {
+                orderUuid: input.orderUuid,
+            });
+            return 0;
         }
-    
+
         logWithContext("info", "[InventoryOrder] Released", {
             orderUuid: input.orderUuid,
+            released,
         });
-    
+
         MetricsService.increment("inventory.released", 1);
+        return released;
     }
- 
+
     static async deductForOrder(input: {
         orderUuid: string;
         tenantUuid: string;
@@ -315,6 +467,13 @@ export class InventoryOrderService {
         const items = [...input.items].sort((a, b) => a.productUuid.localeCompare(b.productUuid));
 
         const execute = async (client: any) => {
+            // A repeated cashier payment event must not sell the stock twice
+            const order = await this.lockOrder(client, input.orderUuid);
+            if (order?.inventoryCommitted) {
+                logWithContext("info", "[InventoryOrder] Already committed", { orderUuid: input.orderUuid });
+                return;
+            }
+
             for (const item of items) {
                 const inventory = await client.inventoryItem.findFirst({
                     where: {
@@ -324,7 +483,7 @@ export class InventoryOrderService {
                     },
                     select: { uuid: true },
                 });
-        
+
                 if (!inventory) continue;
 
                 // The sale has already happened, so this never rejects: it
@@ -337,8 +496,6 @@ export class InventoryOrderService {
                     SET "currentStock"   = GREATEST(0, old."currentStock" - ${item.quantity}),
                         "availableStock" = GREATEST(0, GREATEST(0, old."currentStock" - ${item.quantity}) - old."reservedStock"),
                         "quantity"       = GREATEST(0, old."currentStock" - ${item.quantity}),
-                        "status"         = (CASE WHEN old."currentStock" - ${item.quantity} <= 0
-                                                 THEN 'OUT_OF_STOCK' ELSE 'IN_STOCK' END)::"InventoryStatus",
                         "lastUpdated"    = NOW()
                     FROM (
                         SELECT "uuid", "currentStock", "reservedStock"
@@ -350,7 +507,8 @@ export class InventoryOrderService {
                     RETURNING old."currentStock" AS "previousStock", i."currentStock" AS "newStock"
                 `;
                 const { previousStock, newStock } = row;
-        
+                await this.refreshStatus(client, inventory.uuid);
+
                 await client.inventoryMovement.create({
                     data: {
                         tenantUuid: input.tenantUuid,
@@ -366,7 +524,7 @@ export class InventoryOrderService {
                         reason: "Direct sale (cashier)",
                     },
                 });
-        
+
                 await client.inventoryTransaction.create({
                     data: {
                         tenantUuid: input.tenantUuid,
@@ -381,14 +539,14 @@ export class InventoryOrderService {
                     },
                 });
             }
-        
+
             // Mark order committed
             await client.order.update({
                 where: { uuid: input.orderUuid },
                 data: { inventoryCommitted: true },
             });
         };
-    
+
         if (input.tx) {
             await execute(input.tx);
         } else {
