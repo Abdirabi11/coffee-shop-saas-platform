@@ -82,7 +82,7 @@ export class WebhookDeadLetterQueue {
 
         try {
             // Get the appropriate handler based on provider
-            const handler = this.getHandlerForProvider(dlq.provider);
+            const handler = await this.getHandlerForProvider(dlq.provider);
 
             // Process the webhook
             await handler(dlq.payload);
@@ -235,15 +235,18 @@ export class WebhookDeadLetterQueue {
         MetricsService.increment("webhook.dlq.abandoned", 1);
     }
 
-    private static getHandlerForProvider(provider: string): (payload: any) => Promise<void> {
+    // Handlers are imported lazily (ES modules: there is no require). There
+    // is no Stripe handler module to replay through (the old code required a
+    // path that doesn't exist), so Stripe entries fail with a clear error.
+    private static async getHandlerForProvider(provider: string): Promise<(payload: any) => Promise<void>> {
         switch (provider.toLowerCase()) {
             case "stripe":
-                const { StripeWebhookHandler } = require("@/handlers/webhooks/StripeWebhook.handler");
-                return StripeWebhookHandler.process;
+                throw new Error("STRIPE_DLQ_HANDLER_UNAVAILABLE");
 
-            case "evc_plus":
-                const { EVCWebhookHandler } = require("@/handlers/webhooks/EVCWebhook.handler");
-                return EVCWebhookHandler.process;
+            case "evc_plus": {
+                const { EVCWebhookHandler } = await import("../../controllers/webhooks/EVCWebhook.handler.ts");
+                return (payload: any) => EVCWebhookHandler.process(payload);
+            }
 
             default:
                 throw new Error(`UNSUPPORTED_PROVIDER: ${provider}`);

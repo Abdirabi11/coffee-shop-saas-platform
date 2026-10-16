@@ -1,9 +1,10 @@
-import { Parser } from "json2csv";
+import { json2csv } from "json-2-csv";
 import PDFDocument from "pdfkit";
 import { createWriteStream, createReadStream } from "fs";
+import fsp from "node:fs/promises";
 import path from "path";
 import dayjs from "dayjs";
-import { prisma } from "../../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
@@ -139,8 +140,7 @@ export class ReportGenerationService {
         }));
  
         // Convert to CSV
-        const parser = new Parser({
-            fields: [
+        const csv = json2csv(data, { keys: [
                 "Order Number",
                 "Store",
                 "Customer",
@@ -155,10 +155,7 @@ export class ReportGenerationService {
                 "Status",
                 "Created At",
                 "Completed At",
-            ],
-        });
- 
-        const csv = parser.parse(data);
+            ] });
     
         // Save to file
         const fileName = `sales-report-${input.tenantUuid}-${Date.now()}.csv`;
@@ -166,8 +163,7 @@ export class ReportGenerationService {
     
         await this.ensureDirectoryExists(path.dirname(filePath));
     
-        const fs = require("fs").promises;
-        await fs.writeFile(filePath, csv);
+        await fsp.writeFile(filePath, csv);
     
         return filePath;
     }
@@ -361,19 +357,14 @@ export class ReportGenerationService {
             "Orders": p.orderCount,
         }));
     
-        const parser = new Parser({
-            fields: ["Product", "Category", "Quantity Sold", "Gross Revenue", "Net Revenue", "Orders"],
-        });
-    
-        const csv = parser.parse(csvData);
+        const csv = json2csv(csvData, { keys: ["Product", "Category", "Quantity Sold", "Gross Revenue", "Net Revenue", "Orders"] });
     
         const fileName = `product-report-${input.tenantUuid}-${Date.now()}.csv`;
         const filePath = path.join(process.cwd(), "temp", "reports", fileName);
     
         await this.ensureDirectoryExists(path.dirname(filePath));
     
-        const fs = require("fs").promises;
-        await fs.writeFile(filePath, csv);
+        await fsp.writeFile(filePath, csv);
     
         return filePath;
     }
@@ -449,11 +440,6 @@ export class ReportGenerationService {
     
     //Ensure directory exists
     private static async ensureDirectoryExists(dirPath: string) {
-        const fs = require("fs").promises;
-        try {
-            await fs.access(dirPath);
-        } catch {
-            await fs.mkdir(dirPath, { recursive: true });
-        }
+        await fsp.mkdir(dirPath, { recursive: true });
     }
 }

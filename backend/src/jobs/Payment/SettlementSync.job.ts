@@ -51,8 +51,7 @@ export class SettlementSyncJob {
         let failed = 0;
     
         try {
-            const Stripe = require("stripe");
-            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
         
             // Get recent payouts (last 7 days)
             const payouts = await stripe.payouts.list({
@@ -76,11 +75,17 @@ export class SettlementSyncJob {
             
                         // txn.source is the charge ID, but we store payment_intent ID
                         // We need to find the charge to get the payment_intent
-                        const charge = await stripe.charges.retrieve(txn.source);
+                        // (Stripe returns either an ID or an expanded object)
+                        const chargeId = typeof txn.source === "string" ? txn.source : txn.source?.id;
+                        if (!chargeId) continue;
+                        const charge = await stripe.charges.retrieve(chargeId);
+                        const paymentIntentId = typeof charge.payment_intent === "string"
+                            ? charge.payment_intent
+                            : charge.payment_intent?.id;
             
-                        if (charge.payment_intent) {
+                        if (paymentIntentId) {
                             await SettlementService.markSettled({
-                                providerRef: charge.payment_intent,
+                                providerRef: paymentIntentId,
                                 providerPayoutId: payout.id,
                                 settledAt: new Date(payout.arrival_date * 1000),
                                 netAmount: txn.net, // Amount after Stripe fees

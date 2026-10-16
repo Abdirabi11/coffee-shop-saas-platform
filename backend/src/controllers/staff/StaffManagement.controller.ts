@@ -347,7 +347,12 @@ export class StaffManagementController {
     static async resetPin(req: Request, res: Response) {
         try {
             const { userUuid } = req.params;
-            const { newPin } = req.body;
+            const { newPin } = req.body ?? {};
+
+            // The PIN is a login: only for members of this tenant who rank
+            // below the caller at every store they work at (the route's role
+            // check alone was at whatever store the client named)
+            await assertCanModifyStaffMember(req, await findTenantMember(req, { userUuid }));
 
             await StaffManagementService.resetPIN({
                 userUuid,
@@ -363,6 +368,9 @@ export class StaffManagementController {
         } catch (error: any) {
             if (error instanceof RoleAssignmentError) {
                 return res.status(error.status).json({ error: error.code });
+            }
+            if (error.message === "PIN_INVALID_FORMAT") {
+                return res.status(400).json({ error: "VALIDATION_ERROR", message: "PIN must be 4 digits" });
             }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",

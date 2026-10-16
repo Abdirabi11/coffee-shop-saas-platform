@@ -1,4 +1,5 @@
 import axios from "axios"
+import { EventEmitter } from "node:events";
 
 export class MonitoringService extends EventEmitter {
     private static instance: MonitoringService;
@@ -95,8 +96,6 @@ export class MonitoringService extends EventEmitter {
     //Send Slack alert
     private async sendSlackAlert(alert: any) {
         try {
-            const axios = require('axios');
-            
             const color = {
                 INFO: '#36a64f',
                 WARNING: '#ff9900',

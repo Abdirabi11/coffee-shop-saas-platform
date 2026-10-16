@@ -1,5 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import Stripe from "stripe";
+import axios from "axios";
 
 interface ReconciliationResult {
     hasDiscrepancy: boolean;
@@ -214,7 +216,7 @@ export class PaymentReconciliationService {
         periodStart: Date,
         periodEnd: Date
     ) {
-        const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
     
         const transactions = await stripe.balanceTransactions.list({
             created: {
@@ -252,7 +254,6 @@ export class PaymentReconciliationService {
         periodStart: Date,
         periodEnd: Date
     ) {
-        const axios = require("axios");
     
         const response = await axios.post(
             `${process.env.EVC_PLUS_API_URL}/reports/transactions`,

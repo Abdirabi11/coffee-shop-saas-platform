@@ -87,7 +87,7 @@ export class ShiftManagementService {
 
             // Invalidate cache
             await invalidateCache(`shifts:store:${input.storeUuid}:${dayjs(input.scheduledStart).format("YYYY-MM-DD")}`);
-            await invalidateCache(`shifts:user:${input.userUuid}`);
+            await invalidateCache(`shifts:user:${input.userUuid}:*`);
 
             // Emit event
             EventBus.emit("SHIFT_CREATED", {
@@ -166,19 +166,28 @@ export class ShiftManagementService {
         });
     }
 
+    // stores undefined = every store in the tenant
     static async getUserShifts(input: {
+        tenantUuid: string;
         userUuid: string;
         daysAhead?: number;
+        storeUuids?: string[];
     }) {
-        const cacheKey = `shifts:user:${input.userUuid}`;
+        const daysAhead = input.daysAhead || 7;
+        // Keyed by tenant, range and visible stores too (invalidated by the
+        // shifts:user:<userUuid>:* prefix)
+        const scope = input.storeUuids ? [...input.storeUuids].sort().join(",") : "all";
+        const cacheKey = `shifts:user:${input.userUuid}:${input.tenantUuid}-${daysAhead}-${scope}`;
 
         return withCache(cacheKey, 300, async () => {
             const now = new Date();
-            const futureDate = dayjs().add(input.daysAhead || 7, "day").toDate();
+            const futureDate = dayjs().add(daysAhead, "day").toDate();
 
             return prisma.shift.findMany({
                 where: {
+                    tenantUuid: input.tenantUuid,
                     userUuid: input.userUuid,
+                    ...(input.storeUuids && { storeUuid: { in: input.storeUuids } }),
                     scheduledStart: {
                         gte: now,
                         lte: futureDate,
@@ -245,7 +254,7 @@ export class ShiftManagementService {
 
         // Invalidate cache
         await invalidateCache(`shifts:store:${shift.storeUuid}:${dayjs(shift.scheduledStart).format("YYYY-MM-DD")}`);
-        await invalidateCache(`shifts:user:${shift.userUuid}`);
+        await invalidateCache(`shifts:user:${shift.userUuid}:*`);
 
         return updated;
     }
@@ -278,7 +287,7 @@ export class ShiftManagementService {
 
         // Invalidate cache
         await invalidateCache(`shifts:store:${shift.storeUuid}:${dayjs(shift.scheduledStart).format("YYYY-MM-DD")}`);
-        await invalidateCache(`shifts:user:${shift.userUuid}`);
+        await invalidateCache(`shifts:user:${shift.userUuid}:*`);
 
         // Emit event
         EventBus.emit("SHIFT_CANCELLED", {
@@ -337,14 +346,28 @@ export class ShiftManagementService {
         return swapRequest;
     }
 
+    // PENDING -> APPROVED/REJECTED once, by someone not party to the swap
     static async respondToShiftSwap(input: {
+        tenantUuid: string;
         swapRequestUuid: string;
         managerUuid: string;
         approved: boolean;
         notes?: string;
     }) {
-        const swapRequest = await prisma.shiftSwapRequest.update({
-            where: { uuid: input.swapRequestUuid },
+        // ShiftSwapRequest has no tenantUuid: its tenant is its shift's
+        const existing = await prisma.shiftSwapRequest.findFirst({
+            where: { uuid: input.swapRequestUuid, shift: { tenantUuid: input.tenantUuid } },
+            select: { requestedBy: true, requestedWith: true },
+        });
+        if (!existing) {
+            throw new Error("SWAP_REQUEST_NOT_FOUND");
+        }
+        if (existing.requestedBy === input.managerUuid || existing.requestedWith === input.managerUuid) {
+            throw new Error("SWAP_SELF_APPROVE");
+        }
+
+        const { count } = await prisma.shiftSwapRequest.updateMany({
+            where: { uuid: input.swapRequestUuid, status: "PENDING" },
             data: {
                 status: input.approved ? "APPROVED" : "REJECTED",
                 managerApproved: input.approved,
@@ -353,6 +376,10 @@ export class ShiftManagementService {
                 respondedAt: new Date(),
             },
         });
+        if (count === 0) {
+            throw new Error("SWAP_NOT_PENDING");
+        }
+        const swapRequest = await prisma.shiftSwapRequest.findUniqueOrThrow({ where: { uuid: input.swapRequestUuid } });
 
         logWithContext("info", "[Shift] Swap request responded", {
             swapRequestUuid: input.swapRequestUuid,

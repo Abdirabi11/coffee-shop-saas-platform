@@ -1,5 +1,26 @@
 import type { Request, Response } from "express";
 import { OrderAttributionService } from "../../services/staff/OrderAttribution.service.ts";
+import { RoleAssignmentError } from "../../domain/auth/roleHierarchy.ts";
+import { staffRecordScope } from "../../domain/auth/staffAccess.ts";
+
+const ATTRIBUTION_ERRORS: Record<string, number> = {
+    VALIDATION_ERROR: 400,
+    NOT_STAFF_AT_STORE: 400,
+    ORDER_NOT_FOUND: 404,
+    ALREADY_ATTRIBUTED: 409,
+};
+
+function attributionError(res: Response, error: any) {
+    if (error instanceof RoleAssignmentError) {
+        return res.status(error.status).json({ error: error.code });
+    }
+    const status = ATTRIBUTION_ERRORS[error.message];
+    if (status) return res.status(status).json({ error: error.message });
+    return res.status(500).json({
+        error: "INTERNAL_SERVER_ERROR",
+        message: error.message,
+    });
+}
 
 export class OrderAttributionController {
   
@@ -7,9 +28,10 @@ export class OrderAttributionController {
     static async attributeOrder(req: Request, res: Response) {
         try {
             const { orderUuid } = req.params;
-            const { takenBy, preparedBy, servedBy } = req.body;
+            const { takenBy, preparedBy, servedBy } = req.body ?? {};
 
             const order = await OrderAttributionService.attributeOrder({
+                tenantUuid: req.tenant!.uuid,
                 orderUuid,
                 takenBy,
                 preparedBy,
@@ -22,10 +44,7 @@ export class OrderAttributionController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return attributionError(res, error);
         }
     }
 
@@ -36,6 +55,7 @@ export class OrderAttributionController {
             const userUuid = req.user!.userUuid;
 
             const order = await OrderAttributionService.setTakenBy({
+                tenantUuid: req.tenant!.uuid,
                 orderUuid,
                 userUuid,
             });
@@ -46,10 +66,7 @@ export class OrderAttributionController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return attributionError(res, error);
         }
     }
 
@@ -57,7 +74,7 @@ export class OrderAttributionController {
     static async addPreparedBy(req: Request, res: Response) {
         try {
             const { orderUuid } = req.params;
-            const { userUuid } = req.body;
+            const { userUuid } = req.body ?? {};
 
             if (!userUuid) {
                 return res.status(400).json({
@@ -67,6 +84,7 @@ export class OrderAttributionController {
             };
 
             const order = await OrderAttributionService.addPreparedBy({
+                tenantUuid: req.tenant!.uuid,
                 orderUuid,
                 userUuid,
             });
@@ -77,10 +95,7 @@ export class OrderAttributionController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return attributionError(res, error);
         }
     }
 
@@ -91,6 +106,7 @@ export class OrderAttributionController {
             const userUuid = req.user!.userUuid;
 
             const order = await OrderAttributionService.setServedBy({
+                tenantUuid: req.tenant!.uuid,
                 orderUuid,
                 userUuid,
             });
@@ -101,10 +117,7 @@ export class OrderAttributionController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return attributionError(res, error);
         }
     }
 
@@ -121,6 +134,9 @@ export class OrderAttributionController {
                 });
             }
 
+            // The user themselves, tenant admins, or reports.view at the store
+            await staffRecordScope(req, userUuid, { permissions: ["reports.view"], storeUuid });
+
             const stats = await OrderAttributionService.getStaffOrderStats({
                 userUuid,
                 storeUuid: storeUuid as string,
@@ -134,10 +150,7 @@ export class OrderAttributionController {
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return attributionError(res, error);
         }
     }
 

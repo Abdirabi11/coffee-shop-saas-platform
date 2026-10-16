@@ -2,28 +2,9 @@ import type { Request, Response } from "express";
 import { TimeEntryService } from "../../services/staff/TimeEntry.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { findStoreInTenant } from "../../middlewares/auth.middleware.ts";
-import { PermissionManagementService } from "../../services/staff/PermissionManagement.service.ts";
-import { RoleAssignmentError, callerTenantRank, findTenantMember } from "../../domain/auth/roleHierarchy.ts";
+import { RoleAssignmentError } from "../../domain/auth/roleHierarchy.ts";
+import { staffRecordScope } from "../../domain/auth/staffAccess.ts";
 import prisma from "../../config/prisma.ts";
-
-const TENANT_ADMIN_RANK = 2;
-
-// Stores whose time entries for this user someone else might be allowed to
-// see: where the user has entries, plus where they're assigned
-async function storesWithEntriesOrAccess(tenantUuid: string, userUuid: string): Promise<string[]> {
-    const [entries, assignments] = await Promise.all([
-        prisma.timeEntry.findMany({ where: { tenantUuid, userUuid }, distinct: ["storeUuid"], select: { storeUuid: true } }),
-        prisma.userStore.findMany({ where: { tenantUuid, userUuid }, select: { storeUuid: true } }),
-    ]);
-    return [...new Set([...entries, ...assignments].map((r) => r.storeUuid))];
-}
-
-async function canReadTimeEntriesAt(userUuid: string, storeUuid: string): Promise<boolean> {
-    for (const permissionSlug of ["time_entry.read", "payroll.read"]) {
-        if (await PermissionManagementService.hasPermission({ userUuid, storeUuid, permissionSlug })) return true;
-    }
-    return false;
-}
 
 // Employees clock and break only themselves: the user is always the
 // authenticated caller. A body userUuid naming someone else is rejected
@@ -224,32 +205,17 @@ export class TimeEntryController {
                 });
             };
 
-            // Target must be a member of this tenant (404 otherwise)
-            await findTenantMember(req, { userUuid });
-            const isSelf = userUuid === req.user!.userUuid;
-            const isTenantAdmin = callerTenantRank(req) >= TENANT_ADMIN_RANK;
-
-            let stores: string[] | undefined;
-            if (typeof storeUuid === "string" && storeUuid) {
-                if (!(await findStoreInTenant(req, storeUuid))) {
-                    return res.status(404).json({ error: "STORE_NOT_FOUND", message: "Store not found" });
-                }
-                stores = [storeUuid];
-            }
-
-            // Others see only entries at stores where they hold
-            // time_entry.read or payroll.read; never the pay
-            if (!isSelf && !isTenantAdmin) {
-                const candidates = stores ?? await storesWithEntriesOrAccess(tenantUuid, userUuid);
-                const allowed: string[] = [];
-                for (const candidate of candidates) {
-                    if (await canReadTimeEntriesAt(req.user!.userUuid, candidate)) allowed.push(candidate);
-                }
-                if (allowed.length === 0) {
-                    return res.status(403).json({ error: "FORBIDDEN", message: "Insufficient permissions" });
-                }
-                stores = allowed;
-            }
+            // Tenant member; the user themselves and tenant admins see every
+            // store and the pay, others only stores where they hold
+            // time_entry.read or payroll.read (also stores the user has
+            // entries at), never the pay
+            const { stores, sensitive } = await staffRecordScope(req, userUuid, {
+                permissions: ["time_entry.read", "payroll.read"],
+                storeUuid,
+                extraStores: async () => (await prisma.timeEntry.findMany({
+                    where: { tenantUuid, userUuid }, distinct: ["storeUuid"], select: { storeUuid: true },
+                })).map((e) => e.storeUuid),
+            });
 
             const entries = await TimeEntryService.getUserTimeEntries({
                 tenantUuid,
@@ -257,7 +223,7 @@ export class TimeEntryController {
                 periodStart: from,
                 periodEnd: to,
                 storeUuids: stores,
-                includePay: isSelf || isTenantAdmin,
+                includePay: sensitive,
             });
 
             return res.status(200).json({

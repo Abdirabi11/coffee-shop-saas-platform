@@ -181,33 +181,49 @@ export class TipsAndCommissionService {
         }
     }
 
+    // CALCULATED -> DISTRIBUTED once; pays out that pool's pending shares
     static async distributeTips(input: {
+        tenantUuid: string;
         tipPoolUuid: string;
         distributedBy: string;
         paymentMethod: string;
     }) {
-        // Update all distributions to PAID
-        await prisma.tipDistribution.updateMany({
-            where: {
-                tipPoolUuid: input.tipPoolUuid,
-                payoutStatus: "PENDING",
-            },
-            data: {
-                payoutStatus: "PAID",
-                paidAt: new Date(),
-                paidBy: input.distributedBy,
-                paymentMethod: input.paymentMethod,
-            },
+        const existing = await prisma.tipPool.findFirst({
+            where: { uuid: input.tipPoolUuid, tenantUuid: input.tenantUuid },
+            select: { uuid: true },
         });
+        if (!existing) {
+            throw new Error("TIP_POOL_NOT_FOUND");
+        }
 
-        // Update pool status
-        const tipPool = await prisma.tipPool.update({
-            where: { uuid: input.tipPoolUuid },
-            data: {
-                status: "DISTRIBUTED",
-                distributedAt: new Date(),
-                distributedBy: input.distributedBy,
-            },
+        const tipPool = await prisma.$transaction(async (tx) => {
+            const { count } = await tx.tipPool.updateMany({
+                where: { uuid: input.tipPoolUuid, tenantUuid: input.tenantUuid, status: "CALCULATED" },
+                data: {
+                    status: "DISTRIBUTED",
+                    distributedAt: new Date(),
+                    distributedBy: input.distributedBy,
+                },
+            });
+            if (count === 0) {
+                throw new Error("TIP_POOL_NOT_CALCULATED");
+            }
+
+            // Update all distributions to PAID
+            await tx.tipDistribution.updateMany({
+                where: {
+                    tipPoolUuid: input.tipPoolUuid,
+                    payoutStatus: "PENDING",
+                },
+                data: {
+                    payoutStatus: "PAID",
+                    paidAt: new Date(),
+                    paidBy: input.distributedBy,
+                    paymentMethod: input.paymentMethod,
+                },
+            });
+
+            return tx.tipPool.findUniqueOrThrow({ where: { uuid: input.tipPoolUuid } });
         });
 
         logWithContext("info", "[Tips] Tips distributed", {

@@ -43,7 +43,6 @@ export class CurrencyConversionService {
         }
     
         try {
-            const axios = require("axios");
             const response = await axios.get(
                 "https://api.exchangerate-api.com/v4/latest/USD"
             );

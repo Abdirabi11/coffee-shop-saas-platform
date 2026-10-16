@@ -1,6 +1,15 @@
 import type { Request, Response } from "express";
 import { ShiftManagementService } from "../../services/staff/ShiftManagement.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { RoleAssignmentError } from "../../domain/auth/roleHierarchy.ts";
+import { staffRecordScope } from "../../domain/auth/staffAccess.ts";
+
+const SWAP_ERRORS: Record<string, number> = {
+    VALIDATION_ERROR: 400,
+    SWAP_REQUEST_NOT_FOUND: 404,
+    SWAP_SELF_APPROVE: 403,
+    SWAP_NOT_PENDING: 409,
+};
 
 
 export class ShiftManagementController {
@@ -93,11 +102,21 @@ export class ShiftManagementController {
     static async getUserShifts(req: Request, res: Response) {
         try {
             const { userUuid } = req.params;
-            const { daysAhead } = req.query;
+            const { daysAhead, storeUuid } = req.query;
+
+            // Tenant member; the user themselves and tenant admins see every
+            // store, others only stores where they hold shift.read/manage
+            const { stores } = await staffRecordScope(req, userUuid, {
+                permissions: ["shift.read", "shift.manage"],
+                storeUuid,
+            });
+            const days = daysAhead ? parseInt(daysAhead as string) : 7;
 
             const shifts = await ShiftManagementService.getUserShifts({
+                tenantUuid: req.tenant!.uuid,
                 userUuid,
-                daysAhead: daysAhead ? parseInt(daysAhead as string) : 7,
+                daysAhead: Number.isFinite(days) ? Math.min(Math.max(days, 1), 90) : 7,
+                storeUuids: stores,
             });
 
             return res.status(200).json({
@@ -106,6 +125,9 @@ export class ShiftManagementController {
             });
 
         } catch (error: any) {
+            if (error instanceof RoleAssignmentError) {
+                return res.status(error.status).json({ error: error.code });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -204,9 +226,13 @@ export class ShiftManagementController {
     static async respondToSwap(req: Request, res: Response) {
         try {
             const { swapRequestUuid } = req.params;
-            const { approved, notes } = req.body;
+            const { approved, notes } = req.body ?? {};
+            if (typeof approved !== "boolean") {
+                throw new Error("VALIDATION_ERROR");
+            }
 
             const swapRequest = await ShiftManagementService.respondToShiftSwap({
+                tenantUuid: req.tenant!.uuid,
                 swapRequestUuid,
                 managerUuid: req.user!.userUuid,
                 approved,
@@ -219,6 +245,8 @@ export class ShiftManagementController {
             });
 
         } catch (error: any) {
+            const status = SWAP_ERRORS[error.message];
+            if (status) return res.status(status).json({ error: error.message });
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,

@@ -82,9 +82,9 @@ export class BreakEnforcementService {
         return policies;
     }
 
-    static async checkBreakRequirement(timeEntryUuid: string) {
-        const timeEntry = await prisma.timeEntry.findUnique({
-            where: { uuid: timeEntryUuid },
+    static async checkBreakRequirement(tenantUuid: string, timeEntryUuid: string) {
+        const timeEntry = await prisma.timeEntry.findFirst({
+            where: { uuid: timeEntryUuid, tenantUuid },
             include: {
                 breakEntries: true,
             },
@@ -245,7 +245,7 @@ export class BreakEnforcementService {
         };
 
         for (const entry of activeEntries) {
-            const check = await this.checkBreakRequirement(entry.uuid);
+            const check = await this.checkBreakRequirement(entry.tenantUuid, entry.uuid);
 
             // Send reminders for upcoming required breaks
             for (const required of check.requiredBreaks) {
@@ -286,18 +286,34 @@ export class BreakEnforcementService {
         return results;
     }
 
+    // BreakViolation has no tenantUuid: its tenant is its store's. Nobody
+    // signs off their own violation.
+    private static async findViolation(tenantUuid: string, violationUuid: string, actorUuid: string) {
+        const violation = await prisma.breakViolation.findFirst({
+            where: { uuid: violationUuid, store: { tenantUuid } },
+            select: { userUuid: true },
+        });
+        if (!violation) throw new Error("VIOLATION_NOT_FOUND");
+        if (violation.userUuid === actorUuid) throw new Error("VIOLATION_SELF_REVIEW");
+    }
+
     static async acknowledgeViolation(input: {
+        tenantUuid: string;
         violationUuid: string;
         acknowledgedBy: string;
     }) {
-        const violation = await prisma.breakViolation.update({
-            where: { uuid: input.violationUuid },
+        await this.findViolation(input.tenantUuid, input.violationUuid, input.acknowledgedBy);
+
+        const { count } = await prisma.breakViolation.updateMany({
+            where: { uuid: input.violationUuid, acknowledged: false },
             data: {
                 acknowledged: true,
                 acknowledgedBy: input.acknowledgedBy,
                 acknowledgedAt: new Date(),
             },
         });
+        if (count === 0) throw new Error("VIOLATION_ALREADY_ACKNOWLEDGED");
+        const violation = await prisma.breakViolation.findUniqueOrThrow({ where: { uuid: input.violationUuid } });
 
         logWithContext("info", "[BreakEnforcement] Violation acknowledged", {
             violationUuid: input.violationUuid,
@@ -308,18 +324,23 @@ export class BreakEnforcementService {
     }
 
     static async waiveViolation(input: {
+        tenantUuid: string;
         violationUuid: string;
         waivedBy: string;
         reason: string;
     }) {
-        const violation = await prisma.breakViolation.update({
-            where: { uuid: input.violationUuid },
+        await this.findViolation(input.tenantUuid, input.violationUuid, input.waivedBy);
+
+        const { count } = await prisma.breakViolation.updateMany({
+            where: { uuid: input.violationUuid, waived: false },
             data: {
                 waived: true,
                 waivedBy: input.waivedBy,
                 waivedReason: input.reason,
             },
         });
+        if (count === 0) throw new Error("VIOLATION_ALREADY_WAIVED");
+        const violation = await prisma.breakViolation.findUniqueOrThrow({ where: { uuid: input.violationUuid } });
 
         logWithContext("info", "[BreakEnforcement] Violation waived", {
             violationUuid: input.violationUuid,

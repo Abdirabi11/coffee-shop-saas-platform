@@ -95,6 +95,8 @@ router.get("/time-entry/user/:userUuid", TimeEntryController.getUserTimeEntries)
 // Staff record routes check roles and permissions at the record's own store
 // (storeOf.record), never a client-supplied storeUuid
 const SUPERVISOR_ROLES = ["SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN"];
+const MANAGER_ROLES = ["MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN"];
+const STAFF_ROLES = ["CASHIER", "BARISTA", "KITCHEN_STAFF", "STAFF", ...SUPERVISOR_ROLES];
 
 router.post(
     "/time-entry/:timeEntryUuid/approve",
@@ -122,6 +124,10 @@ router.get(
   ShiftManagementController.getShiftCoverage
 );
  
+// Per-user records (shifts, tips, commission, order stats; time entries
+// above): access is checked in the handler (staffRecordScope): tenant
+// member; the user themselves, a tenant admin, or the read permission at the
+// stores involved. Never a client-chosen store alone.
 router.get("/shifts/user/:userUuid", ShiftManagementController.getUserShifts);
  
 router.patch(
@@ -140,7 +146,7 @@ router.post("/shifts/:shiftUuid/swap-request", ShiftManagementController.request
  
 router.post(
   "/shifts/swap/:swapRequestUuid/respond",
-  checkStoreRole(["STORE_MANAGER", "SHIFT_SUPERVISOR"]),
+  checkRole(SUPERVISOR_ROLES, storeOf.shiftSwap()),
   ShiftManagementController.respondToSwap
 );
  
@@ -232,7 +238,7 @@ router.post(
  
 router.post(
   "/tips/:tipPoolUuid/distribute",
-  checkStoreRole(["STORE_MANAGER"]),
+  checkRole(MANAGER_ROLES, storeOf.record("tipPool", "tipPoolUuid")),
   TipsAndCommissionController.distributeTips
 );
  
@@ -296,6 +302,7 @@ router.post(
   BreakEnforcementController.createStandardPolicies
 );
  
+// The time entry's owner, or a supervisor at its store (checked in the handler)
 router.get("/break-enforcement/check/:timeEntryUuid", BreakEnforcementController.checkBreakRequirement);
  
 router.get(
@@ -306,22 +313,31 @@ router.get(
  
 router.post(
   "/break-enforcement/violations/:violationUuid/acknowledge",
-  checkStoreRole(["STORE_MANAGER", "SHIFT_SUPERVISOR"]),
+  checkRole(SUPERVISOR_ROLES, storeOf.breakViolation()),
   BreakEnforcementController.acknowledgeViolation
 );
  
 router.post(
   "/break-enforcement/violations/:violationUuid/waive",
-  checkStoreRole(["STORE_MANAGER"]),
+  checkRole(MANAGER_ROLES, storeOf.breakViolation()),
   BreakEnforcementController.waiveViolation
 );
  
 // ─── ORDER ATTRIBUTION
  
-router.post("/orders/:orderUuid/attribution", OrderAttributionController.attributeOrder);
-router.post("/orders/:orderUuid/taken-by", OrderAttributionController.setTakenBy);
-router.post("/orders/:orderUuid/prepared-by", OrderAttributionController.addPreparedBy);
-router.post("/orders/:orderUuid/served-by", OrderAttributionController.setServedBy);
+// Staff roles at the order's own store; setting all three (and replacing
+// someone else's credit) is for supervisors. Named users must be staff there.
+// "STAFF" is also the tenant role every member (customers too) holds, so the
+// self-attribution routes also need an actual assignment at the order's store
+// (checkRole sets req.storeRole only then).
+const orderStore = storeOf.order();
+const assignedAtOrderStore: express.RequestHandler = (req, res, next) =>
+    req.storeRole ? next() : res.status(403).json({ message: "Forbidden", error: "INSUFFICIENT_ROLE" });
+const orderStaff = [checkRole(STAFF_ROLES, orderStore), assignedAtOrderStore];
+router.post("/orders/:orderUuid/attribution", checkRole(SUPERVISOR_ROLES, orderStore), OrderAttributionController.attributeOrder);
+router.post("/orders/:orderUuid/taken-by", ...orderStaff, OrderAttributionController.setTakenBy);
+router.post("/orders/:orderUuid/prepared-by", ...orderStaff, OrderAttributionController.addPreparedBy);
+router.post("/orders/:orderUuid/served-by", ...orderStaff, OrderAttributionController.setServedBy);
  
 router.get("/orders/stats/:userUuid", OrderAttributionController.getStaffOrderStats);
  

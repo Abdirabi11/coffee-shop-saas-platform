@@ -30,7 +30,9 @@ export class WebhookReplayService {
         
         try {
             // Mock request and replay
-            const PaymentWebhookController = require("@/controllers/payment/webhook/PaymentWebhook.controller");
+            // Lazy ES-module import (this file is imported by the controller's
+            // dependencies; there is no require in the ES-module build)
+            const { PaymentWebhookController } = await import("../../controllers/payments/Paymentwebhook.controller.ts");
             
             const mockReq = {
                 body: webhook.payload,
@@ -47,7 +49,7 @@ export class WebhookReplayService {
                 }),
             };
         
-            await PaymentWebhookController.PaymentWebhookController.handleStripe(mockReq as any, mockRes as any);
+            await PaymentWebhookController.handleStripe(mockReq as any, mockRes as any);
     
             // Mark as success
             await prisma.webhookReplay.update({

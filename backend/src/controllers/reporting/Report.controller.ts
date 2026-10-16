@@ -1,9 +1,28 @@
 import { Request, Response } from "express";
-import { createReadStream } from "fs";
+import fs from "node:fs";
 import path from "path";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { ReportGenerationService } from "../../services/reporting/ReportGeneration.service.ts";
+
+// Stream a generated report, then delete the temp file. "close" fires after
+// the download finishes or the client goes away. (The old cleanup used
+// CommonJS require, which doesn't exist in the ES-module build: it threw
+// inside the stream handler and crashed the process.)
+function sendReportFile(res: Response, filePath: string, fileName: string, contentType: string) {
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", (error) => {
+        logWithContext("error", "[Report] Report file stream failed", { error: error.message });
+        if (!res.headersSent) res.status(500).json({ error: "INTERNAL_SERVER_ERROR", message: "Failed to send report" });
+        else res.destroy(error);
+    });
+    stream.on("close", () => {
+        fs.unlink(filePath, () => {});
+    });
+    stream.pipe(res);
+}
 
 export class ReportController {
   
@@ -39,22 +58,7 @@ export class ReportController {
                 format: format || "CSV",
             });
         
-            // Stream file to client
-            const fileStream = createReadStream(result.filePath);
-            const fileName = result.fileName;
-        
-            res.setHeader("Content-Type", format === "PDF" ? "application/pdf" : "text/csv");
-            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    
-            fileStream.pipe(res);
-
-            // Clean up file after sending
-            fileStream.on("end", () => {
-                const fs = require("fs");
-                fs.unlink(result.filePath, (err: any) => {
-                    if (err) console.error("Failed to delete temp file:", err);
-                });
-            });
+            return sendReportFile(res, result.filePath, result.fileName, format === "PDF" ? "application/pdf" : "text/csv");
         } catch (error: any) {
             logWithContext("error", "[Report] Failed to generate sales report", {
                 traceId,
@@ -97,20 +101,7 @@ export class ReportController {
                 tenantUuid,
             });
 
-            // Stream file
-            const fileStream = createReadStream(result.filePath);
-
-            res.setHeader("Content-Type", format === "PDF" ? "application/pdf" : "text/csv");
-            res.setHeader("Content-Disposition", `attachment; filename="${result.fileName}"`);
-
-            fileStream.pipe(res);
-
-            fileStream.on("end", () => {
-                const fs = require("fs");
-                fs.unlink(result.filePath, (err: any) => {
-                    if (err) console.error("Failed to delete temp file:", err);
-                });
-            });
+            return sendReportFile(res, result.filePath, result.fileName, format === "PDF" ? "application/pdf" : "text/csv");
 
         } catch (error: any) {
             logWithContext("error", "[Report] Failed to generate product report", {

@@ -129,11 +129,31 @@ export const storeOf = {
         });
         return drop?.cashDrawer.storeUuid ?? null;
     },
+    // ShiftSwapRequest has no tenant/store columns: they're its shift's
+    shiftSwap: (param = "swapRequestUuid"): StoreResolver => async (req) => {
+        const uuid = stringParam(req.params?.[param]);
+        if (!uuid || !req.tenant) return null;
+        const swap = await prisma.shiftSwapRequest.findFirst({
+            where: { uuid, shift: { tenantUuid: req.tenant.uuid } },
+            select: { shift: { select: { storeUuid: true } } },
+        });
+        return swap?.shift.storeUuid ?? null;
+    },
+    // BreakViolation has no tenantUuid: its tenant is its store's
+    breakViolation: (param = "violationUuid"): StoreResolver => async (req) => {
+        const uuid = stringParam(req.params?.[param]);
+        if (!uuid || !req.tenant) return null;
+        const violation = await prisma.breakViolation.findFirst({
+            where: { uuid, store: { tenantUuid: req.tenant.uuid } },
+            select: { storeUuid: true },
+        });
+        return violation?.storeUuid ?? null;
+    },
     // Any tenant-scoped model with uuid/tenantUuid/storeUuid columns
     record: (
         model:
             | "cashDrawer" | "dailyReconciliation" | "product" | "category" | "optionGroup"
-            | "shift" | "timeEntry" | "staffApprovalRequest",
+            | "shift" | "timeEntry" | "staffApprovalRequest" | "tipPool",
         param: string
     ): StoreResolver => async (req) => {
         const uuid = stringParam(req.params?.[param]);

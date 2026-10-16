@@ -1,5 +1,24 @@
 import type { Request, Response } from "express";
 import { TipsAndCommissionService } from "../../services/staff/TipsAndCommission.service.ts";
+import { RoleAssignmentError } from "../../domain/auth/roleHierarchy.ts";
+import { staffRecordScope } from "../../domain/auth/staffAccess.ts";
+
+const TIP_ERRORS: Record<string, number> = {
+    TIP_POOL_NOT_FOUND: 404,
+    TIP_POOL_NOT_CALCULATED: 409,
+};
+
+// Tips and commission are pay: the user themselves, tenant admins, or
+// payroll.read at the named store (which must be in the tenant)
+function summaryError(res: Response, error: any) {
+    if (error instanceof RoleAssignmentError) {
+        return res.status(error.status).json({ error: error.code });
+    }
+    return res.status(500).json({
+        error: "INTERNAL_SERVER_ERROR",
+        message: error.message,
+    });
+}
 
 
 export class TipsAndCommissionController{
@@ -70,9 +89,10 @@ export class TipsAndCommissionController{
     static async distributeTips(req: Request, res: Response) {
         try {
             const { tipPoolUuid } = req.params;
-            const { paymentMethod } = req.body;
+            const { paymentMethod } = req.body ?? {};
 
             const tipPool = await TipsAndCommissionService.distributeTips({
+                tenantUuid: req.tenant!.uuid,
                 tipPoolUuid,
                 distributedBy: req.user!.userUuid,
                 paymentMethod: paymentMethod || "payroll",
@@ -84,6 +104,8 @@ export class TipsAndCommissionController{
             });
 
         } catch (error: any) {
+            const status = TIP_ERRORS[error.message];
+            if (status) return res.status(status).json({ error: error.message });
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -147,6 +169,8 @@ export class TipsAndCommissionController{
                 });
             }
 
+            await staffRecordScope(req, userUuid, { permissions: ["payroll.read"], storeUuid });
+
             const summary = await TipsAndCommissionService.getStaffTipSummary({
                 userUuid,
                 storeUuid: storeUuid as string,
@@ -160,10 +184,7 @@ export class TipsAndCommissionController{
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return summaryError(res, error);
         }
     }
 
@@ -180,6 +201,8 @@ export class TipsAndCommissionController{
                 });
             };
 
+            await staffRecordScope(req, userUuid, { permissions: ["payroll.read"], storeUuid });
+
             const summary = await TipsAndCommissionService.getStaffCommissionSummary({
                 userUuid,
                 storeUuid: storeUuid as string,
@@ -193,10 +216,7 @@ export class TipsAndCommissionController{
             });
 
         } catch (error: any) {
-            return res.status(500).json({
-                error: "INTERNAL_SERVER_ERROR",
-                message: error.message,
-            });
+            return summaryError(res, error);
         }
     }
 }

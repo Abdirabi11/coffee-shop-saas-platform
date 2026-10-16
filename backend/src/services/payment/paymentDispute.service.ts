@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import Stripe from "stripe";
 
 export class PaymentDisputeService {
     static async createFromWebhook(input: {
@@ -285,7 +286,7 @@ export class PaymentDisputeService {
     ) {
         switch (provider) {
             case "STRIPE": {
-                const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+                const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
                 await stripe.disputes.update(disputeId, {
                     evidence: {
                         customer_name: evidence.customerName,
@@ -315,7 +316,7 @@ export class PaymentDisputeService {
     ) {
         switch (provider) {
             case "STRIPE": {
-                const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+                const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
                 await stripe.disputes.close(disputeId);
                 break;
             }

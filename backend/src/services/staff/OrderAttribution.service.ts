@@ -3,18 +3,47 @@ import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 
+// Attribution feeds commission (orders takenBy) and staff stats, so it is
+// tenant-scoped, names only active staff at the order's own store, and
+// nobody takes credit someone else already holds (supervisors reassign via
+// attributeOrder).
+async function findOrder(tenantUuid: string, orderUuid: string) {
+    const order = await prisma.order.findFirst({
+        where: { uuid: orderUuid, tenantUuid },
+        select: { uuid: true, storeUuid: true, takenBy: true, servedBy: true, preparedBy: true },
+    });
+    if (!order) throw new Error("ORDER_NOT_FOUND");
+    return order;
+}
+
+async function assertStaffAtStore(tenantUuid: string, storeUuid: string, userUuids: string[]) {
+    const unique = [...new Set(userUuids)];
+    if (unique.some((u) => typeof u !== "string" || !u)) throw new Error("VALIDATION_ERROR");
+    const staff = await prisma.userStore.count({
+        where: { tenantUuid, storeUuid, userUuid: { in: unique }, isActive: true },
+    });
+    if (staff !== unique.length) throw new Error("NOT_STAFF_AT_STORE");
+}
+
 export class OrderAttributionService{
     static async attributeOrder(input: {
+        tenantUuid: string;
         orderUuid: string;
         takenBy?: string;
         preparedBy?: string[];
         servedBy?: string;
     }) {
+        const existing = await findOrder(input.tenantUuid, input.orderUuid);
+        if (input.preparedBy !== undefined && !Array.isArray(input.preparedBy)) throw new Error("VALIDATION_ERROR");
+        const named = [input.takenBy, ...(input.preparedBy ?? []), input.servedBy].filter((u) => u !== undefined) as string[];
+        await assertStaffAtStore(input.tenantUuid, existing.storeUuid, named);
+
+        // Only the fields given change
         const order = await prisma.order.update({
             where: { uuid: input.orderUuid },
             data: {
                 takenBy: input.takenBy,
-                preparedBy: input.preparedBy || [],
+                preparedBy: input.preparedBy ? [...new Set(input.preparedBy)] : undefined,
                 servedBy: input.servedBy,
             },
         });
@@ -31,52 +60,67 @@ export class OrderAttributionService{
         return order;
     }
 
-    //Set order as taken by current user
+    //Set order as taken by current user (unless someone else already took it)
     static async setTakenBy(input: {
+        tenantUuid: string;
         orderUuid: string;
         userUuid: string;
     }) {
-        const order = await prisma.order.update({
-            where: { uuid: input.orderUuid },
-            data: {
-                takenBy: input.userUuid,
-                commissionableAmount: undefined, // Will be set when order completes
-            },
-        });
+        const existing = await findOrder(input.tenantUuid, input.orderUuid);
+        await assertStaffAtStore(input.tenantUuid, existing.storeUuid, [input.userUuid]);
 
-        return order;
+        const { count } = await prisma.order.updateMany({
+            where: {
+                uuid: input.orderUuid,
+                tenantUuid: input.tenantUuid,
+                OR: [{ takenBy: null }, { takenBy: input.userUuid }],
+            },
+            data: { takenBy: input.userUuid },
+        });
+        if (count === 0) throw new Error("ALREADY_ATTRIBUTED");
+
+        return prisma.order.findUniqueOrThrow({ where: { uuid: input.orderUuid } });
     }
 
     //Add staff to prepared by list
     static async addPreparedBy(input: {
+        tenantUuid: string;
         orderUuid: string;
         userUuid: string;
     }) {
-        const order = await prisma.order.findUnique({
-            where: { uuid: input.orderUuid },
-        });
+        const order = await findOrder(input.tenantUuid, input.orderUuid);
+        await assertStaffAtStore(input.tenantUuid, order.storeUuid, [input.userUuid]);
 
-        if (!order) {
-        throw new Error("ORDER_NOT_FOUND");
+        if (order.preparedBy.includes(input.userUuid)) {
+            return prisma.order.findUniqueOrThrow({ where: { uuid: input.orderUuid } });
         }
-
-        const preparedBy = [...order.preparedBy, input.userUuid];
 
         return prisma.order.update({
             where: { uuid: input.orderUuid },
-            data: { preparedBy },
+            data: { preparedBy: { push: input.userUuid } },
         });
     }
 
-    //Set order as served by
+    //Set order as served by current user (unless someone else already served it)
     static async setServedBy(input: {
+        tenantUuid: string;
         orderUuid: string;
         userUuid: string;
     }) {
-        return prisma.order.update({
-            where: { uuid: input.orderUuid },
+        const existing = await findOrder(input.tenantUuid, input.orderUuid);
+        await assertStaffAtStore(input.tenantUuid, existing.storeUuid, [input.userUuid]);
+
+        const { count } = await prisma.order.updateMany({
+            where: {
+                uuid: input.orderUuid,
+                tenantUuid: input.tenantUuid,
+                OR: [{ servedBy: null }, { servedBy: input.userUuid }],
+            },
             data: { servedBy: input.userUuid },
         });
+        if (count === 0) throw new Error("ALREADY_ATTRIBUTED");
+
+        return prisma.order.findUniqueOrThrow({ where: { uuid: input.orderUuid } });
     }
 
     //Get staff order statistics
