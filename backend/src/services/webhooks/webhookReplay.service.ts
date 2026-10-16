@@ -1,71 +1,73 @@
+import type { WebhookProvider } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
+import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+
+// Providers whose stored events can be replayed
+const REPLAYABLE: WebhookProvider[] = ["STRIPE"];
+
+function replayableProvider(provider: string): WebhookProvider {
+    const normalized = provider.toUpperCase() as WebhookProvider;
+    if (!REPLAYABLE.includes(normalized)) throw new Error(`UNSUPPORTED_PROVIDER: ${provider}`);
+    return normalized;
+}
 
 export class WebhookReplayService {
-    static async replayByEventId(provider: string, eventUuid: string) {
-        // Find webhook event
+    // eventId is the provider's own event id (e.g. Stripe's evt_...), as the
+    // WebhookEventLedger stores it in providerEventId
+    static async replayByEventId(provider: string, eventId: string) {
+        const webhookProvider = replayableProvider(provider);
+
         const webhook = await prisma.webhookEvent.findUnique({
             where: {
-                provider_eventUuid: {
-                    provider,
-                    eventUuid,
+                provider_providerEventId: {
+                    provider: webhookProvider,
+                    providerEventId: eventId,
                 },
             },
         });
-    
+
         if (!webhook) {
-            throw new Error("Webhook event not found");
+            throw new Error("WEBHOOK_EVENT_NOT_FOUND");
         }
-    
-        // Create replay record
+        // A live delivery is mid-flight: replaying now could apply it twice
+        if (webhook.status === "PROCESSING") {
+            throw new Error("WEBHOOK_EVENT_IN_PROGRESS");
+        }
+
         const replay = await prisma.webhookReplay.create({
             data: {
                 webhookEventUuid: webhook.uuid,
                 provider: webhook.provider,
-                eventUuid: webhook.eventUuid,
+                eventUuid: eventId,
                 eventType: webhook.eventType,
-                payload: webhook.payload,
+                payload: webhook.payload ?? {},
                 status: "PENDING",
             },
         });
-        
+
         try {
-            // Mock request and replay
-            // Lazy ES-module import (this file is imported by the controller's
-            // dependencies; there is no require in the ES-module build)
+            // Lazy ES-module import (the controller's dependencies import this file)
             const { PaymentWebhookController } = await import("../../controllers/payments/Paymentwebhook.controller.ts");
-            
-            const mockReq = {
-                body: webhook.payload,
-                headers: {
-                "x-replay-id": replay.uuid,
-                },
-                rawBody: Buffer.from(JSON.stringify(webhook.payload)),
-            };
-    
-            const mockRes = {
-                status: (code: number) => ({
-                    json: (data: any) => ({ code, data }),
-                    send: () => ({ code }),
-                }),
-            };
-        
-            await PaymentWebhookController.handleStripe(mockReq as any, mockRes as any);
-    
-            // Mark as success
-            await prisma.webhookReplay.update({
+            const result = await PaymentWebhookController.replayStripeEvent(webhook.payload, `replay_${replay.uuid}`);
+
+            const completed = await prisma.webhookReplay.update({
                 where: { uuid: replay.uuid },
                 data: {
                     status: "SUCCESS",
                     completedAt: new Date(),
                 },
             });
-    
-            console.log(`[WebhookReplay] Successfully replayed: ${eventId}`);
-            
-            return replay;
-              
+
+            logWithContext("info", "[WebhookReplay] Replayed", {
+                replayUuid: replay.uuid,
+                webhookEventUuid: webhook.uuid,
+                eventId,
+                outcome: result.status,
+            });
+
+            return completed;
+
         } catch (error: any) {
-            // Mark as failed
             await prisma.webhookReplay.update({
                 where: { uuid: replay.uuid },
                 data: {
@@ -74,9 +76,14 @@ export class WebhookReplayService {
                     completedAt: new Date(),
                 },
             });
-    
-            console.error(`[WebhookReplay] Failed to replay: ${eventId}`, error.message);
-            
+
+            logWithContext("error", "[WebhookReplay] Replay failed", {
+                replayUuid: replay.uuid,
+                webhookEventUuid: webhook.uuid,
+                eventId,
+                error: error.message,
+            });
+
             throw error;
         }
     }
@@ -90,19 +97,23 @@ export class WebhookReplayService {
         endDate: Date;
         eventType?: string;
     }) {
-        const webhooks= await prisma.webhookEvent.findMany({
+        const provider = replayableProvider(input.provider);
+
+        const webhooks = await prisma.webhookEvent.findMany({
             where: {
-                provider: input.provider,
+                provider,
+                providerEventId: { not: null },
                 ...(input.eventType && { eventType: input.eventType }),
                 createdAt: {
                     gte: input.startDate,
                     lte: input.endDate,
                 },
             },
+            select: { providerEventId: true },
             orderBy: { createdAt: "asc" },
         });
 
-        console.log(`[WebhookReplay] Replaying ${webhooks.length} webhooks`);
+        logWithContext("info", "[WebhookReplay] Replaying range", { provider, count: webhooks.length });
 
         const results = {
             total: webhooks.length,
@@ -110,16 +121,16 @@ export class WebhookReplayService {
             failed: 0,
         };
 
-        for(const webhook of webhooks) {
+        for (const webhook of webhooks) {
             try {
-                await this.replayByEventId(webhook.provider, webhook.eventId);
+                await this.replayByEventId(provider, webhook.providerEventId!);
                 results.success++;
-            } catch (error) {
+            } catch {
                 results.failed++;
             }
-        };
+        }
 
-        console.log(`[WebhookReplay] Completed: ${results.success} success, ${results.failed} failed`);
+        logWithContext("info", "[WebhookReplay] Range completed", { provider, ...results });
         return results;
     }
 
@@ -131,16 +142,16 @@ export class WebhookReplayService {
         status?: string;
         limit?: number;
     }) {
-        return prisma.webhookRepl.findMany({
+        return prisma.webhookReplay.findMany({
             where: {
-                ...(filters?.provider && { provider: filters.provider }),
+                ...(filters?.provider && { provider: filters.provider.toUpperCase() }),
                 ...(filters?.status && { status: filters.status as any }),
             },
             include: {
                 webhookEvent: true,
             },
             orderBy: { createdAt: "desc" },
-            take: filters?.limit || 50,
+            take: Math.min(filters?.limit || 50, 200),
         })
     }
 }

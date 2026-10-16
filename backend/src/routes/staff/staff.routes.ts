@@ -156,8 +156,11 @@ router.post(
 // storeOf.cashDrop), never a client-supplied storeUuid; the handlers then
 // limit non-supervisors to their own drawer. Opening uses the body storeUuid,
 // verified to be in the tenant, and always opens the caller's own drawer.
+// No "STAFF": that is also the tenant role every member (customers too)
+// holds, so it matched people with no assignment at the store. Every role
+// left is a store assignment, or a tenant admin.
 const DRAWER_ROLES = [
-    "CASHIER", "BARISTA", "KITCHEN_STAFF", "STAFF", "SHIFT_SUPERVISOR",
+    "CASHIER", "BARISTA", "KITCHEN_STAFF", "SHIFT_SUPERVISOR",
     "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN",
 ];
 const DROP_VERIFIER_ROLES = ["SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN"];

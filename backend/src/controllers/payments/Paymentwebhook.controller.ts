@@ -127,6 +127,21 @@ export class PaymentWebhookController {
         }
     }
 
+    // Admin replay of an event already verified and stored in the ledger
+    // (steps 3-4 only: the stored event has no raw bytes to re-verify, and
+    // claiming it again would just report a duplicate). Throws on failure.
+    static async replayStripeEvent(event: any, traceId: string) {
+        const provider: WebhookProvider = "STRIPE";
+        try {
+            const result = await PaymentWebhookController.processStripeEvent(event, traceId);
+            await WebhookEventLedger.complete(provider, event.id, result.status, result.detail);
+            return result;
+        } catch (error: any) {
+            await WebhookEventLedger.fail(provider, event.id, error.message).catch(() => {});
+            throw error;
+        }
+    }
+
     private static async processStripeEvent(
         event: any,
         traceId: string

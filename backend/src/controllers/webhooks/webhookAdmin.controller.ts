@@ -3,6 +3,13 @@ import prisma from "../../config/prisma.ts"
 import { WebhookDeadLetterQueue } from "../../services/webhooks/WebhookDeadLetterQueue.service.ts";
 import { WebhookReplayService } from "../../services/webhooks/webhookReplay.service.ts";
 
+function replayErrorStatus(message: string): number | undefined {
+    if (message === "WEBHOOK_EVENT_NOT_FOUND") return 404;
+    if (message === "WEBHOOK_EVENT_IN_PROGRESS") return 409;
+    if (message.startsWith("UNSUPPORTED_PROVIDER")) return 400;
+    return undefined;
+}
+
 export class WebhookAdminController {
 
     //GET /api/admin/webhooks/dlq
@@ -97,11 +104,11 @@ export class WebhookAdminController {
         }
     }
 
-    //POST /api/admin/webhooks/replay/:eventUuid
+    //POST /api/admin/webhooks/replay/:eventId
     static async replayWebhook(req: Request, res: Response) {
         try {
-            const { eventUuid } = req.params;
-            const { provider } = req.body;
+            const { eventId } = req.params;
+            const { provider } = req.body ?? {};
 
             if (!provider) {
                 return res.status(400).json({
@@ -110,7 +117,7 @@ export class WebhookAdminController {
                 });
             }
 
-            const replay = await WebhookReplayService.replayByEventId(provider, eventUuid);
+            const replay = await WebhookReplayService.replayByEventId(provider, eventId);
 
             return res.status(200).json({
                 success: true,
@@ -118,6 +125,8 @@ export class WebhookAdminController {
             });
 
         } catch (error: any) {
+            const status = replayErrorStatus(error.message);
+            if (status) return res.status(status).json({ error: error.message.split(":")[0] });
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
@@ -128,7 +137,7 @@ export class WebhookAdminController {
     //POST /api/admin/webhooks/replay/range
     static async replayRange(req: Request, res: Response) {
         try {
-            const { provider, startDate, endDate, eventType } = req.body;
+            const { provider, startDate, endDate, eventType } = req.body ?? {};
 
             if (!provider || !startDate || !endDate) {
                 return res.status(400).json({
@@ -137,10 +146,19 @@ export class WebhookAdminController {
                 });
             }
 
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+                return res.status(400).json({
+                    error: "VALIDATION_ERROR",
+                    message: "startDate and endDate must be valid dates, start before end",
+                });
+            }
+
             const results = await WebhookReplayService.replayByTimeRange({
                 provider,
-                startDate: new Date(startDate),
-                endDate: new Date(endDate),
+                startDate: start,
+                endDate: end,
                 eventType,
             });
 
@@ -150,6 +168,8 @@ export class WebhookAdminController {
             });
 
         } catch (error: any) {
+            const status = replayErrorStatus(error.message);
+            if (status) return res.status(status).json({ error: error.message.split(":")[0] });
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,
