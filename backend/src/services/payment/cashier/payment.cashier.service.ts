@@ -335,6 +335,16 @@ export class CashierPaymentService{
             if (!managerStore || !managerStore.isActive || !VOID_AUTHORIZED_ROLES.includes(managerStore.role)) {
                 throw new Error("INSUFFICIENT_ROLE_FOR_VOID");
             }
+
+            // And still a member of the business: someone removed before
+            // removal also ended store assignments still has an active one
+            const managerMembership = await prisma.tenantUser.findFirst({
+                where: { tenantUuid: payment.tenantUuid, userUuid: input.managerUuid, isActive: true },
+                select: { uuid: true },
+            });
+            if (!managerMembership) {
+                throw new Error("INSUFFICIENT_ROLE_FOR_VOID");
+            }
         }
 
         if (payment.status !== "COMPLETED") {

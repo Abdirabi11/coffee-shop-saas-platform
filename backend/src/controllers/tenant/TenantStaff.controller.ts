@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { AccessRevocationService } from "../../services/staff/AccessRevocation.service.ts";
 import { planLimitErrorResponse } from "../../services/billing/PlanLimit.service.ts";
 import prisma from "../../config/prisma.ts"
 import { TenantInvitationService } from "../../services/tenant/TenantInvitation.service.ts";
@@ -120,27 +121,17 @@ export class TenantStaffController {
             const target = await findTenantMember(req, { uuid: staffUuid });
             assertCanModifyTenantMember(req, target);
  
-            // Soft delete
-            const staff = await prisma.tenantUser.update({
-                where: { uuid: staffUuid, tenantUuid },
-                data: { isActive: false },
-                select: { userUuid: true },
+            // Membership, store access, open time entry and drawer, shifts,
+            // tokens and sockets, all at once
+            const revoked = await AccessRevocationService.revokeTenantAccess({
+                tenantUuid,
+                userUuid: target.userUuid,
+                revokedBy: actor.userUuid,
+                reason: "Removed from the business",
             });
- 
-            // Revoke all their sessions
-            await prisma.session.updateMany({
-                where: { userUuid: staff.userUuid, tenantUuid, status: "ACTIVE" },
-                data: {
-                    status: "REVOKED",
-                    revoked: true,
-                    revokedAt: new Date(),
-                    revokedBy: actor.userUuid,
-                    revokedReason: "Staff removed",
-                },
-            });
- 
+
             logWithContext("info", "[TenantStaff] Removed", { staffUuid, by: actor.userUuid });
-            return res.status(200).json({ success: true, message: "Staff member removed" });
+            return res.status(200).json({ success: true, message: "Staff member removed", revoked });
         } catch (error: any) {
             if (error instanceof RoleAssignmentError) return roleErrorResponse(res, error);
             logWithContext("error", "[TenantStaff] Remove failed", { error: error.message });

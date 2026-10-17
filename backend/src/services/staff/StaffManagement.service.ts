@@ -5,6 +5,7 @@ import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { invalidateCache, withCache } from "../../infrastructure/cache/cache.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { PlanLimitService } from "../billing/PlanLimit.service.ts";
+import { AccessRevocationService } from "./AccessRevocation.service.ts";
 
 export class StaffManagementService {
   
@@ -498,7 +499,15 @@ export class StaffManagementService {
             for (const us of userStores) {
                 if (us.user.pinHash) {
                     const isValid = await bcrypt.compare(input.pin, us.user.pinHash);
-                    if (isValid) {
+                    // Only current members of the business: someone removed
+                    // before removal also ended store assignments can still
+                    // have an active one (tenantUserUuid isn't always set on
+                    // assignments, so look the membership up directly)
+                    const member = isValid && await prisma.tenantUser.findFirst({
+                        where: { tenantUuid: us.tenantUuid, userUuid: us.userUuid, isActive: true },
+                        select: { uuid: true },
+                    });
+                    if (isValid && member) {
                         // Update last login
                         await prisma.user.update({
                             where: { uuid: us.userUuid },
@@ -569,6 +578,11 @@ export class StaffManagementService {
         MetricsService.increment("staff.pin.reset", 1);
     }
 
+    // Ends someone's employment at this tenant. Access goes through the
+    // shared revocation (memberships, store access, open time entry and
+    // drawer, shifts, tokens, sockets). The global User row is left alone:
+    // they may work for another tenant. No scheduler applies a future date,
+    // and access ends now, so the date can only be today or earlier.
     static async terminateStaff(input: {
         userUuid: string;
         tenantUuid: string;
@@ -576,49 +590,16 @@ export class StaffManagementService {
         reason?: string;
         terminatedBy: string;
     }) {
-    // Update user
-        await prisma.user.update({
-            where: { uuid: input.userUuid },
-            data: {
-                employmentStatus: "TERMINATED",
-                terminationDate: input.terminationDate || new Date(),
-            },
-        });
+        if (input.terminationDate && input.terminationDate.getTime() > Date.now()) {
+            throw new Error("TERMINATION_DATE_IN_FUTURE");
+        }
 
-        // Deactivate tenant relationship
-        await prisma.tenantUser.updateMany({
-            where: {
-                tenantUuid: input.tenantUuid,
-                userUuid: input.userUuid,
-            },
-            data: {
-                isActive: false,
-                endDate: new Date(),
-            },
-        });
-
-        // Deactivate all store access
-        await prisma.userStore.updateMany({
-            where: {
-                tenantUuid: input.tenantUuid,
-                userUuid: input.userUuid,
-            },
-            data: {
-                isActive: false,
-                endDate: new Date(),
-            },
-        });
-
-        // Cancel future shifts
-        await prisma.shift.updateMany({
-            where: {
-                userUuid: input.userUuid,
-                scheduledStart: { gte: new Date() },
-                status: "SCHEDULED",
-            },
-            data: {
-                status: "CANCELLED",
-            },
+        const result = await AccessRevocationService.revokeTenantAccess({
+            tenantUuid: input.tenantUuid,
+            userUuid: input.userUuid,
+            revokedBy: input.terminatedBy,
+            reason: input.reason ? `Terminated: ${input.reason}` : "Terminated",
+            endDate: input.terminationDate,
         });
 
         logWithContext("info", "[StaffManagement] Staff terminated", {
@@ -629,9 +610,7 @@ export class StaffManagementService {
 
         MetricsService.increment("staff.terminated", 1);
 
-        // Invalidate all caches
-        await invalidateCache(`staff:user:${input.userUuid}`);
-        await invalidateCache(`staff:tenant:${input.tenantUuid}`);
+        return result;
     }
 
 }

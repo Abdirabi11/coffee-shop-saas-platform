@@ -200,6 +200,23 @@ export class DashboardSocket {
       });
     });
 
+    // Someone lost access to a tenant (AccessRevocationService): drop every
+    // socket of theirs, matched on the identity verified at handshake (not
+    // room membership, so a socket still joining its rooms goes too). Their
+    // tokens were invalidated in the same change, so reconnecting fails.
+    EventBus.on("USER_ACCESS_REVOKED", async ({ userUuid }) => {
+      if (!userUuid) return;
+      const sockets = await this.io.fetchSockets();
+      let dropped = 0;
+      for (const socket of sockets) {
+        if ((socket.data.identity as SocketIdentity | undefined)?.userUuid === userUuid) {
+          socket.disconnect(true);
+          dropped++;
+        }
+      }
+      logWithContext("info", "[DashboardSocket] Disconnected revoked user", { userUuid, sockets: dropped });
+    });
+
     // Every status change (payment confirmed, cashier payment, staff moving
     // it to PREPARING/READY/COMPLETED, cancellation). Emitted after the
     // change commits.

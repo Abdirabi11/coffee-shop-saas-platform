@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
@@ -167,33 +168,7 @@ export class CashDrawerService{
                         throw new Error("DRAWER_NOT_OPEN");
                     }
 
-                    const cashIn = await tx.payment.aggregate({
-                        where: {
-                            drawerUuid: drawer.uuid,
-                            paymentMethod: "CASH",
-                            status: { in: ["COMPLETED", "PARTIALLY_REFUNDED"] },
-                        },
-                        _sum: { amount: true },
-                    });
-
-                    const partialRefunds = await tx.refund.aggregate({
-                        where: {
-                            status: "COMPLETED",
-                            payment: { drawerUuid: drawer.uuid, paymentMethod: "CASH", status: "PARTIALLY_REFUNDED" },
-                        },
-                        _sum: { amount: true },
-                    });
-
-                    const verifiedDrops = drawer.cashDrops
-                        .filter((d) => d.verifiedAt)
-                        .reduce((sum, d) => sum + d.amount, 0);
-                    const unverifiedDrops = drawer.cashDrops
-                        .filter((d) => !d.verifiedAt)
-                        .reduce((sum, d) => sum + d.amount, 0);
-
-                    const cashSales = cashIn._sum.amount || 0;
-                    const refunded = partialRefunds._sum.amount || 0;
-                    const expectedCash = drawer.startingCash + cashSales - refunded - verifiedDrops;
+                    const { cashSales, refunded, unverifiedDrops, expectedCash } = await this.expectedTotals(tx, drawer);
 
                     const variance = input.actualCash - expectedCash;
 
@@ -334,6 +309,108 @@ export class CashDrawerService{
             });
             throw error;
         }
+    }
+
+    // What a drawer should hold (see closeDrawer for the rules). Call with
+    // the drawer row locked; `cashDrops` must be the drawer's drops.
+    private static async expectedTotals(
+        tx: Prisma.TransactionClient,
+        drawer: { uuid: string; startingCash: number; cashDrops: Array<{ amount: number; verifiedAt: Date | null }> }
+    ) {
+        const cashIn = await tx.payment.aggregate({
+            where: {
+                drawerUuid: drawer.uuid,
+                paymentMethod: "CASH",
+                status: { in: ["COMPLETED", "PARTIALLY_REFUNDED"] },
+            },
+            _sum: { amount: true },
+        });
+
+        const partialRefunds = await tx.refund.aggregate({
+            where: {
+                status: "COMPLETED",
+                payment: { drawerUuid: drawer.uuid, paymentMethod: "CASH", status: "PARTIALLY_REFUNDED" },
+            },
+            _sum: { amount: true },
+        });
+
+        const verifiedDrops = drawer.cashDrops
+            .filter((d) => d.verifiedAt)
+            .reduce((sum, d) => sum + d.amount, 0);
+        const unverifiedDrops = drawer.cashDrops
+            .filter((d) => !d.verifiedAt)
+            .reduce((sum, d) => sum + d.amount, 0);
+
+        const cashSales = cashIn._sum.amount || 0;
+        const refunded = partialRefunds._sum.amount || 0;
+        const expectedCash = drawer.startingCash + cashSales - refunded - verifiedDrops;
+
+        return { cashSales, refunded, unverifiedDrops, expectedCash };
+    }
+
+    // Takes an OPEN drawer out of service without a count, when its owner
+    // loses access (AccessRevocationService). Nobody counted the cash, so it
+    // isn't CLOSED: it goes to RECONCILING with the expected amount and no
+    // actual/variance, and a CASH_VARIANCE request asks a manager to count
+    // it and sign it off (approveCashVariance). Payments stop linking to it
+    // because it is no longer OPEN. Runs in the caller's transaction, under
+    // the drawer's row lock like closeDrawer. Returns false if the drawer
+    // was no longer open.
+    static async autoClose(tx: Prisma.TransactionClient, input: {
+        tenantUuid: string;
+        drawerUuid: string;
+        closedBy: string;
+        reason: string;
+    }) {
+        await tx.$queryRaw`
+            SELECT 1 FROM "CashDrawer"
+            WHERE "uuid" = ${input.drawerUuid} AND "tenantUuid" = ${input.tenantUuid}
+            FOR UPDATE
+        `;
+        const drawer = await tx.cashDrawer.findFirst({
+            where: { uuid: input.drawerUuid, tenantUuid: input.tenantUuid, status: "OPEN" },
+            include: { cashDrops: true },
+        });
+        if (!drawer) return false;
+
+        const { cashSales, refunded, unverifiedDrops, expectedCash } = await this.expectedTotals(tx, drawer);
+        const note = `Auto-closed due to termination (${input.reason}): cash not counted`;
+
+        await tx.cashDrawer.update({
+            where: { uuid: drawer.uuid },
+            data: {
+                status: "RECONCILING",
+                closedAt: new Date(),
+                closedBy: input.closedBy,
+                expectedCash,
+                actualCash: null,
+                variance: null,
+                totalSales: cashSales,
+                cashSales,
+                refunds: refunded,
+                notes: drawer.notes ? `${drawer.notes}\n${note}` : note,
+            },
+        });
+
+        await tx.staffApprovalRequest.create({
+            data: {
+                tenantUuid: drawer.tenantUuid,
+                storeUuid: drawer.storeUuid,
+                requestedBy: input.closedBy,
+                approvalType: "CASH_VARIANCE",
+                requestData: {
+                    drawerUuid: drawer.uuid,
+                    reason: "TERMINATION_AUTO_CLOSE",
+                    drawerOwner: drawer.userUuid,
+                    expectedCash,
+                    actualCash: null,
+                    unverifiedDrops,
+                },
+                status: "PENDING",
+            },
+        });
+
+        return true;
     }
 
     //Cash drop (move excess cash to safe)

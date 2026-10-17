@@ -393,10 +393,15 @@ export class StaffManagementController {
 
             await assertCanModifyStaffMember(req, await findTenantMember(req, { userUuid }));
 
-            await StaffManagementService.terminateStaff({
+            const date = terminationDate ? new Date(terminationDate) : undefined;
+            if (date && Number.isNaN(date.getTime())) {
+                return res.status(400).json({ error: "INVALID_TERMINATION_DATE" });
+            }
+
+            const revoked = await StaffManagementService.terminateStaff({
                 userUuid,
                 tenantUuid,
-                terminationDate: terminationDate ? new Date(terminationDate) : undefined,
+                terminationDate: date,
                 reason,
                 terminatedBy: req.user!.userUuid,
             });
@@ -404,11 +409,18 @@ export class StaffManagementController {
             return res.status(200).json({
                 success: true,
                 message: "Staff terminated",
+                revoked,
             });
 
         } catch (error: any) {
             if (error instanceof RoleAssignmentError) {
                 return res.status(error.status).json({ error: error.code });
+            }
+            if (error.message === "TERMINATION_DATE_IN_FUTURE") {
+                return res.status(400).json({ error: error.message, message: "Termination takes effect now; a future date can't be scheduled" });
+            }
+            if (error.message === "STAFF_NOT_FOUND") {
+                return res.status(404).json({ error: error.message });
             }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",

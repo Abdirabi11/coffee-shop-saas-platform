@@ -1,4 +1,5 @@
 import dayjs from "dayjs";
+import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
@@ -222,50 +223,13 @@ export class TimeEntryService {
                 }
             }
 
-            // Calculate hours worked
-            const clockInTime = dayjs(timeEntry.clockInAt);
-            const clockOutTime = dayjs();
-            const hoursWorked = clockOutTime.diff(clockInTime, "hour", true);
-
-            // Calculate total break time
-            const breaks = await prisma.breakEntry.findMany({
-                where: { timeEntryUuid: timeEntry.uuid },
+            const { updated, hoursWorked, totalPay } = await this.closeEntry(prisma, timeEntry, {
+                at: new Date(),
+                deviceId: input.deviceId,
+                latitude: input.latitude,
+                longitude: input.longitude,
+                distanceFromStore,
             });
-
-            const totalBreakMinutes = breaks.reduce((sum, b) => {
-                if (!b.breakEnd) return sum;
-                return sum + dayjs(b.breakEnd).diff(dayjs(b.breakStart), "minute");
-            }, 0);
-
-            // Calculate pay
-            const payRate = timeEntry.payRate || 0;
-            const totalPay = Math.round(hoursWorked * payRate);
-
-            // Update time entry
-            const updated = await prisma.timeEntry.update({
-                where: { uuid: timeEntry.uuid },
-                data: {
-                    clockOutAt: new Date(),
-                    clockOutDevice: input.deviceId,
-                    clockOutLat: input.latitude,
-                    clockOutLng: input.longitude,
-                    clockOutDistanceM: distanceFromStore,
-                    hoursWorked: Number(hoursWorked.toFixed(2)),
-                    breakMinutes: totalBreakMinutes,
-                    totalPay,
-                },
-            });
-
-            // Update shift status
-            if (timeEntry.shift) {
-                await prisma.shift.update({
-                    where: { uuid: timeEntry.shift.uuid },
-                    data: {
-                        status: "COMPLETED",
-                        actualEnd: new Date(),
-                    },
-                });
-            }
 
             logWithContext("info", "[TimeEntry] Clock out successful", {
                 timeEntryUuid: timeEntry.uuid,
@@ -300,6 +264,75 @@ export class TimeEntryService {
 
             throw error;
         }
+    }
+
+    // Clock-out bookkeeping for an open entry: hours, breaks, pay, and the
+    // shift it belongs to. Shared by clockOut and by access revocation
+    // (removed staff are clocked out), which passes its transaction and an
+    // autoReason; that entry is flagged for approval rather than taken as
+    // the person's own clock-out. A break still open is ended at `at`.
+    static async closeEntry(
+        client: Prisma.TransactionClient,
+        timeEntry: { uuid: string; clockInAt: Date; payRate: number | null; shiftUuid: string | null },
+        data: {
+            at: Date;
+            deviceId?: string;
+            latitude?: number;
+            longitude?: number;
+            distanceFromStore?: number;
+            autoReason?: string;
+        }
+    ) {
+        // Calculate hours worked
+        const hoursWorked = dayjs(data.at).diff(dayjs(timeEntry.clockInAt), "hour", true);
+
+        await client.breakEntry.updateMany({
+            where: { timeEntryUuid: timeEntry.uuid, breakEnd: null },
+            data: { breakEnd: data.at },
+        });
+
+        // Calculate total break time
+        const breaks = await client.breakEntry.findMany({
+            where: { timeEntryUuid: timeEntry.uuid },
+        });
+
+        const totalBreakMinutes = breaks.reduce((sum, b) => {
+            if (!b.breakEnd) return sum;
+            return sum + dayjs(b.breakEnd).diff(dayjs(b.breakStart), "minute");
+        }, 0);
+
+        // Calculate pay
+        const payRate = timeEntry.payRate || 0;
+        const totalPay = Math.round(hoursWorked * payRate);
+
+        // Update time entry
+        const updated = await client.timeEntry.update({
+            where: { uuid: timeEntry.uuid },
+            data: {
+                clockOutAt: data.at,
+                clockOutDevice: data.deviceId ?? (data.autoReason ? "SYSTEM" : undefined),
+                clockOutLat: data.latitude,
+                clockOutLng: data.longitude,
+                clockOutDistanceM: data.distanceFromStore,
+                hoursWorked: Number(hoursWorked.toFixed(2)),
+                breakMinutes: totalBreakMinutes,
+                totalPay,
+                ...(data.autoReason && { requiresApproval: true, approvalReason: data.autoReason }),
+            },
+        });
+
+        // Update shift status
+        if (timeEntry.shiftUuid) {
+            await client.shift.update({
+                where: { uuid: timeEntry.shiftUuid },
+                data: {
+                    status: "COMPLETED",
+                    actualEnd: data.at,
+                },
+            });
+        }
+
+        return { updated, hoursWorked, totalPay };
     }
 
     static async startBreak(input: {
