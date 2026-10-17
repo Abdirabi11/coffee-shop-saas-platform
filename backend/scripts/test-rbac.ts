@@ -50,6 +50,8 @@ const { default: staffRoutes } = await import("../src/routes/staff/staff.routes.
 const { default: financialRoutes } = await import("../src/routes/payment/Financial.routes.ts");
 const { default: menuAdminRoutes } = await import("../src/routes/menu/menuAdmin.routes.ts");
 const { default: webhookAdminRoutes } = await import("../src/routes/webhooks/webhookAdmin.routes.ts");
+const { default: invitationRoutes } = await import("../src/routes/tenant/invitation.routes.ts");
+const { default: bcryptjs } = await import("bcryptjs");
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -410,6 +412,7 @@ async function main() {
     app.use("/api/financial", financialRoutes);
     app.use("/api/admin/menu", menuAdminRoutes);
     app.use("/api/admin/webhooks", webhookAdminRoutes);
+    app.use("/api/invitations", invitationRoutes);
     const server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -929,6 +932,82 @@ async function main() {
         });
         check("range route reachable (not taken as an event id)", `${range.status} ${range.body?.results?.failed >= 1 && range.body?.results?.success >= 1}`, "200 true");
         check("range with a bad date", (await call("POST", "/api/admin/webhooks/replay/range", t.superAdmin, { body: { provider: "stripe", startDate: "x", endDate: "y" } })).status, 400);
+
+        console.log("\n=== Accepting invitations (Phase 37) ===");
+        // Invitations are stored by token hash; the raw token is what the email carries
+        const invite = async (email: string, opts: { role?: "STAFF" | "REGIONAL_MANAGER"; stores?: string[]; expired?: boolean } = {}) => {
+            const raw = crypto.randomBytes(32).toString("hex");
+            await prisma.tenantInvitation.create({
+                data: {
+                    tenantUuid: ctx.tA.uuid,
+                    email,
+                    role: opts.role ?? "STAFF",
+                    token: crypto.createHash("sha256").update(raw).digest("hex"),
+                    invitedBy: ctx.users.ownerA.uuid,
+                    expiresAt: new Date(Date.now() + (opts.expired ? -1 : 1) * 86_400_000),
+                    storeAccess: opts.stores ?? [ctx.a1.uuid],
+                },
+            });
+            return raw;
+        };
+        // Each request from its own address, so the per-IP limiter doesn't
+        // interfere with these checks
+        let inviteIp = 0;
+        const accept = async (path: string, body: unknown, bearer?: string) => {
+            const res = await fetch(`${base}/api/invitations${path}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": `10.37.0.${++inviteIp}`,
+                    ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+                },
+                body: JSON.stringify(body),
+            });
+            return { status: res.status, body: await res.json().catch(() => null) };
+        };
+        const newPhone = () => `+1777${crypto.randomInt(1_000_000, 9_999_999)}`;
+        const signup = (token: string, phoneNumber = newPhone()) =>
+            ({ token, firstName: "Invited", lastName: "Barista", phoneNumber, password: "Brew-Strong-42" });
+
+        const email1 = `invitee1-${runId}@rbac.test`;
+        const token1 = await invite(email1, { role: "REGIONAL_MANAGER" });
+        const accepted = await accept("/accept", signup(token1));
+        check("new account accepts", accepted.status, 201);
+        check("  ...response has no password hash", JSON.stringify(accepted.body).includes("passwordHash") || JSON.stringify(accepted.body).includes("$2"), false);
+        const invitee = await prisma.user.findUniqueOrThrow({ where: { email: email1 } });
+        check("  ...password stored hashed (bcrypt)", invitee.passwordHash?.startsWith("$2") === true && invitee.password === null, true);
+        check("  ...login hash check accepts it", await bcryptjs.compare("Brew-Strong-42", invitee.passwordHash!), true);
+        const inviteeMember = await prisma.tenantUser.findUniqueOrThrow({ where: { tenantUuid_userUuid: { tenantUuid: ctx.tA.uuid, userUuid: invitee.uuid } } });
+        check("  ...tenant membership with the invited role", inviteeMember.role, "REGIONAL_MANAGER");
+        const inviteeStore = await prisma.userStore.findUniqueOrThrow({ where: { userUuid_storeUuid: { userUuid: invitee.uuid, storeUuid: ctx.a1.uuid } } });
+        check("  ...store access in the tenant, matching store role", `${inviteeStore.tenantUuid === ctx.tA.uuid} ${inviteeStore.role}`, "true MANAGER");
+        check("  ...invitation marked accepted", (await prisma.tenantInvitation.findFirstOrThrow({ where: { email: email1 } })).status, "ACCEPTED");
+        check("same token again", (await accept("/accept", signup(token1))).body?.error, "INVALID_OR_EXPIRED_INVITATION");
+
+        check("expired invitation", (await accept("/accept", signup(await invite(`expired-${runId}@rbac.test`, { expired: true })))).body?.error, "INVALID_OR_EXPIRED_INVITATION");
+        check("malformed token", (await accept("/accept", signup("not-a-token"))).status, 400);
+        check("short password", (await accept("/accept", { ...signup(await invite(`weak-${runId}@rbac.test`)), password: "short" })).status, 400);
+        check("new account for an email that has one", (await accept("/accept", signup(await invite(email1)))).body?.error, "ACCOUNT_EXISTS");
+        check("new account with a taken phone number", (await accept("/accept", signup(await invite(`phone-${runId}@rbac.test`), invitee.phoneNumber))).body?.error, "PHONE_ALREADY_REGISTERED");
+
+        // Existing account, signed in
+        const existing = await prisma.user.create({
+            data: { phoneNumber: newPhone(), email: `existing-${runId}@rbac.test`, firstName: "Existing", lastName: "RBAC", globalRole: "CUSTOMER" },
+        });
+        const bearer = (who: { uuid: string; globalRole: any; tokenVersion: number }) =>
+            signAccessToken({ userUuid: who.uuid, role: who.globalRole, tenantUuid: ctx.tA.uuid, tokenVersion: who.tokenVersion });
+        const tokenExisting = await invite(existing.email!);
+        check("existing account, not signed in", (await accept("/accept/existing", { token: tokenExisting })).status, 401);
+        check("existing account, someone else signed in", (await accept("/accept/existing", { token: tokenExisting }, bearer(ctx.users.customerA))).body?.error, "EMAIL_MISMATCH");
+        check("  ...invitation still usable", (await prisma.tenantInvitation.findFirstOrThrow({ where: { email: existing.email! } })).status, "PENDING");
+        check("existing account, signed in", (await accept("/accept/existing", { token: tokenExisting }, bearer(existing))).status, 200);
+        check("  ...membership created", (await prisma.tenantUser.count({ where: { tenantUuid: ctx.tA.uuid, userUuid: existing.uuid, isActive: true } })), 1);
+
+        // Five people race to accept one invitation
+        const raced = await invite(`raced-${runId}@rbac.test`);
+        const raceResults = await Promise.all(Array.from({ length: 5 }, () => accept("/accept", signup(raced)).then((r) => r.status)));
+        check("concurrent accepts of one invitation succeed once", raceResults.filter((st) => st === 201).length, 1);
+        check("  ...one account created", await prisma.user.count({ where: { email: `raced-${runId}@rbac.test` } }), 1);
     } finally {
         server.close();
     }

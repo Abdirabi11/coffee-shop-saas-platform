@@ -174,6 +174,16 @@ async function cashierPayments(ctx: Ctx) {
     EventBus.on("PAYMENT_VOIDED", (p) => {
         if (p.paymentUuid === payment.uuid) voidedEvents++;
     });
+    // The order leaves kitchen screens: one status change, one cancellation
+    const statusEvents: string[] = [];
+    let cancelledEvents = 0;
+    EventBus.on("ORDER_STATUS_CHANGED", (p) => {
+        if (p.orderUuid === order.uuid) statusEvents.push(`${p.from}->${p.to}`);
+    });
+    EventBus.on("ORDER_CANCELLED", (p) => {
+        if (p.orderUuid === order.uuid) cancelledEvents++;
+    });
+    const cancelStatusEvents = () => statusEvents.filter((e) => e.endsWith("->CANCELLED")).length;
 
     const results = await Promise.all(
         Array.from({ length: VOIDS }, () =>
@@ -206,6 +216,18 @@ async function cashierPayments(ctx: Ctx) {
     check("void audit snapshots", snapshots, 1);
     check("drawer expectedCash reversed exactly once", afterPay.expectedCash - afterVoid.expectedCash, total);
     check("drawer totalSales reversed exactly once", afterPay.totalSales - afterVoid.totalSales, total);
+
+    // A voided order can't be paid again (one Payment per order): it ends,
+    // rather than going back to READY/unpaid
+    const voidedOrder = await prisma.order.findUniqueOrThrow({ where: { uuid: order.uuid } });
+    check("voided order status", voidedOrder.status, "CANCELLED");
+    check("voided order paymentStatus", voidedOrder.paymentStatus, "VOIDED");
+    const history = await prisma.orderStatusHistory.findFirst({
+        where: { orderUuid: order.uuid, toStatus: "CANCELLED" },
+    });
+    check("status history row for the void", history?.reason, "PAYMENT_VOIDED");
+    check("ORDER_STATUS_CHANGED → CANCELLED events", cancelStatusEvents(), 1);
+    check("ORDER_CANCELLED events", cancelledEvents, 1);
 }
 
 async function refundApprovals(ctx: Ctx) {
