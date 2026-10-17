@@ -3,6 +3,13 @@ import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
+// Subscriptions a tenant can move to another plan
+const CHANGEABLE_STATUSES = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
+
+// Plan limits checked against what the tenant already has
+const LIMIT_KEYS = ["maxStores", "maxStaff", "maxProducts"] as const;
+type PlanLimits = Partial<Record<(typeof LIMIT_KEYS)[number], number>>;
+
 export class SubscriptionService{
     //Create subscription
     static async createSubscription(input: {
@@ -114,85 +121,150 @@ export class SubscriptionService{
     }
 
     //Change plan (upgrade/downgrade)
+    //
+    // One transaction, under a lock on the tenant's subscription row, so two
+    // plan changes for a tenant run one after the other. The subscription is
+    // changed in place (Subscription.tenantUuid is unique: there is one row
+    // per tenant); the old cancel-then-create left the tenant with a
+    // CANCELLED subscription whenever the create failed.
+    //
+    // Every change, upgrade or downgrade, must fit the tenant's current usage
+    // under the target plan's limits. A cheaper price is not what makes a
+    // downgrade: a pricier plan can still have lower limits.
+    //
+    // No proration or charge happens here; the new price applies from now.
     static async changePlan(input: {
         tenantUuid: string;
         newPlanUuid: string;
-        newPlanVersionUuid: string;
-        prorated?: boolean;
+        newPlanVersionUuid?: string; // defaults to the plan's latest active version
+        changedBy?: string;
     }) {
+        if (!input.newPlanUuid) {
+            throw new Error("PLAN_REQUIRED");
+        }
+
         try {
-            const currentSub = await this.getTenantSubscription(input.tenantUuid);
+            const { previous, updated, eventType } = await prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`SELECT 1 FROM "Subscription" WHERE "tenantUuid" = ${input.tenantUuid} FOR UPDATE`;
 
-            if (!currentSub) {
-                throw new Error("NO_ACTIVE_SUBSCRIPTION");
-            };
-
-            const newPlan = await prisma.plan.findUnique({
-                where: { uuid: input.newPlanUuid },
-                include: {
-                    prices: {
-                        where: {
-                        interval: currentSub.interval,
-                        isActive: true,
-                        },
-                        take: 1,
-                    },
-                },
-            });
-        
-            if (!newPlan) {
-                throw new Error("PLAN_NOT_FOUND");
-            };
-        
-            const newPrice = newPlan.prices[0];
-            if (!newPrice) {
-                throw new Error("PLAN_PRICE_NOT_FOUND");
-            };
-
-            // Validate downgrade if applicable
-            if (newPrice.amount < currentSub.currentPeriodAmount) {
-                const validation = await this.validateDowngrade(
-                    input.tenantUuid,
-                    input.newPlanVersionUuid
-                );
-
-                if (!validation.allowed) {
-                    throw new Error(`DOWNGRADE_NOT_ALLOWED: ${validation.violations.join(", ")}`);
+                const previous = await tx.subscription.findUnique({
+                    where: { tenantUuid: input.tenantUuid },
+                });
+                if (!previous || !CHANGEABLE_STATUSES.has(previous.status)) {
+                    throw new Error("NO_ACTIVE_SUBSCRIPTION");
                 }
-            };
 
-             // Cancel current subscription
-            await prisma.subscription.update({
-                where: { uuid: currentSub.uuid },
-                data: {
-                    status: "CANCELLED",
-                    cancelledAt: new Date(),
-                    cancellationReason: "PLAN_CHANGE",
-                },
-            });
+                const plan = await tx.plan.findFirst({
+                    where: { uuid: input.newPlanUuid, isActive: true },
+                    include: { quotas: { where: { enforced: true } } },
+                });
+                if (!plan) {
+                    throw new Error("PLAN_NOT_FOUND");
+                }
 
-            // Create new subscription
-            const newSubscription = await this.createSubscription({
-                tenantUuid: input.tenantUuid,
-                planUuid: input.newPlanUuid,
-                planVersionUuid: input.newPlanVersionUuid,
-                interval: currentSub.interval,
-                startTrial: false,
+                // The version must belong to this plan: limits are read from it
+                const version = input.newPlanVersionUuid
+                    ? await tx.planVersion.findFirst({
+                        where: { uuid: input.newPlanVersionUuid, planUuid: plan.uuid, isActive: true },
+                    })
+                    : await tx.planVersion.findFirst({
+                        where: { planUuid: plan.uuid, isActive: true },
+                        orderBy: { version: "desc" },
+                    });
+                if (!version) {
+                    throw new Error("PLAN_VERSION_NOT_FOUND");
+                }
+
+                if (previous.planUuid === plan.uuid && previous.planVersionUuid === version.uuid) {
+                    throw new Error("ALREADY_ON_PLAN");
+                }
+
+                // Same billing interval and currency as the current subscription
+                const price = await tx.planPrice.findFirst({
+                    where: {
+                        planUuid: plan.uuid,
+                        interval: previous.interval,
+                        currency: previous.currency,
+                        isActive: true,
+                    },
+                    orderBy: { isDefault: "desc" },
+                });
+                if (!price) {
+                    throw new Error("PLAN_PRICE_NOT_FOUND");
+                }
+
+                const limits = this.planLimits(plan.quotas, version.quotas);
+                const violations = await this.limitViolations(tx, input.tenantUuid, limits);
+                if (violations.length > 0) {
+                    throw new Error(`PLAN_LIMITS_EXCEEDED: ${violations.join("; ")}`);
+                }
+
+                const updated = await tx.subscription.update({
+                    where: { uuid: previous.uuid },
+                    data: {
+                        planUuid: plan.uuid,
+                        planVersionUuid: version.uuid,
+                        planPriceUuid: price.uuid,
+                        currentPeriodAmount: price.amount,
+                        price: price.amount,
+                        amount: price.amount,
+                        intervalCount: price.intervalCount,
+                    },
+                });
+
+                // enforceStoreLimit reads the tenant's own copy of the limit
+                if (limits.maxStores !== undefined) {
+                    await tx.tenant.update({
+                        where: { uuid: input.tenantUuid },
+                        data: { maxStores: limits.maxStores },
+                    });
+                }
+
+                const eventType =
+                    price.amount > previous.currentPeriodAmount ? "UPGRADED"
+                    : price.amount < previous.currentPeriodAmount ? "DOWNGRADED"
+                    : "PLAN_CHANGED";
+
+                await tx.subscriptionHistory.create({
+                    data: {
+                        subscriptionUuid: previous.uuid,
+                        eventType,
+                        oldPlanUuid: previous.planUuid,
+                        newPlanUuid: plan.uuid,
+                        oldPriceUuid: previous.planPriceUuid,
+                        newPriceUuid: price.uuid,
+                        oldAmount: previous.currentPeriodAmount,
+                        newAmount: price.amount,
+                        performedBy: input.changedBy,
+                        reason: "PLAN_CHANGE",
+                        metadata: {
+                            oldPlanVersionUuid: previous.planVersionUuid,
+                            newPlanVersionUuid: version.uuid,
+                            limits,
+                        },
+                    },
+                });
+
+                return { previous, updated, eventType };
             });
 
             logWithContext("info", "[Subscription] Plan changed", {
                 tenantUuid: input.tenantUuid,
-                oldPlanUuid: currentSub.planUuid,
-                newPlanUuid: input.newPlanUuid,
+                oldPlanUuid: previous.planUuid,
+                newPlanUuid: updated.planUuid,
+                eventType,
             });
-        
+
+            // After the commit, so a rolled-back change is never announced
             EventBus.emit("SUBSCRIPTION_PLAN_CHANGED", {
                 tenantUuid: input.tenantUuid,
-                oldSubscriptionUuid: currentSub.uuid,
-                newSubscriptionUuid: newSubscription.uuid,
+                subscriptionUuid: updated.uuid,
+                oldPlanUuid: previous.planUuid,
+                newPlanUuid: updated.planUuid,
+                eventType,
             });
-        
-            return newSubscription;
+
+            return updated;
         } catch (error: any) {
             logWithContext("error", "[Subscription] Failed to change plan", {
                 error: error.message,
@@ -343,64 +415,61 @@ export class SubscriptionService{
         }
     }
 
-    //Validate downgrade
-    private static async validateDowngrade(
-        tenantUuid: string,
-        targetPlanVersionUuid: string
-    ) {
-        const targetPlanVersion = await prisma.planVersion.findUnique({
-            where: { uuid: targetPlanVersionUuid },
-        });
+    // A plan's hard limits: its enforced PlanQuota rows, falling back to the
+    // plan version's quotas JSON for keys the plan has no row for
+    private static planLimits(
+        quotas: Array<{ quotaKey: string; limit: number; limitType: string }>,
+        versionQuotas: unknown
+    ): PlanLimits {
+        const limits: PlanLimits = {};
+        const fromVersion = (versionQuotas ?? {}) as Record<string, unknown>;
 
-        if (!targetPlanVersion) {
-            throw new Error("PLAN_VERSION_NOT_FOUND");
+        for (const key of LIMIT_KEYS) {
+            const row = quotas.find((q) => q.quotaKey === key && q.limitType === "HARD");
+            const value = row ? row.limit : fromVersion[key];
+            if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+                limits[key] = value;
+            }
         }
 
-        const quotas = targetPlanVersion.quotas as any;
+        return limits;
+    }
+
+    // What the tenant uses now that the limits wouldn't allow
+    private static async limitViolations(tx: any, tenantUuid: string, limits: PlanLimits) {
         const violations: string[] = [];
 
-        // Check store count
-        if (quotas?.maxStores) {
-            const storeCount = await prisma.store.count({
-                where: { tenantUuid },
+        if (limits.maxStores !== undefined) {
+            const stores = await tx.store.count({
+                where: { tenantUuid, active: true, deletedAt: null },
             });
-
-            if (storeCount > quotas.maxStores) {
-                violations.push(
-                `You have ${storeCount} stores but plan allows ${quotas.maxStores}`
-                );
+            if (stores > limits.maxStores) {
+                violations.push(`${stores} active stores, plan allows ${limits.maxStores}`);
             }
-        };
+        }
 
-        // Check staff count
-        if (quotas?.maxStaff) {
-            const staffCount = await prisma.tenantUser.count({
+        // Staff are people assigned to a store. TenantUser rows include
+        // customers (whose default role is STAFF), so they can't be counted.
+        if (limits.maxStaff !== undefined) {
+            const staff = await tx.userStore.findMany({
                 where: { tenantUuid, isActive: true },
+                distinct: ["userUuid"],
+                select: { userUuid: true },
             });
-
-            if (staffCount > quotas.maxStaff) {
-                violations.push(
-                    `You have ${staffCount} staff but plan allows ${quotas.maxStaff}`
-                );
+            if (staff.length > limits.maxStaff) {
+                violations.push(`${staff.length} staff, plan allows ${limits.maxStaff}`);
             }
-        };
+        }
 
-        // Check product count
-        if (quotas?.maxProducts) {
-            const productCount = await prisma.product.count({
-                where: { tenantUuid },
+        if (limits.maxProducts !== undefined) {
+            const products = await tx.product.count({
+                where: { tenantUuid, isDeleted: false },
             });
-
-            if (productCount > quotas.maxProducts) {
-                violations.push(
-                `You have ${productCount} products but plan allows ${quotas.maxProducts}`
-                );
+            if (products > limits.maxProducts) {
+                violations.push(`${products} products, plan allows ${limits.maxProducts}`);
             }
-        };
+        }
 
-        return {
-            allowed: violations.length === 0,
-            violations,
-        };
+        return violations;
     }
 }

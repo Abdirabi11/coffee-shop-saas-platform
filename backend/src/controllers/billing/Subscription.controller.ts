@@ -73,12 +73,18 @@ export class SubscriptionController{
     static async changePlan(req: Request, res: Response) {
         try {
             const tenantUuid = req.tenant!.uuid;
-            const { newPlanUuid, newPlanVersionUuid, prorated } = req.body;
+            const { newPlanUuid, newPlanVersionUuid } = req.body;
 
-            if (!newPlanUuid || !newPlanVersionUuid) {
+            if (typeof newPlanUuid !== "string" || !newPlanUuid) {
                 return res.status(400).json({
                     error: "VALIDATION_ERROR",
-                    message: "newPlanUuid and newPlanVersionUuid are required",
+                    message: "newPlanUuid is required",
+                });
+            }
+            if (newPlanVersionUuid !== undefined && typeof newPlanVersionUuid !== "string") {
+                return res.status(400).json({
+                    error: "VALIDATION_ERROR",
+                    message: "newPlanVersionUuid must be a string",
                 });
             }
 
@@ -86,7 +92,7 @@ export class SubscriptionController{
                 tenantUuid,
                 newPlanUuid,
                 newPlanVersionUuid,
-                prorated,
+                changedBy: req.tenantUser?.uuid,
             });
 
             return res.status(200).json({
@@ -95,11 +101,19 @@ export class SubscriptionController{
             });
 
         } catch (error: any) {
-            if (error.message.includes("DOWNGRADE_NOT_ALLOWED")) {
-                return res.status(400).json({
-                    error: "DOWNGRADE_NOT_ALLOWED",
-                    message: error.message,
+            const message: string = error.message ?? "";
+
+            if (message.startsWith("PLAN_LIMITS_EXCEEDED")) {
+                return res.status(409).json({
+                    error: "PLAN_LIMITS_EXCEEDED",
+                    message: message.replace(/^PLAN_LIMITS_EXCEEDED: /, ""),
                 });
+            };
+            if (["PLAN_NOT_FOUND", "PLAN_VERSION_NOT_FOUND", "PLAN_PRICE_NOT_FOUND", "NO_ACTIVE_SUBSCRIPTION"].includes(message)) {
+                return res.status(404).json({ error: message });
+            };
+            if (message === "ALREADY_ON_PLAN") {
+                return res.status(409).json({ error: message });
             };
 
             return res.status(500).json({

@@ -1,7 +1,11 @@
 import prisma from "../../config/prisma.ts"
+import { billingEnforcementEnabled } from "./billingEnforcement.ts";
 import dayjs from "dayjs";
 
 export async function suspendOverdueTenants() {
+    // Off until platform invoices can be paid: see billingEnforcement.ts
+    if (!billingEnforcementEnabled("suspendOverdueTenants")) return 0;
+
     console.log("🚫 Suspending overdue tenants");
     // Find tenants with overdue invoices
     const overdueInvoices = await prisma.invoice.findMany({

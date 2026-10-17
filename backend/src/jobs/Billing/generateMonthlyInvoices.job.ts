@@ -1,8 +1,14 @@
 import { Prisma } from "@prisma/client";
+import { billingEnforcementEnabled } from "./billingEnforcement.ts";
 import prisma from "../../config/prisma.ts"
 import dayjs from "dayjs";
 
 export async function generateMonthlyInvoices() {
+    // Off until platform invoices can be paid: see billingEnforcement.ts
+    if (!billingEnforcementEnabled("generateMonthlyInvoices")) {
+        return { created: 0, skipped: 0, failed: 0 };
+    }
+
     console.log("🧾 Generating monthly invoices");
 
     // The billing period, as fixed instants: the current calendar month,

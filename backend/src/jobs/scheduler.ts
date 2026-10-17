@@ -35,15 +35,12 @@ import { MenuCacheWarmupJob } from "./Product/menuCacheWarmup.job.ts";
 import { TipPoolCalculationJob } from "./staff/TipPoolCalculation.job.ts";
 import { AnalyticsAggregationJob } from "./Analytics/AnalyticsAggregation.job.ts";
 import { SubscriptionRenewalJob } from "./Billing/SubscriptionRenewal.job.ts";
-import { markOverdueInvoices } from "./Billing/markOverdueInvoices.job.ts";
 import { DailyReconciliationJob } from "./Payment/DailyReconciliation.job.ts";
 import { PerformanceCalculationJob } from "./staff/PerformanceCalculation.job.ts";
 import { MenuSnapshotJob } from "./menu/MenuSnapshot.job.ts";
 import { ProductPopularityJob } from "./Order/productPopularity.job.ts";
 import { ProductMetricsCalculationJob } from "./Product/productMetricsCalculation.job.ts";
 import { AnalyticsSnapshotCleanupJob } from "./Analytics/Analyticssnapshotcleanup.job.ts";
-import { generateMonthlyInvoices } from "./Billing/generateMonthlyInvoices.job.ts";
-import { suspendOverdueTenants } from "./Billing/suspendOverdueTenants.job.ts";
 import { IdempotencyKeyCleanupJob } from "./Payment/IdempotencyKeyCleanup.job.ts";
 import { DailyStoreMetricsJob } from "./Order/dailyStoreMetrics.job.ts";
 import { InventoryReconciliationJob } from "./Inventory/InventoryReconciliation.job.ts";
@@ -145,13 +142,17 @@ export function startScheduler() {
   // 🔵 DAILY (nightly batch window: 00:00–05:00)
   // ─────────────────────────────────────────────────────────────────────────
  
+  // Not scheduled: generateMonthlyInvoices, markOverdueInvoices and
+  // suspendOverdueTenants. Platform invoices can't be paid yet, so they would
+  // end with every tenant suspended; see Billing/billingEnforcement.ts (the
+  // jobs also refuse to run while it is off).
+
   // 00:00 — Quota resets
   schedule("0 0 * * *",  "QuotaResetJob.daily",             () => QuotaResetJob.runDaily());
  
   // 01:00 — Subscriptions & tips
   schedule("0 1 * * *",  "SubscriptionRenewalJob",          () => SubscriptionRenewalJob.run());
   schedule("0 1 * * *",  "TipPoolCalculationJob",           () => TipPoolCalculationJob.run());
-  schedule("0 1 * * *",  "markOverdueInvoices",             () => markOverdueInvoices());
   schedule("0 1 * * *",  "AnalyticsAggregationJob",         () => AnalyticsAggregationJob.run());
  
   // 02:00 — Reconciliation & metrics
@@ -160,7 +161,6 @@ export function startScheduler() {
   schedule("0 2 * * *",  "PerformanceCalculationJob",       () => PerformanceCalculationJob.run());
   schedule("0 2 * * *",  "ProductMetricsCalculationJob",    () => ProductMetricsCalculationJob.run());
   schedule("0 2 * * *",  "MenuSnapshotJob",                 () => MenuSnapshotJob.run());
-  schedule("0 2 * * *",  "suspendOverdueTenants",           () => suspendOverdueTenants());
   schedule("0 2 * * *",  "InventoryReconciliationJob",      () => InventoryReconciliationJob.run());
   schedule("30 2 * * *", "ProductPopularityJob",            () => ProductPopularityJob.runDaily());
   schedule("30 2 * * *", "DashboardSnapshotJob",            () => DashboardSnapshotJob.execute());
@@ -197,7 +197,6 @@ export function startScheduler() {
   // 🟣 MONTHLY (1st of month)
   // ─────────────────────────────────────────────────────────────────────────
  
-  schedule("0 0 1 * *",  "generateMonthlyInvoices",         () => generateMonthlyInvoices());
   schedule("0 0 1 * *",  "QuotaResetJob.monthly",           () => QuotaResetJob.runMonthly());
   schedule("30 0 1 * *", "MonthlyRevenueJob",               () => MonthlyRevenueJob.run());
   schedule("0 1 1 * *",  "GenerateBillingSnapshotsJob",     () => GenerateBillingSnapshotsJob.run());
@@ -212,7 +211,7 @@ export function startScheduler() {
   schedule("0 0 1 1 *",  "QuotaResetJob.yearly",            () => QuotaResetJob.runYearly());
  
 
-  console.log("✅ Scheduler started — 69 jobs registered");
+  console.log("✅ Scheduler started — 61 jobs registered");
   console.log("  ⚡ Every 5 min:   9 jobs (payments, orders, inventory, shifts, cache)");
   console.log("  🔄 Every 10 min:  5 jobs (refunds, stuck orders, breaks, webhooks, dashboards)");
   console.log("  🔄 Every 15 min:  4 jobs (webhooks, shifts, orders, menu cache)");
