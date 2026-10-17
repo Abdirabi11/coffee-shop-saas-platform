@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { planLimitErrorResponse } from "../../services/billing/PlanLimit.service.ts";
 import prisma from "../../config/prisma.ts"
 import { TenantInvitationService } from "../../services/tenant/TenantInvitation.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
@@ -75,6 +76,8 @@ export class TenantStaffController {
             if (error.message === "USER_ALREADY_MEMBER") {
                 return res.status(409).json({ success: false, error: "USER_ALREADY_MEMBER" });
             }
+            const limited = planLimitErrorResponse(res, error);
+            if (limited) return limited;
             logWithContext("error", "[TenantStaff] Invite failed", { error: error.message });
             return res.status(500).json({ success: false, error: "INVITE_FAILED" });
         }

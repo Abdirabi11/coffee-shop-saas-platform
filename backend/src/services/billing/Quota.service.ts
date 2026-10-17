@@ -1,10 +1,13 @@
+import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class QuotaService {
-    static async initializeQuotas(tenantUuid: string, planUuid: string) {
-        const quotas = await prisma.planQuota.findMany({
+    // Pass the caller's transaction client to set quotas up atomically with
+    // the subscription
+    static async initializeQuotas(tenantUuid: string, planUuid: string, client: Prisma.TransactionClient = prisma) {
+        const quotas = await client.planQuota.findMany({
             where: {
                 planUuid,
                 enforced: true,
@@ -12,7 +15,7 @@ export class QuotaService {
         });
 
         for (const quota of quotas) {
-            await prisma.usageQuota.upsert({
+            await client.usageQuota.upsert({
                 where: {
                     tenantUuid_quotaKey: {
                     tenantUuid,

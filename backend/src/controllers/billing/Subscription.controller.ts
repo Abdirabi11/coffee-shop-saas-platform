@@ -38,10 +38,16 @@ export class SubscriptionController{
             const tenantUuid = req.tenant!.uuid;
             const { planUuid, planVersionUuid, interval, startTrial } = req.body;
 
-            if (!planUuid || !planVersionUuid || !interval) {
+            if (typeof planUuid !== "string" || !planUuid || typeof interval !== "string" || !interval) {
                 return res.status(400).json({
-                error: "VALIDATION_ERROR",
-                message: "planUuid, planVersionUuid, and interval are required",
+                    error: "VALIDATION_ERROR",
+                    message: "planUuid and interval are required",
+                });
+            }
+            if (planVersionUuid !== undefined && typeof planVersionUuid !== "string") {
+                return res.status(400).json({
+                    error: "VALIDATION_ERROR",
+                    message: "planVersionUuid must be a string",
                 });
             }
 
@@ -49,8 +55,9 @@ export class SubscriptionController{
                 tenantUuid,
                 planUuid,
                 planVersionUuid,
-                interval,
-                startTrial,
+                interval: interval as any,
+                startTrial: startTrial === true,
+                createdBy: req.tenantUser?.uuid,
             });
 
             return res.status(201).json({
@@ -61,6 +68,23 @@ export class SubscriptionController{
             logWithContext("error", "[Subscription] Failed to create", {
                 error: error.message,
             });
+
+            const message: string = error.message ?? "";
+            if (message === "SUBSCRIPTION_EXISTS") {
+                return res.status(409).json({ error: message, message: "The tenant already has an active subscription" });
+            }
+            if (message.startsWith("PLAN_LIMITS_EXCEEDED")) {
+                return res.status(409).json({
+                    error: "PLAN_LIMITS_EXCEEDED",
+                    message: message.replace(/^PLAN_LIMITS_EXCEEDED: /, ""),
+                });
+            }
+            if (["PLAN_NOT_FOUND", "PLAN_VERSION_NOT_FOUND", "PLAN_PRICE_NOT_FOUND"].includes(message)) {
+                return res.status(404).json({ error: message });
+            }
+            if (message === "PLAN_REQUIRED" || message.startsWith("UNSUPPORTED_INTERVAL")) {
+                return res.status(400).json({ error: "VALIDATION_ERROR", message });
+            }
 
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",

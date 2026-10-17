@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { planLimitErrorResponse } from "../../services/billing/PlanLimit.service.ts";
 import { StaffManagementService } from "../../services/staff/StaffManagement.service.ts";
 import { PermissionManagementService } from "../../services/staff/PermissionManagement.service.ts";
 import prisma from "../../config/prisma.ts";
@@ -92,6 +93,8 @@ export class StaffManagementController {
             if (error instanceof RoleAssignmentError) {
                 return res.status(error.status).json({ error: error.code });
             }
+            const limited = planLimitErrorResponse(res, error);
+            if (limited) return limited;
             logWithContext("error", "[StaffManagement] Create staff failed", {
                 error: error.message,
             });
@@ -261,6 +264,8 @@ export class StaffManagementController {
             if (error instanceof RoleAssignmentError) {
                 return res.status(error.status).json({ error: error.code });
             }
+            const limited = planLimitErrorResponse(res, error);
+            if (limited) return limited;
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,

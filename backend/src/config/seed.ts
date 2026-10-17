@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.ts";
 import bcrypt from "bcrypt";
+import { SubscriptionService } from "../services/billing/Subscription.service.ts";
 
 async function main() {
     console.log("🌱 Seeding database...\n");
@@ -933,6 +934,44 @@ async function main() {
     console.log(`     Milk:   ${milkGroup.uuid} (Whole, Oat +$0.75, Almond +$0.75)`);
     console.log(`     Size:   ${sizeGroup.uuid} (Small, Medium +$1.00, Large +$2.00)`);
     console.log(`     Extras: ${extrasGroup.uuid} (Shot +$1.00, Whip +$0.50, Vanilla +$0.75)`);
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  BILLING — dev plans and subscriptions
+    // ══════════════════════════════════════════════════════════════════════
+    // Adding stores, staff and products needs an active subscription and
+    // stays within its plan's limits, so each seeded tenant gets one. The
+    // limits match the tenants' maxStores / maxUsers above.
+
+    const devPlan = async (name: string, slug: string, monthly: number, limits: Record<string, number>) => {
+        const plan = await prisma.plan.create({
+            data: { name, slug, supportedIntervals: ["MONTHLY"], trialEnabled: false },
+        });
+        await prisma.planVersion.create({
+            data: { planUuid: plan.uuid, version: 1, priceMonthly: monthly, features: {}, quotas: limits },
+        });
+        await prisma.planPrice.create({
+            data: { planUuid: plan.uuid, interval: "MONTHLY", amount: monthly, isDefault: true },
+        });
+        for (const [quotaKey, limit] of Object.entries(limits)) {
+            await prisma.planQuota.create({ data: { planUuid: plan.uuid, quotaKey, quotaName: quotaKey, limit } });
+        }
+        return plan;
+    };
+
+    const devStandard = await devPlan("Dev Standard", "dev-standard", 4900, { maxStores: 5, maxStaff: 50, maxProducts: 500 });
+    const devStarter = await devPlan("Dev Starter", "dev-starter", 1900, { maxStores: 3, maxStaff: 30, maxProducts: 300 });
+
+    const subscription1 = await SubscriptionService.createSubscription({
+        tenantUuid: tenant1.uuid,
+        planUuid: devStandard.uuid,
+        interval: "MONTHLY",
+    });
+    const subscription2 = await SubscriptionService.createSubscription({
+        tenantUuid: tenant2.uuid,
+        planUuid: devStarter.uuid,
+        interval: "MONTHLY",
+    });
+    console.log("✅ Dev plans and subscriptions created:", subscription1.uuid, subscription2.uuid);
 
     // ══════════════════════════════════════════════════════════════════════
     //  SUMMARY

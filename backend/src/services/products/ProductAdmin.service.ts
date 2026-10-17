@@ -1,5 +1,6 @@
 import prisma from "../../config/prisma.ts";
 import { MenuCacheService } from "../menu/menuCache.service.ts";
+import { PlanLimitService } from "../billing/PlanLimit.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 // Every lookup and write is scoped to the caller's verified tenant (and store
@@ -39,25 +40,32 @@ export class ProductAdminService {
     }) {
         await this.assertCategoryInStore(input.tenantUuid, input.storeUuid, input.categoryUuid);
 
-        const product = await prisma.product.create({
-            data: {
-                tenantUuid: input.tenantUuid,
-                storeUuid: input.storeUuid,
-                categoryUuid: input.categoryUuid,
-                name: input.name,
-                description: input.description,
-                imageUrl: input.imageUrl,
-                basePrice: input.basePrice,
-                sku: input.sku,
-                trackInventory: input.trackInventory,
-                currentStock: input.currentStock,
-                lowStockThreshold: input.lowStockThreshold,
-                isActive: input.isActive,
-                isFeatured: input.isFeatured,
-                tags: input.tags,
-                calories: input.calories,
-                preparationTime: input.preparationTime,
-            },
+        // The plan's product limit is checked under the plan lock, in the same
+        // transaction as the insert, so concurrent creates can't both take the
+        // last slot
+        const product = await prisma.$transaction(async (tx) => {
+            await PlanLimitService.assertCanAdd(tx, input.tenantUuid, "maxProducts");
+
+            return tx.product.create({
+                data: {
+                    tenantUuid: input.tenantUuid,
+                    storeUuid: input.storeUuid,
+                    categoryUuid: input.categoryUuid,
+                    name: input.name,
+                    description: input.description,
+                    imageUrl: input.imageUrl,
+                    basePrice: input.basePrice,
+                    sku: input.sku,
+                    trackInventory: input.trackInventory,
+                    currentStock: input.currentStock,
+                    lowStockThreshold: input.lowStockThreshold,
+                    isActive: input.isActive,
+                    isFeatured: input.isFeatured,
+                    tags: input.tags,
+                    calories: input.calories,
+                    preparationTime: input.preparationTime,
+                },
+            });
         });
 
         await MenuCacheService.invalidate({

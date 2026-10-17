@@ -4,6 +4,7 @@ import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { invalidateCache, withCache } from "../../infrastructure/cache/cache.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+import { PlanLimitService } from "../billing/PlanLimit.service.ts";
 
 export class StaffManagementService {
   
@@ -40,51 +41,67 @@ export class StaffManagementService {
                 passwordHash = await bcrypt.hash(input.password, 10);
             }
 
-            // Create user
-            const user = await prisma.user.create({
-                data: {
-                    email: input.email,
-                    phoneNumber: input.phoneNumber,
-                    firstName: input.firstName,
-                    lastName: input.lastName,
-                    pinHash,
-                    passwordHash,
-                    employmentStatus: "ACTIVE",
-                    hireDate: input.hireDate || new Date(),
-                    certifications: input.certifications,
-                },
-            });
+            // One transaction: the plan's staff limit (checked under the plan
+            // lock, so concurrent creates can't both take the last slot) and
+            // every row, so a failure can't leave a user with half a membership
+            const user = await prisma.$transaction(async (tx) => {
+                if (input.storeUuids.length > 0) {
+                    await PlanLimitService.assertCanAdd(tx, input.tenantUuid, "maxStaff");
+                }
 
-            // Create tenant relationship
-            await prisma.tenantUser.create({
-                data: {
-                    tenantUuid: input.tenantUuid,
-                    userUuid: user.uuid,
-                    role: input.role as any,
-                    employmentType: (input.employmentType as any) || "PART_TIME",
-                    payRate: input.payRate,
-                    startDate: new Date(),
-                    isActive: true,
-                },
-            });
-
-            // Create store assignments
-            for (const storeUuid of input.storeUuids) {
-                const isPrimary = storeUuid === input.storeUuids[0]; // First is primary
-                const storeRole = input.storeRoles[storeUuid] || "CASHIER";
-
-                await prisma.userStore.create({
+                // Create user
+                const user = await tx.user.create({
                     data: {
-                        userUuid: user.uuid,
-                        storeUuid,
-                        tenantUuid: input.tenantUuid,
-                        role: storeRole as any,
-                        isPrimary,
-                        isActive: true,
-                        startDate: new Date(),
+                        email: input.email,
+                        phoneNumber: input.phoneNumber,
+                        firstName: input.firstName,
+                        lastName: input.lastName,
+                        pinHash,
+                        passwordHash,
+                        employmentStatus: "ACTIVE",
+                        hireDate: input.hireDate || new Date(),
+                        certifications: input.certifications,
                     },
                 });
-            };
+
+                // Create tenant relationship
+                await tx.tenantUser.create({
+                    data: {
+                        tenantUuid: input.tenantUuid,
+                        userUuid: user.uuid,
+                        // Required and unique; it was missing, so every create failed
+                        slug: `${input.firstName}-${input.lastName}`
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, "-")
+                            .replace(/(^-|-$)/g, "") + `-${crypto.randomBytes(3).toString("hex")}`,
+                        role: input.role as any,
+                        employmentType: (input.employmentType as any) || "PART_TIME",
+                        payRate: input.payRate,
+                        startDate: new Date(),
+                        isActive: true,
+                    },
+                });
+
+                // Create store assignments
+                for (const storeUuid of input.storeUuids) {
+                    const isPrimary = storeUuid === input.storeUuids[0]; // First is primary
+                    const storeRole = input.storeRoles[storeUuid] || "CASHIER";
+
+                    await tx.userStore.create({
+                        data: {
+                            userUuid: user.uuid,
+                            storeUuid,
+                            tenantUuid: input.tenantUuid,
+                            role: storeRole as any,
+                            isPrimary,
+                            isActive: true,
+                            startDate: new Date(),
+                        },
+                    });
+                };
+
+                return user;
+            });
 
             logWithContext("info", "[StaffManagement] Staff created", {
                 userUuid: user.uuid,
@@ -166,37 +183,49 @@ export class StaffManagementService {
         role: string;
         isPrimary?: boolean;
     }) {
-        // Check if already exists
-        const existing = await prisma.userStore.findUnique({
-            where: {
-                userUuid_storeUuid: {
-                    userUuid: input.userUuid,
-                    storeUuid: input.storeUuid,
+        const userStore = await prisma.$transaction(async (tx) => {
+            // Check if already exists
+            const existing = await tx.userStore.findUnique({
+                where: {
+                    userUuid_storeUuid: {
+                        userUuid: input.userUuid,
+                        storeUuid: input.storeUuid,
+                    },
                 },
-            },
-        });
+            });
+            if (existing?.isActive) {
+                throw new Error("STORE_ACCESS_ALREADY_EXISTS");
+            }
 
-        if (existing) {
+            // Someone with no active store in this tenant becomes staff here,
+            // so they count against the plan's staff limit
+            const alreadyStaff = await tx.userStore.findFirst({
+                where: { userUuid: input.userUuid, tenantUuid: input.tenantUuid, isActive: true },
+                select: { uuid: true },
+            });
+            if (!alreadyStaff) {
+                await PlanLimitService.assertCanAdd(tx, input.tenantUuid, "maxStaff");
+            }
+
             // Reactivate if inactive
-            if (!existing.isActive) {
-                return prisma.userStore.update({
+            if (existing) {
+                return tx.userStore.update({
                     where: { uuid: existing.uuid },
                     data: { isActive: true, role: input.role as any },
                 });
             }
-            throw new Error("STORE_ACCESS_ALREADY_EXISTS");
-        };
 
-        const userStore = await prisma.userStore.create({
-            data: {
-                userUuid: input.userUuid,
-                storeUuid: input.storeUuid,
-                tenantUuid: input.tenantUuid,
-                role: input.role as any,
-                isPrimary: input.isPrimary || false,
-                isActive: true,
-                startDate: new Date(),
-            },
+            return tx.userStore.create({
+                data: {
+                    userUuid: input.userUuid,
+                    storeUuid: input.storeUuid,
+                    tenantUuid: input.tenantUuid,
+                    role: input.role as any,
+                    isPrimary: input.isPrimary || false,
+                    isActive: true,
+                    startDate: new Date(),
+                },
+            });
         });
 
         logWithContext("info", "[StaffManagement] Store access granted", {

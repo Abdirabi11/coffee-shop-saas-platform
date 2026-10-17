@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { planLimitErrorResponse } from "../../../services/billing/PlanLimit.service.ts";
 import { ProductAdminService } from "../../../services/products/ProductAdmin.service.ts";
 
 
@@ -20,6 +21,8 @@ export class ProductAdminController {
             if (error.code === "P2002") {
                 return res.status(400).json({ error: "DUPLICATE_PRODUCT", message: "A product with this name already exists in this category" });
             }
+            const limited = planLimitErrorResponse(res, error);
+            if (limited) return limited;
             return res.status(500).json({ error: "INTERNAL_SERVER_ERROR", message: "Failed to create product" });
         }
     }

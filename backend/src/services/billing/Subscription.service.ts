@@ -1,91 +1,134 @@
+import crypto from "node:crypto";
 import dayjs from "dayjs";
+import { Prisma, type BillingInterval } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { ACTIVE_SUBSCRIPTION_STATUSES, PlanLimitService } from "./PlanLimit.service.ts";
+import { QuotaService } from "./Quota.service.ts";
 
-// Subscriptions a tenant can move to another plan
-const CHANGEABLE_STATUSES = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
-
-// Plan limits checked against what the tenant already has
-const LIMIT_KEYS = ["maxStores", "maxStaff", "maxProducts"] as const;
-type PlanLimits = Partial<Record<(typeof LIMIT_KEYS)[number], number>>;
+type Tx = Prisma.TransactionClient;
 
 export class SubscriptionService{
     //Create subscription
+    //
+    // There is one Subscription row per tenant (tenantUuid is unique), so a
+    // tenant whose subscription ended gets that row restarted on the new plan
+    // rather than a second one. Everything (subscription, quotas, the
+    // tenant's store limit, history) is written in one transaction.
     static async createSubscription(input: {
         tenantUuid: string;
         planUuid: string;
-        planVersionUuid: string;
-        interval: "MONTHLY" | "QUARTERLY" | "YEARLY";
+        planVersionUuid?: string; // defaults to the plan's latest active version
+        interval: BillingInterval;
         startTrial?: boolean;
+        createdBy?: string;
     }) {
         try {
-            const plan = await prisma.plan.findUnique({
-                where: { uuid: input.planUuid },
-                include: {
-                    prices: {
-                        where: {
-                            interval: input.interval,
-                            isActive: true,
-                        },
-                        take: 1,
-                    },
-                },
-            });
-        
-            if (!plan) {
-                throw new Error("PLAN_NOT_FOUND");
-            };
-        
-            const price = plan.prices[0];
-            if (!price) {
-                throw new Error("PLAN_PRICE_NOT_FOUND");
-            }
-        
-            // Calculate dates
-            const now = new Date();
-            let currentPeriodStart = now;
-            let currentPeriodEnd: Date;
-            let trialEnd: Date | null = null;
-            let status: "TRIALING" | "ACTIVE" = "ACTIVE";
-        
-            if (input.startTrial && plan.trialEnabled) {
-                trialEnd = dayjs(now).add(plan.trialDays, "day").toDate();
-                currentPeriodEnd = trialEnd;
-                status = "TRIALING";
-            } else {
-                currentPeriodEnd = this.calculatePeriodEnd(now, input.interval);
-            };
-        
-            // Create subscription
-            const subscription = await prisma.subscription.create({
-                data: {
-                    tenantUuid: input.tenantUuid,
+            const subscription = await prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`SELECT 1 FROM "Subscription" WHERE "tenantUuid" = ${input.tenantUuid} FOR UPDATE`;
+
+                const existing = await tx.subscription.findUnique({
+                    where: { tenantUuid: input.tenantUuid },
+                });
+                if (existing && ACTIVE_SUBSCRIPTION_STATUSES.has(existing.status)) {
+                    throw new Error("SUBSCRIPTION_EXISTS");
+                }
+
+                const { plan, version, price } = await this.resolvePlan(tx, {
                     planUuid: input.planUuid,
                     planVersionUuid: input.planVersionUuid,
-                    status,
                     interval: input.interval,
-                    currentPeriodStart,
+                });
+
+                // A tenant coming back may already have more than this plan allows
+                const limits = PlanLimitService.limitsFor(plan.quotas, version.quotas);
+                const violations = await PlanLimitService.violations(tx, input.tenantUuid, limits);
+                if (violations.length > 0) {
+                    throw new Error(`PLAN_LIMITS_EXCEEDED: ${violations.join("; ")}`);
+                }
+
+                // One trial per tenant: none for a tenant that already had a subscription
+                const now = new Date();
+                const trial = !!input.startTrial && plan.trialEnabled && !existing;
+                const trialEnd = trial ? dayjs(now).add(plan.trialDays, "day").toDate() : null;
+                const currentPeriodEnd = trialEnd ?? this.calculatePeriodEnd(now, price.interval, price.intervalCount);
+
+                const terms = {
+                    planUuid: plan.uuid,
+                    planVersionUuid: version.uuid,
+                    planPriceUuid: price.uuid,
+                    status: trial ? ("TRIALING" as const) : ("ACTIVE" as const),
+                    interval: price.interval,
+                    intervalCount: price.intervalCount,
+                    currentPeriodStart: now,
                     currentPeriodEnd,
                     currentPeriodAmount: price.amount,
+                    price: price.amount,
+                    amount: price.amount,
+                    currency: price.currency,
+                    trialStart: trial ? now : null,
                     trialEnd,
+                    isInTrial: trial,
                     cancelAtPeriodEnd: false,
-                },
-            });
+                    cancelledAt: null,
+                    cancelledBy: null,
+                    cancellationReason: null,
+                    startDate: now,
+                    endDate: null,
+                };
 
-            // Initialize quota usage
-            await QuotaService.initializeQuotas(input.tenantUuid, input.planUuid);
+                const subscription = existing
+                    ? await tx.subscription.update({ where: { uuid: existing.uuid }, data: terms })
+                    : await tx.subscription.create({
+                        data: {
+                            ...terms,
+                            tenantUuid: input.tenantUuid,
+                            subscriptionNumber: this.newSubscriptionNumber(now),
+                            taxExempt: false,
+                        },
+                    });
+
+                await QuotaService.initializeQuotas(input.tenantUuid, plan.uuid, tx);
+
+                // enforceStoreLimit and the tenant dashboard read the tenant's own copy
+                if (limits.maxStores !== undefined) {
+                    await tx.tenant.update({
+                        where: { uuid: input.tenantUuid },
+                        data: { maxStores: limits.maxStores },
+                    });
+                }
+
+                await tx.subscriptionHistory.create({
+                    data: {
+                        subscriptionUuid: subscription.uuid,
+                        eventType: trial ? "TRIAL_STARTED" : existing ? "ACTIVATED" : "CREATED",
+                        oldPlanUuid: existing?.planUuid,
+                        newPlanUuid: plan.uuid,
+                        oldPriceUuid: existing?.planPriceUuid,
+                        newPriceUuid: price.uuid,
+                        oldAmount: existing?.currentPeriodAmount,
+                        newAmount: price.amount,
+                        performedBy: input.createdBy,
+                        reason: existing ? "RESUBSCRIBED" : "CREATED",
+                        metadata: { planVersionUuid: version.uuid, limits },
+                    },
+                });
+
+                return subscription;
+            });
 
             logWithContext("info", "[Subscription] Created", {
                 subscriptionUuid: subscription.uuid,
                 tenantUuid: input.tenantUuid,
-                planUuid: input.planUuid,
+                planUuid: subscription.planUuid,
             });
 
+            // After the commit, so a rolled-back create is never announced
             EventBus.emit("SUBSCRIPTION_CREATED", {
                 subscriptionUuid: subscription.uuid,
                 tenantUuid: input.tenantUuid,
-                planUuid: input.planUuid,
+                planUuid: subscription.planUuid,
             });
 
             return subscription;
@@ -94,8 +137,65 @@ export class SubscriptionService{
             logWithContext("error", "[Subscription] Failed to create", {
                 error: error.message,
             });
+            // Two first-time creates at once: the loser hits the unique tenantUuid
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+                throw new Error("SUBSCRIPTION_EXISTS");
+            }
             throw error;
         }
+    }
+
+    // An active plan, its version (which must belong to it; default: latest
+    // active) and its active price for the interval, with the plan's
+    // enforced quotas
+    private static async resolvePlan(tx: Tx, input: {
+        planUuid: string;
+        planVersionUuid?: string;
+        interval: BillingInterval;
+        currency?: string;
+    }) {
+        if (!input.planUuid) {
+            throw new Error("PLAN_REQUIRED");
+        }
+
+        const plan = await tx.plan.findFirst({
+            where: { uuid: input.planUuid, isActive: true },
+            include: { quotas: { where: { enforced: true } } },
+        });
+        if (!plan) {
+            throw new Error("PLAN_NOT_FOUND");
+        }
+
+        const version = input.planVersionUuid
+            ? await tx.planVersion.findFirst({
+                where: { uuid: input.planVersionUuid, planUuid: plan.uuid, isActive: true },
+            })
+            : await tx.planVersion.findFirst({
+                where: { planUuid: plan.uuid, isActive: true },
+                orderBy: { version: "desc" },
+            });
+        if (!version) {
+            throw new Error("PLAN_VERSION_NOT_FOUND");
+        }
+
+        const price = await tx.planPrice.findFirst({
+            where: {
+                planUuid: plan.uuid,
+                interval: input.interval,
+                isActive: true,
+                ...(input.currency && { currency: input.currency }),
+            },
+            orderBy: { isDefault: "desc" },
+        });
+        if (!price) {
+            throw new Error("PLAN_PRICE_NOT_FOUND");
+        }
+
+        return { plan, version, price };
+    }
+
+    private static newSubscriptionNumber(now: Date) {
+        return `SUB-${dayjs(now).format("YYYYMMDD")}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
     }
 
     //Get tenant subscription
@@ -150,51 +250,24 @@ export class SubscriptionService{
                 const previous = await tx.subscription.findUnique({
                     where: { tenantUuid: input.tenantUuid },
                 });
-                if (!previous || !CHANGEABLE_STATUSES.has(previous.status)) {
+                if (!previous || !ACTIVE_SUBSCRIPTION_STATUSES.has(previous.status)) {
                     throw new Error("NO_ACTIVE_SUBSCRIPTION");
                 }
 
-                const plan = await tx.plan.findFirst({
-                    where: { uuid: input.newPlanUuid, isActive: true },
-                    include: { quotas: { where: { enforced: true } } },
+                const { plan, version, price } = await this.resolvePlan(tx, {
+                    planUuid: input.newPlanUuid,
+                    planVersionUuid: input.newPlanVersionUuid,
+                    // Same billing interval and currency as the current subscription
+                    interval: previous.interval,
+                    currency: previous.currency,
                 });
-                if (!plan) {
-                    throw new Error("PLAN_NOT_FOUND");
-                }
-
-                // The version must belong to this plan: limits are read from it
-                const version = input.newPlanVersionUuid
-                    ? await tx.planVersion.findFirst({
-                        where: { uuid: input.newPlanVersionUuid, planUuid: plan.uuid, isActive: true },
-                    })
-                    : await tx.planVersion.findFirst({
-                        where: { planUuid: plan.uuid, isActive: true },
-                        orderBy: { version: "desc" },
-                    });
-                if (!version) {
-                    throw new Error("PLAN_VERSION_NOT_FOUND");
-                }
 
                 if (previous.planUuid === plan.uuid && previous.planVersionUuid === version.uuid) {
                     throw new Error("ALREADY_ON_PLAN");
                 }
 
-                // Same billing interval and currency as the current subscription
-                const price = await tx.planPrice.findFirst({
-                    where: {
-                        planUuid: plan.uuid,
-                        interval: previous.interval,
-                        currency: previous.currency,
-                        isActive: true,
-                    },
-                    orderBy: { isDefault: "desc" },
-                });
-                if (!price) {
-                    throw new Error("PLAN_PRICE_NOT_FOUND");
-                }
-
-                const limits = this.planLimits(plan.quotas, version.quotas);
-                const violations = await this.limitViolations(tx, input.tenantUuid, limits);
+                const limits = PlanLimitService.limitsFor(plan.quotas, version.quotas);
+                const violations = await PlanLimitService.violations(tx, input.tenantUuid, limits);
                 if (violations.length > 0) {
                     throw new Error(`PLAN_LIMITS_EXCEEDED: ${violations.join("; ")}`);
                 }
@@ -371,7 +444,8 @@ export class SubscriptionService{
             const newPeriodStart = subscription.currentPeriodEnd;
             const newPeriodEnd = this.calculatePeriodEnd(
                 newPeriodStart,
-                subscription.interval
+                subscription.interval,
+                subscription.intervalCount
             );
 
             await prisma.subscription.update({
@@ -401,75 +475,24 @@ export class SubscriptionService{
     }
 
     //Calculate period end date
-    private static calculatePeriodEnd(
-        start: Date,
-        interval: "MONTHLY" | "QUARTERLY" | "YEARLY"
-    ): Date {
+    private static calculatePeriodEnd(start: Date, interval: BillingInterval, intervalCount = 1): Date {
+        const count = Math.max(1, intervalCount);
         switch (interval) {
+            case "DAILY":
+                return dayjs(start).add(count, "day").toDate();
+            case "WEEKLY":
+                return dayjs(start).add(count, "week").toDate();
             case "MONTHLY":
-                return dayjs(start).add(1, "month").toDate();
+                return dayjs(start).add(count, "month").toDate();
             case "QUARTERLY":
-                return dayjs(start).add(3, "month").toDate();
+                return dayjs(start).add(3 * count, "month").toDate();
             case "YEARLY":
-                return dayjs(start).add(1, "year").toDate();
+                return dayjs(start).add(count, "year").toDate();
+            case "BIENNIAL":
+                return dayjs(start).add(2 * count, "year").toDate();
+            default:
+                // CUSTOM / ONE_TIME have no recurring period
+                throw new Error(`UNSUPPORTED_INTERVAL: ${interval}`);
         }
-    }
-
-    // A plan's hard limits: its enforced PlanQuota rows, falling back to the
-    // plan version's quotas JSON for keys the plan has no row for
-    private static planLimits(
-        quotas: Array<{ quotaKey: string; limit: number; limitType: string }>,
-        versionQuotas: unknown
-    ): PlanLimits {
-        const limits: PlanLimits = {};
-        const fromVersion = (versionQuotas ?? {}) as Record<string, unknown>;
-
-        for (const key of LIMIT_KEYS) {
-            const row = quotas.find((q) => q.quotaKey === key && q.limitType === "HARD");
-            const value = row ? row.limit : fromVersion[key];
-            if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
-                limits[key] = value;
-            }
-        }
-
-        return limits;
-    }
-
-    // What the tenant uses now that the limits wouldn't allow
-    private static async limitViolations(tx: any, tenantUuid: string, limits: PlanLimits) {
-        const violations: string[] = [];
-
-        if (limits.maxStores !== undefined) {
-            const stores = await tx.store.count({
-                where: { tenantUuid, active: true, deletedAt: null },
-            });
-            if (stores > limits.maxStores) {
-                violations.push(`${stores} active stores, plan allows ${limits.maxStores}`);
-            }
-        }
-
-        // Staff are people assigned to a store. TenantUser rows include
-        // customers (whose default role is STAFF), so they can't be counted.
-        if (limits.maxStaff !== undefined) {
-            const staff = await tx.userStore.findMany({
-                where: { tenantUuid, isActive: true },
-                distinct: ["userUuid"],
-                select: { userUuid: true },
-            });
-            if (staff.length > limits.maxStaff) {
-                violations.push(`${staff.length} staff, plan allows ${limits.maxStaff}`);
-            }
-        }
-
-        if (limits.maxProducts !== undefined) {
-            const products = await tx.product.count({
-                where: { tenantUuid, isDeleted: false },
-            });
-            if (products > limits.maxProducts) {
-                violations.push(`${products} products, plan allows ${limits.maxProducts}`);
-            }
-        }
-
-        return violations;
     }
 }

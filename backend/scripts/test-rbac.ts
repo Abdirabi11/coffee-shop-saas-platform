@@ -41,6 +41,7 @@ process.env.LOG_LEVEL ??= "fatal";
 const { default: express } = await import("express");
 const { default: prisma } = await import("../src/config/prisma.ts");
 const { signAccessToken } = await import("../src/utils/jwt.ts");
+const { SubscriptionService } = await import("../src/services/billing/Subscription.service.ts");
 const { default: storeRoutes } = await import("../src/routes/store/store.routes.ts");
 const { default: orderRoutes } = await import("../src/routes/order/order.routes.ts");
 const { default: cashierRoutes } = await import("../src/routes/payment/CashierPayment.routes.ts");
@@ -65,10 +66,26 @@ async function user(name: string, globalRole: "SUPER_ADMIN" | "ADMIN" | "CUSTOME
     return prisma.user.create({ data: { phoneNumber, firstName: name, lastName: "RBAC", globalRole } });
 }
 
+// Adding staff/products needs an active subscription within its plan's
+// limits; these tenants get a plan generous enough not to matter here
+let rbacPlanUuid: string | undefined;
+async function rbacPlan() {
+    if (rbacPlanUuid) return rbacPlanUuid;
+    const plan = await prisma.plan.create({ data: { name: `RBAC ${runId}`, slug: `rbac-${runId}` } });
+    await prisma.planVersion.create({ data: { planUuid: plan.uuid, version: 1, priceMonthly: 0, features: {} } });
+    await prisma.planPrice.create({ data: { planUuid: plan.uuid, interval: "MONTHLY", amount: 0 } });
+    for (const quotaKey of ["maxStores", "maxStaff", "maxProducts"]) {
+        await prisma.planQuota.create({ data: { planUuid: plan.uuid, quotaKey, quotaName: quotaKey, limit: 1000 } });
+    }
+    return (rbacPlanUuid = plan.uuid);
+}
+
 async function tenant(label: string, ownerUuid: string) {
-    return prisma.tenant.create({
+    const created = await prisma.tenant.create({
         data: { name: `RBAC ${label} ${runId}`, slug: `rbac-${label.toLowerCase()}-${runId}`, email: `${label}@rbac.test`, ownerUuid },
     });
+    await SubscriptionService.createSubscription({ tenantUuid: created.uuid, planUuid: await rbacPlan(), interval: "MONTHLY" });
+    return created;
 }
 
 async function member(tenantUuid: string, userUuid: string, role: "TENANT_ADMIN" | "REGIONAL_MANAGER" | "STAFF", slug: string) {

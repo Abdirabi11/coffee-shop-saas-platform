@@ -2,6 +2,7 @@ import crypto from "crypto";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { EmailService } from "../notification/Email.service.ts";
+import { PlanLimitService } from "../billing/PlanLimit.service.ts";
 
 
 export class TenantInvitationService{
@@ -41,17 +42,32 @@ export class TenantInvitationService{
                 .update(invitationToken)
                 .digest("hex");
 
-            // Create invitation
-            const invitation = await prisma.tenantInvitation.create({
-                data: {
-                    tenantUuid: input.tenantUuid,
-                    email: input.email,
-                    role: input.role,
-                    token: hashedToken,
-                    invitedBy: input.invitedBy,
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-                    storeAccess: input.storeUuids,
-                },
+            // Create invitation. An invitee with store access becomes staff,
+            // so open invitations count against the plan's staff limit too;
+            // checked under the plan lock with the insert.
+            const invitation = await prisma.$transaction(async (tx) => {
+                if (input.storeUuids.length > 0) {
+                    const pending = await tx.tenantInvitation.count({
+                        where: {
+                            tenantUuid: input.tenantUuid,
+                            status: "PENDING",
+                            expiresAt: { gt: new Date() },
+                        },
+                    });
+                    await PlanLimitService.assertCanAdd(tx, input.tenantUuid, "maxStaff", { pending });
+                }
+
+                return tx.tenantInvitation.create({
+                    data: {
+                        tenantUuid: input.tenantUuid,
+                        email: input.email,
+                        role: input.role,
+                        token: hashedToken,
+                        invitedBy: input.invitedBy,
+                        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+                        storeAccess: input.storeUuids,
+                    },
+                });
             });
 
             // Get tenant info
