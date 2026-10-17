@@ -468,8 +468,10 @@ async function main() {
             await status("GET", `/api/store/${ctx.a1.uuid}/orders/active`, t.customerA), 403);
 
         console.log("\n=== Cashier payments at the order's own store (finding #4) ===");
+        // Card: these checks are about who may take a payment; cash also
+        // needs an open drawer at the terminal (covered in the drawer section)
         const pay = (orderUuid: string, extra: Record<string, unknown> = {}) => ({
-            orderUuid, paymentMethod: "CASH", amount: 400, amountTendered: 500, changeGiven: 100, ...extra,
+            orderUuid, paymentMethod: "CARD_TERMINAL", amount: 400, ...extra,
         });
         check("A1 cashier takes payment for an A2 order, naming A1 as storeUuid",
             await status("POST", "/api/cashier/process", t.cashierA, { body: pay(o.a2Order.uuid, { storeUuid: ctx.a1.uuid }) }), 403);
@@ -661,7 +663,8 @@ async function main() {
         const drawerSale = await sale(o.a1DrawerSale.uuid, "T-A1");
         const elsewhere = await sale(o.a1OtherTerminalSale.uuid, "T-OTHER");
         check("sale on the drawer's terminal", drawerSale.status, 201);
-        check("sale on another terminal", elsewhere.status, 201);
+        // Cash at a terminal with no open drawer would belong to no count
+        check("cash sale on a terminal with no open drawer", `${elsewhere.status} ${elsewhere.body?.error}`, "409 NO_OPEN_DRAWER");
         const linkedPayment = await prisma.payment.findUnique({ where: { uuid: drawerSale.body?.data?.uuid } });
         check("  ...payment linked to the drawer", linkedPayment?.drawerUuid, drawer.uuid);
 
