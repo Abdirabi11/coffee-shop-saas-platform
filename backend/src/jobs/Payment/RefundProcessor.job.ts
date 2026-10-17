@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.ts"
-import { RefundService } from "../../services/payment/Refund.service.ts";
+import { MANUAL_REFUND_PROVIDERS, RefundService } from "../../services/payment/Refund.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class RefundProcessorJob {
@@ -11,9 +11,9 @@ export class RefundProcessorJob {
         // REQUESTED only: refunds parked as PENDING_APPROVAL (high fraud
         // risk) must wait for RefundService.approveRefund, never auto-process
         const pendingRefunds = await prisma.refund.findMany({
-            // Cash refunds are paid out at a till (RefundService.payCashRefund),
-            // not sent to a provider
-            where: { status: "REQUESTED", provider: { not: "CASH" } },
+            // Cash and card-terminal refunds are paid back by staff at the
+            // store (payCashRefund, markCardRefunded), not sent to a provider
+            where: { status: "REQUESTED", provider: { notIn: MANUAL_REFUND_PROVIDERS } },
             orderBy: { requestedAt: "asc" },
             take: 20,
         });

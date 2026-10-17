@@ -1,4 +1,4 @@
-import { PaymentProvider } from "@prisma/client";
+import { PaymentProvider, type Prisma, type RefundStatus } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { PaymentStateMachine } from "../../domain/payment/PaymentStateMachine.ts";
 import { RefundStateMachine } from "../../domain/payment/RefundStateMachine.ts";
@@ -10,8 +10,32 @@ import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 import { PaymentRestrictionService } from "./PaymentRestriction.service.ts";
 import { CashDrawerService } from "../staff/CashDrawer.service.ts";
 
+// Refunds that count against a payment's refundable amount: paid back,
+// being sent, waiting to be paid out, or parked for approval. FAILED and
+// REJECTED ones release their amount.
+const COMMITTED_REFUND_STATUSES: readonly RefundStatus[] = ["PENDING_APPROVAL", "REQUESTED", "PROCESSING", "COMPLETED"];
+
+// Payments a refund can be taken against. PARTIALLY_REFUNDED allows a
+// further partial refund up to what's left.
+const REFUNDABLE_PAYMENT_STATUSES = new Set(["PAID", "COMPLETED", "PARTIALLY_REFUNDED"]);
+
+// Refunds paid back by staff rather than sent to a provider: cash from a
+// drawer (payCashRefund), or a return keyed on the store's card reader
+// (markCardRefunded), which we have no API for. RefundProcessorJob and
+// processRefund leave them REQUESTED until then.
+export const MANUAL_REFUND_PROVIDERS = ["CASH", "CARD_TERMINAL"];
+
 
 export class RefundService{
+    // Requests a refund on an order's payment, for the given amount or
+    // whatever is left to refund. Several partial refunds are fine; together
+    // they never exceed the payment.
+    //
+    // One transaction holding the Payment's row lock: the payment must still
+    // be refundable, and the amount must fit in what's left after every
+    // refund already committed against it (paid out, in flight, waiting to
+    // be paid out or parked for approval), not just the completed ones. Two
+    // concurrent requests queue on the lock, so the second sees the first.
     static async requestRefund(input: {
         orderUuid: string;
         amount?: number;
@@ -23,84 +47,81 @@ export class RefundService{
             include: {
                 // Order has `payments` (Payment.orderUuid is unique, so at
                 // most one); `payment` isn't a relation and made Prisma throw
-                payments: true,
-                refunds: true,
+                payments: { select: { uuid: true } },
                 tenantUser: true, // Needed for risk check
             },
         });
  
         if (!order) throw new Error("ORDER_NOT_FOUND");
-        const [payment] = order.payments;
-        if (!payment) throw new Error("NO_PAYMENT_FOUND");
-    
-        //Check both PAID and COMPLETED (cashier flow uses COMPLETED)
-        if (payment.status !== "PAID" && payment.status !== "COMPLETED") {
-            throw new Error("PAYMENT_NOT_REFUNDABLE");
-        };
-    
-        const totalPaid = payment.amount;
-        const refundedSoFar = order.refunds
-            .filter((r) => r.status === "COMPLETED")
-            .reduce((sum, r) => sum + r.amount, 0);
-    
-        const refundableAmount = totalPaid - refundedSoFar;
-        if (refundableAmount <= 0) {
-            throw new Error("NOTHING_TO_REFUND");
-        };
- 
-        const refundAmount = input.amount ?? refundableAmount;
-        if (refundAmount > refundableAmount) {
-            throw new Error("REFUND_AMOUNT_EXCEEDS_LIMIT");
-        };
-        if (refundAmount <= 0) {
+        const [orderPayment] = order.payments;
+        if (!orderPayment) throw new Error("NO_PAYMENT_FOUND");
+        if (input.amount !== undefined && (!Number.isInteger(input.amount) || input.amount <= 0)) {
             throw new Error("INVALID_REFUND_AMOUNT");
-        };
- 
-        // Refund.type and Refund.provider are required columns
-        const refundType = refundAmount === totalPaid ? "FULL" : "PARTIAL";
-        const refundProvider = payment.provider ?? payment.paymentMethod; // cashier payments may have no provider
+        }
 
-        // Apply risk policy enforcement before processing
+        // Apply risk policy enforcement before processing; high fraud risk
+        // parks the refund for manual review
+        let requiresReview = false;
         if (order.tenantUser) {
             await RiskPolicyEnforcer.apply({ tenantUuid: order.tenantUuid, tenantUserUuid: order.tenantUser.uuid });
-        
-            // Check if manual review is required due to high fraud risk
-            const requiresReview = await PaymentRestrictionService.hasRestriction(
+            requiresReview = await PaymentRestrictionService.hasRestriction(
                 order.tenantUser.uuid,
                 "REQUIRE_MANUAL_REVIEW"
             );
-        
-            if (requiresReview) {
-                // Parked as PENDING_APPROVAL, not REQUESTED: the processor
-                // only picks up REQUESTED, so this waits for approveRefund
-                const refund = await prisma.refund.create({
-                    data: {
-                        tenantUuid: order.tenantUuid,
-                        paymentUuid: payment.uuid,
-                        orderUuid: order.uuid,
-                        storeUuid: order.storeUuid,
-                        amount: refundAmount,
-                        currency: payment.currency,
-                        type: refundType,
-                        status: "PENDING_APPROVAL",
-                        reason: input.reason,
-                        requestedBy: input.requestedBy,
-                        provider: refundProvider,
-                        snapshot: {
-                            originalPayment: {
-                                amount: payment.amount,
-                                status: payment.status,
-                            },
-                            requestedAmount: refundAmount,
-                            refundableAmount,
+        }
+
+        const { refund, payment, refundableAmount } = await prisma.$transaction(async (tx) => {
+            const payment = await this.lockPayment(tx, orderPayment.uuid);
+            if (!REFUNDABLE_PAYMENT_STATUSES.has(payment.status)) {
+                throw new Error("PAYMENT_NOT_REFUNDABLE");
+            }
+
+            const committed = await this.sumRefunds(tx, payment.uuid, COMMITTED_REFUND_STATUSES);
+            const refundableAmount = payment.amount - committed;
+            if (refundableAmount <= 0) {
+                throw new Error("NOTHING_TO_REFUND");
+            }
+
+            const refundAmount = input.amount ?? refundableAmount;
+            if (refundAmount > refundableAmount) {
+                throw new Error("REFUND_AMOUNT_EXCEEDS_LIMIT");
+            }
+
+            const refund = await tx.refund.create({
+                data: {
+                    tenantUuid: order.tenantUuid,
+                    paymentUuid: payment.uuid,
+                    orderUuid: order.uuid,
+                    storeUuid: order.storeUuid,
+                    amount: refundAmount,
+                    currency: payment.currency,
+                    // Refund.type and Refund.provider are required columns
+                    type: refundAmount === payment.amount ? "FULL" : "PARTIAL",
+                    // Parked as PENDING_APPROVAL, not REQUESTED: the processor
+                    // only picks up REQUESTED, so this waits for approveRefund
+                    status: requiresReview ? "PENDING_APPROVAL" : "REQUESTED",
+                    reason: input.reason,
+                    requestedBy: input.requestedBy,
+                    provider: payment.provider ?? payment.paymentMethod, // cashier payments may have no provider
+                    snapshot: {
+                        originalPayment: {
+                            amount: payment.amount,
+                            status: payment.status,
+                        },
+                        requestedAmount: refundAmount,
+                        refundableAmount,
+                        alreadyCommitted: committed,
+                        ...(requiresReview && {
                             requiresApproval: true,
                             approvalReason: "High fraud risk - manual review required",
-                        },
+                        }),
                     },
-                });
-        
+                },
+            });
+
+            if (requiresReview) {
                 // Create admin alert for manual review
-                await prisma.adminAlert.create({
+                await tx.adminAlert.create({
                     data: {
                         tenantUuid: order.tenantUuid,
                         storeUuid: order.storeUuid,
@@ -119,48 +140,27 @@ export class RefundService{
                         },
                     },
                 });
-        
-                logWithContext("warn", "[Refund] Requires manual approval", {
-                    refundUuid: refund.uuid,
-                    orderUuid: order.uuid,
-                    amount: refundAmount,
-                });
-        
-                return refund;
             }
-        };
-        // Create normal refund record
-        const refund = await prisma.refund.create({
-            data: {
-                tenantUuid: order.tenantUuid,
-                paymentUuid: payment.uuid,
-                orderUuid: order.uuid,
-                storeUuid: order.storeUuid,
-                amount: refundAmount,
-                currency: payment.currency,
-                type: refundType,
-                status: "REQUESTED",
-                reason: input.reason,
-                requestedBy: input.requestedBy,
-                provider: refundProvider,
-                snapshot: {
-                    originalPayment: {
-                        amount: payment.amount,
-                        status: payment.status,
-                    },
-                    requestedAmount: refundAmount,
-                    refundableAmount,
-                },
-            },
+
+            return { refund, payment, refundableAmount };
         });
- 
+
+        if (requiresReview) {
+            logWithContext("warn", "[Refund] Requires manual approval", {
+                refundUuid: refund.uuid,
+                orderUuid: order.uuid,
+                amount: refund.amount,
+            });
+            return refund;
+        }
+
         EventBus.emit("REFUND_REQUESTED", {
             refundUuid: refund.uuid,
             paymentUuid: payment.uuid,
             orderUuid: order.uuid,
             tenantUuid: order.tenantUuid,
             storeUuid: order.storeUuid,
-            amount: refundAmount,
+            amount: refund.amount,
             currency: payment.currency,
             reason: input.reason,
             requestedBy: input.requestedBy,
@@ -169,10 +169,73 @@ export class RefundService{
         logWithContext("info", "[Refund] Requested", {
             refundUuid: refund.uuid,
             paymentUuid: payment.uuid,
-            amount: refundAmount,
-            });
+            amount: refund.amount,
+            refundableAmount,
+        });
     
         return refund;
+    }
+
+    // Locks a payment's row for the rest of the transaction and returns it
+    // as it is now. Every path that commits refund money against a payment
+    // takes this lock first, so their limit checks can't interleave.
+    private static async lockPayment(tx: Prisma.TransactionClient, paymentUuid: string) {
+        await tx.$queryRaw`SELECT 1 FROM "Payment" WHERE "uuid" = ${paymentUuid} FOR UPDATE`;
+        return tx.payment.findUniqueOrThrow({ where: { uuid: paymentUuid } });
+    }
+
+    private static async sumRefunds(
+        tx: Prisma.TransactionClient,
+        paymentUuid: string,
+        statuses: readonly RefundStatus[],
+        excludeRefundUuid?: string,
+    ) {
+        const totals = await tx.refund.aggregate({
+            where: {
+                paymentUuid,
+                status: { in: [...statuses] },
+                ...(excludeRefundUuid && { uuid: { not: excludeRefundUuid } }),
+            },
+            _sum: { amount: true },
+        });
+        return totals._sum.amount ?? 0;
+    }
+
+    // Before a refund is paid out by hand (cash from a drawer, or a return on
+    // the card reader), under the payment's lock: the payment must still be
+    // refundable (not voided since the request), and what's already been
+    // paid back plus this refund must not exceed it.
+    private static async assertPayoutWithinLimit(
+        tx: Prisma.TransactionClient,
+        refund: { uuid: string; paymentUuid: string; amount: number },
+    ) {
+        const payment = await this.lockPayment(tx, refund.paymentUuid);
+        // Payouts of this payment's refunds queue on that lock, so this is
+        // current: a payout we waited on may have paid this very refund
+        const current = await tx.refund.findUniqueOrThrow({ where: { uuid: refund.uuid }, select: { status: true } });
+        if (current.status !== "REQUESTED") throw new Error(`REFUND_NOT_PAYABLE: ${current.status}`);
+        if (!REFUNDABLE_PAYMENT_STATUSES.has(payment.status)) {
+            throw new Error("PAYMENT_NOT_REFUNDABLE");
+        }
+        const paidBack = await this.sumRefunds(tx, payment.uuid, ["PROCESSING", "COMPLETED"], refund.uuid);
+        if (paidBack + refund.amount > payment.amount) {
+            throw new Error("REFUND_AMOUNT_EXCEEDS_LIMIT");
+        }
+        return payment;
+    }
+
+    // After a refund turns COMPLETED: moves the payment to REFUNDED or
+    // PARTIALLY_REFUNDED from its completed refunds. The payment must be
+    // locked (lockPayment) in this transaction.
+    private static async settlePaymentStatus(
+        tx: Prisma.TransactionClient,
+        payment: { uuid: string; amount: number; status: string },
+    ) {
+        const totalRefunded = await this.sumRefunds(tx, payment.uuid, ["COMPLETED"]);
+        const next = totalRefunded >= payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED";
+        PaymentStateMachine.assertTransition(payment.status, next);
+        await tx.payment.update({ where: { uuid: payment.uuid }, data: { status: next } });
+        return next;
     }
  
     // Manager decisions on a refund parked as PENDING_APPROVAL. The status
@@ -277,11 +340,13 @@ export class RefundService{
             return refund;
         };
 
-        // A cash refund has no provider to call: staff pay it out of their
-        // drawer (payCashRefund). Left REQUESTED for that, not failed.
-        if (refund.provider === "CASH") {
-            logWithContext("info", "[Refund] Cash refund waits to be paid out at a till", {
+        // Cash and card-terminal refunds have no provider API to call: staff
+        // pay them back at the store (payCashRefund, markCardRefunded). Left
+        // REQUESTED for that, not failed.
+        if (MANUAL_REFUND_PROVIDERS.includes(refund.provider)) {
+            logWithContext("info", "[Refund] Waits to be paid back at the store", {
                 refundUuid: refund.uuid,
+                provider: refund.provider,
             });
             return refund;
         }
@@ -332,36 +397,10 @@ export class RefundService{
                     },
                 });
         
-                // Calculate total refunded amount
-                const totals = await tx.refund.aggregate({
-                    where: {
-                        paymentUuid: refund.paymentUuid,
-                        status: "COMPLETED",
-                    },
-                    _sum: { amount: true },
-                });
-        
-                const totalRefunded = totals._sum.amount || 0;
-        
-                if (totalRefunded >= refund.payment.amount) {
-                    PaymentStateMachine.assertTransition(
-                        refund.payment.status,
-                        "REFUNDED"
-                    );
-                    await tx.payment.update({
-                        where: { uuid: refund.paymentUuid },
-                        data: { status: "REFUNDED" },
-                    });
-                } else {
-                    PaymentStateMachine.assertTransition(
-                        refund.payment.status,
-                        "PARTIALLY_REFUNDED"
-                    );
-                    await tx.payment.update({
-                        where: { uuid: refund.paymentUuid },
-                        data: { status: "PARTIALLY_REFUNDED" },
-                    });
-                }
+                // From the payment as it is now (an earlier partial refund may
+                // have moved it on since this refund was read)
+                const payment = await this.lockPayment(tx, refund.paymentUuid);
+                await this.settlePaymentStatus(tx, payment);
             });
         
             EventBus.emit("REFUND_COMPLETED", {
@@ -423,9 +462,10 @@ export class RefundService{
     // One transaction, holding the drawer's row lock (the same lock as
     // payments, drops and closing): the drawer must be OPEN, in the refund's
     // store, the caller's own (or the caller a supervisor), and hold at least
-    // the refund in expected cash; the refund is claimed REQUESTED ->
-    // COMPLETED once and records the drawer, whose expected cash goes down by
-    // it. No open drawer: NO_OPEN_DRAWER, and the refund waits.
+    // the refund in expected cash; the payment must still be refundable and
+    // the refunds within it (assertPayoutWithinLimit); the refund is claimed
+    // REQUESTED -> COMPLETED once and records the drawer, whose expected cash
+    // goes down by it. No open drawer: NO_OPEN_DRAWER, and the refund waits.
     static async payCashRefund(input: {
         tenantUuid: string;
         refundUuid: string;
@@ -436,11 +476,13 @@ export class RefundService{
         const result = await prisma.$transaction(async (tx) => {
             const refund = await tx.refund.findFirst({
                 where: { uuid: input.refundUuid, tenantUuid: input.tenantUuid },
-                include: { payment: true },
             });
             if (!refund) throw new Error("REFUND_NOT_FOUND");
             if (refund.provider !== "CASH") throw new Error("NOT_A_CASH_REFUND");
             if (refund.status !== "REQUESTED") throw new Error(`REFUND_NOT_PAYABLE: ${refund.status}`);
+
+            // Payment lock before the drawer's, the order a void takes them in
+            const payment = await this.assertPayoutWithinLimit(tx, refund);
 
             await tx.$queryRaw`
                 SELECT 1 FROM "CashDrawer"
@@ -471,13 +513,7 @@ export class RefundService{
             });
             if (claimed.count === 0) throw new Error("REFUND_NOT_PAYABLE: already paid");
 
-            const totals = await tx.refund.aggregate({
-                where: { paymentUuid: refund.paymentUuid, status: "COMPLETED" },
-                _sum: { amount: true },
-            });
-            const next = (totals._sum.amount || 0) >= refund.payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED";
-            PaymentStateMachine.assertTransition(refund.payment.status, next);
-            await tx.payment.update({ where: { uuid: refund.paymentUuid }, data: { status: next } });
+            const next = await this.settlePaymentStatus(tx, payment);
 
             return { refund, drawerUuid: drawer.uuid, paymentStatus: next };
         });
@@ -499,6 +535,74 @@ export class RefundService{
             paidBy: input.paidBy,
         });
         MetricsService.increment("refund.cash.paid", 1);
+
+        return prisma.refund.findUniqueOrThrow({ where: { uuid: refund.uuid } });
+    }
+
+    // Records a card-terminal refund as paid back. We can't refund through
+    // the card reader from here, so a manager keys the return on the store's
+    // physical terminal and then marks the refund done, optionally with the
+    // reader's reference. Same guards as a cash payout: the refund is claimed
+    // REQUESTED -> COMPLETED once, under the payment's lock, and only while
+    // the payment is refundable and the refunds stay within it.
+    static async markCardRefunded(input: {
+        tenantUuid: string;
+        refundUuid: string;
+        markedBy: string;
+        terminalReference?: string;
+    }) {
+        const result = await prisma.$transaction(async (tx) => {
+            const refund = await tx.refund.findFirst({
+                where: { uuid: input.refundUuid, tenantUuid: input.tenantUuid },
+            });
+            if (!refund) throw new Error("REFUND_NOT_FOUND");
+            if (refund.provider !== "CARD_TERMINAL") throw new Error("NOT_A_CARD_TERMINAL_REFUND");
+            if (refund.status !== "REQUESTED") throw new Error(`REFUND_NOT_PAYABLE: ${refund.status}`);
+
+            const payment = await this.assertPayoutWithinLimit(tx, refund);
+
+            RefundStateMachine.assertTransition("REQUESTED", "PROCESSING");
+            RefundStateMachine.assertTransition("PROCESSING", "COMPLETED");
+            const claimed = await tx.refund.updateMany({
+                where: { uuid: refund.uuid, status: "REQUESTED" },
+                data: {
+                    status: "COMPLETED",
+                    processedAt: new Date(),
+                    providerRef: input.terminalReference ?? null,
+                    approvedBy: refund.approvedBy ?? input.markedBy,
+                    metadata: {
+                        ...((refund.metadata as Record<string, unknown> | null) ?? {}),
+                        cardTerminalRefund: {
+                            markedBy: input.markedBy,
+                            markedAt: new Date().toISOString(),
+                            terminalReference: input.terminalReference ?? null,
+                        },
+                    },
+                },
+            });
+            if (claimed.count === 0) throw new Error("REFUND_NOT_PAYABLE: already paid");
+
+            const paymentStatus = await this.settlePaymentStatus(tx, payment);
+            return { refund, paymentStatus };
+        });
+
+        const { refund } = result;
+        EventBus.emit("REFUND_COMPLETED", {
+            refundUuid: refund.uuid,
+            paymentUuid: refund.paymentUuid,
+            orderUuid: refund.orderUuid,
+            tenantUuid: refund.tenantUuid,
+            storeUuid: refund.storeUuid,
+            amount: refund.amount,
+        });
+
+        logWithContext("info", "[Refund] Card-terminal refund marked paid back", {
+            refundUuid: refund.uuid,
+            amount: refund.amount,
+            markedBy: input.markedBy,
+            paymentStatus: result.paymentStatus,
+        });
+        MetricsService.increment("refund.card_terminal.paid", 1);
 
         return prisma.refund.findUniqueOrThrow({ where: { uuid: refund.uuid } });
     }

@@ -225,11 +225,39 @@ export class CashierPaymentController {
         }
     }
 
+    // POST /api/cashier/refunds/:refundUuid/mark-card-refunded
+    // Body: { terminalReference? } - the card reader's reference for the return
+    static async markCardRefunded(req: Request, res: Response) {
+        try {
+            const { refundUuid } = req.params;
+            const { terminalReference } = req.body ?? {};
+            if (terminalReference !== undefined && (typeof terminalReference !== "string" || terminalReference.length > 100)) {
+                return res.status(400).json({ success: false, error: "INVALID_TERMINAL_REFERENCE" });
+            }
+
+            const refund = await RefundService.markCardRefunded({
+                tenantUuid: req.tenant!.uuid,
+                refundUuid,
+                markedBy: req.user!.userUuid,
+                terminalReference: terminalReference || undefined,
+            });
+
+            return res.status(200).json({ success: true, data: refund });
+        } catch (error: any) {
+            logWithContext("error", "[CashierPayment] Card-terminal refund mark failed", { error: error.message });
+            return res.status(CashierPaymentController.errorToStatus(error)).json({
+                success: false,
+                error: error.message,
+            });
+        }
+    }
+
     private static errorToStatus(error: any): number {
         const msg = error.message || "";
         if (msg.includes("NOT_FOUND")) return 404;
         if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN") || msg.includes("NOT_PAYABLE") || msg === "ORDER_CHANGED" || msg === "NO_OPEN_DRAWER") return 409;
-        if (msg === "INSUFFICIENT_DRAWER_CASH" || msg === "NOT_A_CASH_REFUND") return 409;
+        if (msg === "INSUFFICIENT_DRAWER_CASH" || msg === "NOT_A_CASH_REFUND" || msg === "NOT_A_CARD_TERMINAL_REFUND") return 409;
+        if (msg === "REFUND_AMOUNT_EXCEEDS_LIMIT" || msg === "PAYMENT_NOT_REFUNDABLE") return 409;
         if (msg === "DRAWER_NOT_YOURS" || msg === "DRAWER_WRONG_STORE") return 403;
         // Payment is no longer COMPLETED (e.g. lost a concurrent void)
         if (msg.includes("CANNOT_VOID_STATUS") || msg.includes("CANNOT_CORRECT_STATUS")) return 409;

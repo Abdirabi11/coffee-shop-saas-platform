@@ -47,6 +47,15 @@ router.post(
     CashierPaymentController.payCashRefund
 );
  
+// Mark a card-terminal refund paid back, after the manager has keyed the
+// return on the store's card reader. Role checked at the refund's store.
+// Body: { terminalReference? }
+router.post(
+    "/refunds/:refundUuid/mark-card-refunded",
+    checkRole(["MANAGER", "ADMIN"], storeOf.record("refund", "refundUuid")),
+    CashierPaymentController.markCardRefunded
+);
+ 
 // Correct a payment amount (admin only, audit trail)
 // Body: { correctAmount: number, correctionReason: string }
 router.post(
