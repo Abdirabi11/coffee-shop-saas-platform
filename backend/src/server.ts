@@ -9,6 +9,7 @@ import helmet from "helmet";
 import { createServer } from "http";
 import authRoutes from "./routes/auth/auth.routes.ts"
 import tenantRoutes from "./routes/tenant/tenant.routes.ts"
+import invitationRoutes from "./routes/tenant/invitation.routes.ts";
 import storeRoutes from "./routes/store/store.routes.ts"
 import menuRoutes from "./routes/menu/menu.routes.ts"
 import menuAdminRoutes from "./routes/menu/menuAdmin.routes.ts";
@@ -97,6 +98,7 @@ registerEventHandlers();
 app.use("/api", authRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/tenant", tenantRoutes);
+app.use("/api/invitations", invitationRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/admin/menu", menuAdminRoutes);
 app.use("/api/staff", staffRoutes);

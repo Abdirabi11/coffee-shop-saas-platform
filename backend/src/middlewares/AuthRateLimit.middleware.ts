@@ -120,6 +120,16 @@ export const passwordChangeRateLimit = createRateLimiter({
         message: "Too many password change attempts.",
 });
  
+// Accepting a staff invitation: 10 per IP per 15 minutes. Its own counter,
+// so accepting doesn't use up login attempts (or the other way round).
+export const invitationAcceptRateLimit = createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    maxAttempts: 10,
+    keyPrefix: "invite-accept",
+    keyExtractor: getIP,
+    message: "Too many invitation attempts. Please try again in 15 minutes.",
+});
+
 // Generic API rate limit: 100 per IP per minute (for general protection)
 export const apiRateLimit = createRateLimiter({
     windowMs: 60 * 1000,

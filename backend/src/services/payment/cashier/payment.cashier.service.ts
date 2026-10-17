@@ -5,6 +5,7 @@ import { EventBus } from "../../../events/eventBus.ts";
 import { logWithContext } from "../../../infrastructure/observability/Logger.ts";
 import { PaymentAnomalyDetector } from "../paymentAnomalyDetector.ts";
 import { OrderStatusService } from "../../order/OrderStatus.service.ts";
+import { InventoryOrderService } from "../../inventory/InventoryOrder.service.ts";
 
 interface ProcessCashierPaymentInput {
     orderUuid: string;
@@ -348,7 +349,7 @@ export class CashierPaymentService{
             throw new Error("PAYMENT_TOO_OLD_TO_VOID");
         }
 
-        const updated = await prisma.$transaction(async (tx) => {
+        const voided = await prisma.$transaction(async (tx) => {
             // Claim the void atomically: the COMPLETED check above is only a
             // fast path. Of two concurrent voids exactly one matches here; the
             // other throws and rolls back before touching the drawer, so the
@@ -370,13 +371,41 @@ export class CashierPaymentService{
                 where: { uuid: input.paymentUuid },
             });
 
+            // The order can never be paid again (one Payment per order, and
+            // this one is now VOIDED), so it ends here: CANCELLED, not back
+            // to READY/unpaid as before, which left it stuck. Stock it still
+            // holds as a reservation is released now; stock already sold
+            // comes back through the PAYMENT_VOIDED listener.
+            const [lockedOrder] = await tx.$queryRaw<Array<{ status: string }>>`
+                SELECT "status"::text AS "status" FROM "Order" WHERE "uuid" = ${payment.orderUuid} FOR UPDATE
+            `;
+            const fromStatus = lockedOrder?.status ?? payment.order.status;
+            const cancelledAt = new Date();
+
             const updatedOrder = await tx.order.update({
                 where: { uuid: payment.orderUuid },
                 data: {
-                    status: "READY",
-                    paymentStatus: "PENDING",
+                    status: "CANCELLED",
+                    paymentStatus: "VOIDED",
+                    cancelledAt,
+                    cancelledBy: input.voidedBy,
+                    cancellationReason: `PAYMENT_VOIDED: ${input.voidReason}`,
                 },
             });
+
+            await tx.orderStatusHistory.create({
+                data: {
+                    tenantUuid: payment.tenantUuid,
+                    orderUuid: payment.orderUuid,
+                    fromStatus: fromStatus as any,
+                    toStatus: "CANCELLED",
+                    changedBy: input.voidedBy,
+                    reason: "PAYMENT_VOIDED",
+                    notes: input.voidReason,
+                },
+            });
+
+            await InventoryOrderService.releaseForOrder({ orderUuid: payment.orderUuid, tx });
 
             const drawer = await tx.cashDrawer.findFirst({
                 where: {
@@ -430,7 +459,28 @@ export class CashierPaymentService{
                 },
             });
 
-            return updated;
+            return { updated, fromStatus };
+        });
+        const { updated, fromStatus } = voided;
+
+        // The order left the kitchen's queue: tell screens and the customer
+        EventBus.emit("ORDER_STATUS_CHANGED", {
+            orderUuid: updated.orderUuid,
+            tenantUuid: payment.tenantUuid,
+            storeUuid: payment.storeUuid,
+            from: fromStatus,
+            to: "CANCELLED",
+            timestamp: new Date(),
+        });
+
+        EventBus.emit("ORDER_CANCELLED", {
+            orderUuid: updated.orderUuid,
+            tenantUuid: payment.tenantUuid,
+            storeUuid: payment.storeUuid,
+            fromStatus,
+            refundRequested: false, // the void itself returns the money
+            reason: `PAYMENT_VOIDED: ${input.voidReason}`,
+            cancelledBy: input.voidedBy,
         });
 
         EventBus.emit("PAYMENT_VOIDED", {
