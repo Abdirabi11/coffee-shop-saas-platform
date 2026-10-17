@@ -35,16 +35,21 @@ import webhookRoutes from "./routes/webhooks/webhook.routes.ts";
 import webhookAdminRoutes from "./routes/webhooks/webhookAdmin.routes.ts";
 import { DashboardSocket } from "./websockets/DashboardSocket.ts";
 import { registerEventHandlers } from "./events/registerEvents.ts";
+import { trustProxyHops } from "./utils/clientIp.ts";
 
 
 
 const app = express();
 const PORT: number = Number(process.env.PORT) || 5004;
 
-// Number of proxies in front of the app (default: one load balancer), so
-// req.ip is the real client. Not `true`: that would trust a client-supplied
-// X-Forwarded-For and let callers pick their own rate-limit bucket.
-app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1));
+// Number of reverse proxies in front of the app, so req.ip is the real
+// client (see utils/clientIp.ts). Default 0, no proxy: the TCP peer, with
+// X-Forwarded-For ignored. Behind Nginx or a load balancer set
+// TRUST_PROXY_HOPS=1. Never `true`: that trusts a client-supplied
+// X-Forwarded-For and lets callers pick their own rate-limit bucket.
+const TRUST_PROXY_HOPS = trustProxyHops();
+app.set("trust proxy", TRUST_PROXY_HOPS);
+console.log(`🌐 trust proxy: ${TRUST_PROXY_HOPS} hop(s)`);
 
 app.use(helmet());
 app.use(securityHeadersMiddleware);

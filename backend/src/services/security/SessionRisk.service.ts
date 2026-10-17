@@ -4,6 +4,7 @@ import { MetricsService } from "../../infrastructure/observability/MetricsServic
 import { SessionService } from "../auth/Session.service.ts";
 import { DeviceTrustService } from "./DeviceTrust.service.ts";
 import { FraudService } from "./Fraud.service.ts";
+import { clientIp } from "../../utils/clientIp.ts";
 
 export class SessionRiskService {
     static async analyze(input: {
@@ -17,10 +18,7 @@ export class SessionRiskService {
             (input.req.headers["x-fingerprint"] as string) ||
             (input.req.headers["x-device-fingerprint"] as string);
     
-        const ipAddress =
-            (input.req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-            input.req.ip ||
-            "unknown";
+        const ipAddress = clientIp(input.req);
     
         const isTrusted = await DeviceTrustService.isTrustedDevice(
             input.userUuid,

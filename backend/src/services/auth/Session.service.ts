@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
+import { clientIp } from "../../utils/clientIp.ts";
 
 
 const SESSION_EXPIRY_HOURS = 24;
@@ -22,11 +23,7 @@ export class SessionService {
             (input.req.headers["x-device-fingerprint"] as string) ||
             "unknown";
     
-        const ipAddress =
-            (input.req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-            input.req.ip ||
-            input.req.socket?.remoteAddress ||
-            "unknown";
+        const ipAddress = clientIp(input.req);
     
         const deviceType = this.getDeviceType(userAgent);
         const isMobile = deviceType === "MOBILE" || deviceType === "TABLET";

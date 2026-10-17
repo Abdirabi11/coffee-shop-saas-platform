@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { hitRateLimitWindow } from "../lib/rateLimitWindow.ts";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../infrastructure/observability/MetricsService.ts";
+import { clientIp } from "../utils/clientIp.ts";
 
   
 interface RateLimitConfig {
@@ -59,13 +60,10 @@ function createRateLimiter(config: RateLimitConfig) {
  
 // ── Extractors ──────────────────────────────────────────────────────────
  
+// The client address as Express resolves it from "trust proxy"; the raw
+// X-Forwarded-For is whatever the client sent, so it can't pick the bucket
 function getIP(req: Request): string {
-    return (
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-        req.ip ||
-        req.socket.remoteAddress ||
-        "unknown"
-    );
+    return clientIp(req);
 }
  
 function getUserFromToken(req: Request): string {

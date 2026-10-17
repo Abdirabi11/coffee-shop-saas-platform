@@ -5,6 +5,7 @@ import { MetricsService } from "../../infrastructure/observability/MetricsServic
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../utils/jwt.ts";
 import { SessionService } from "./Session.service.ts";
 import type { StoreRole, GlobalRole } from "@prisma/client";
+import { clientIp } from "../../utils/clientIp.ts";
   
 // Refresh token lifetime: 30 days for mobile (offline-first), 7 days for web
 const MOBILE_TOKEN_EXPIRY_DAYS = 30;
@@ -24,11 +25,7 @@ export class TokenService {
       "unknown";
     const deviceId = (input.req.headers["x-device-id"] as string) || "unknown";
     const userAgent = input.req.headers["user-agent"] || "unknown";
-    const ipAddress =
-      (input.req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-      input.req.ip ||
-      input.req.socket?.remoteAddress ||
-      "unknown";
+    const ipAddress = clientIp(input.req);
     const isMobile = /mobile|android|iphone/i.test(userAgent);
     const expiryDays = isMobile ? MOBILE_TOKEN_EXPIRY_DAYS : WEB_TOKEN_EXPIRY_DAYS;
  
@@ -231,10 +228,7 @@ export class TokenService {
     const deviceId =
       (req.headers["x-device-id"] as string) || storedToken.deviceId || "unknown";
     const userAgent = req.headers["user-agent"] || storedToken.userAgent || "unknown";
-    const ipAddress =
-      (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-      req.ip ||
-      "unknown";
+    const ipAddress = clientIp(req);
     const isMobile = /mobile|android|iphone/i.test(userAgent);
     const expiryDays = isMobile ? MOBILE_TOKEN_EXPIRY_DAYS : WEB_TOKEN_EXPIRY_DAYS;
  
