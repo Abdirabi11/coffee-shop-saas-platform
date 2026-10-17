@@ -228,6 +228,17 @@ export class CashierPaymentService{
             return payment;
         });
         
+        // The order went to PAID in the transaction above; announce it like
+        // every other status change (the kitchen gets the order from this)
+        EventBus.emit("ORDER_STATUS_CHANGED", {
+            orderUuid: payment.orderUuid,
+            tenantUuid: payment.tenantUuid,
+            storeUuid: payment.storeUuid,
+            from: order.status,
+            to: "PAID",
+            timestamp: new Date(),
+        });
+
         EventBus.emit("CASHIER_PAYMENT_COMPLETED", {
             paymentUuid: payment.uuid,
             orderUuid: payment.orderUuid,

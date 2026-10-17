@@ -105,6 +105,17 @@ export class OrderCancellationService{
             await this.requestCancellationRefund(order.uuid, input);
         };
 
+        // Like every other status change. Its inventory listener finds the
+        // reservations already released above, so it does nothing.
+        EventBus.emit("ORDER_STATUS_CHANGED", {
+            orderUuid: order.uuid,
+            tenantUuid: order.tenantUuid,
+            storeUuid: order.storeUuid,
+            from: order.status,
+            to: "CANCELLED",
+            timestamp: new Date(),
+        });
+
         EventBus.emit("ORDER_CANCELLED", {
             orderUuid: order.uuid,
             tenantUuid: order.tenantUuid,

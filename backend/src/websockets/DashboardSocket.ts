@@ -2,6 +2,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { Server } from "http";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { EventBus } from "../events/eventBus.ts";
+import { KitchenTicketService } from "../services/realtime/KitchenTicket.service.ts";
 import prisma from "../config/prisma.ts";
 import { verifyAccessToken } from "../utils/jwt.ts";
 import type { AccessTokenPayload } from "../types/auth.types.ts";
@@ -26,6 +27,9 @@ export async function canJoinDashboardRoom(identity: SocketIdentity, room: unkno
 
   const [scope, uuid, ...rest] = room.split(":");
   if (!uuid || rest.length > 0) return false;
+
+  // A user's own room (their order updates): only that user, super admins included
+  if (scope === "user") return uuid === identity.userUuid;
   if (identity.isSuperAdmin) return scope === "tenant" || scope === "store";
 
   if (scope === "tenant") return isTenantLevelMember(identity.userUuid, uuid);
@@ -155,6 +159,7 @@ export class DashboardSocket {
       // Default rooms, each through the same check as an explicit subscribe
       // (the token's tenant/store only suggest which rooms to try)
       const defaults = [
+        `user:${identity.userUuid}`,
         "superadmin",
         user.tenantUuid ? `tenant:${user.tenantUuid}` : null,
         user.storeUuid ? `store:${user.storeUuid}` : null,
@@ -175,14 +180,11 @@ export class DashboardSocket {
 
   private setupEventListeners() {
     // Order events
+    //
+    // A new order is still unpaid, so it doesn't go to the store room (the
+    // kitchen): only the tenant and platform dashboards count it.
     EventBus.on("ORDER_CREATED", async (data) => {
-      const { tenantUuid, storeUuid, order } = data;
-
-      // Update store dashboard
-      this.io.to(`store:${storeUuid}`).emit("order:created", {
-        order,
-        timestamp: new Date(),
-      });
+      const { tenantUuid, storeUuid } = data;
 
       // Update tenant dashboard
       this.io.to(`tenant:${tenantUuid}`).emit("order:created", {
@@ -198,18 +200,49 @@ export class DashboardSocket {
       });
     });
 
-    EventBus.on("ORDER_COMPLETED", async (data) => {
-      const { tenantUuid, storeUuid, order } = data;
+    // Every status change (payment confirmed, cashier payment, staff moving
+    // it to PREPARING/READY/COMPLETED, cancellation). Emitted after the
+    // change commits.
+    EventBus.on("ORDER_STATUS_CHANGED", async (data) => {
+      const { orderUuid, tenantUuid, storeUuid, from, to } = data;
+      if (!orderUuid || !storeUuid) return;
+      const timestamp = data.timestamp ?? new Date();
 
-      this.io.to(`store:${storeUuid}`).emit("order:completed", {
-        order,
-        timestamp: new Date(),
+      // Paid: this is when the order reaches the kitchen, with everything
+      // needed to make it
+      if (to === "PAID") {
+        const ticket = await KitchenTicketService.forOrder(orderUuid);
+        if (ticket) {
+          this.io.to(`store:${storeUuid}`).emit("order:new", { order: ticket, timestamp });
+        }
+      }
+
+      const summary = await KitchenTicketService.summary(orderUuid);
+
+      this.io.to(`store:${storeUuid}`).emit("order:status-changed", {
+        orderUuid,
+        orderNumber: summary?.orderNumber,
+        from,
+        to,
+        timestamp,
       });
 
-      this.io.to(`tenant:${tenantUuid}`).emit("order:completed", {
-        storeUuid,
-        timestamp: new Date(),
-      });
+      // The customer who placed it
+      if (summary?.customerUserUuid) {
+        this.io.to(`user:${summary.customerUserUuid}`).emit("order:update", {
+          orderUuid,
+          orderNumber: summary.orderNumber,
+          status: to,
+          timestamp,
+        });
+      }
+
+      if (to === "COMPLETED" && tenantUuid) {
+        this.io.to(`tenant:${tenantUuid}`).emit("order:completed", {
+          storeUuid,
+          timestamp,
+        });
+      }
     });
 
     // Payment events
