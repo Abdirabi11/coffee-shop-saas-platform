@@ -12,6 +12,7 @@ import { OrderStatusService, REFUND_ON_CANCEL } from "../order/OrderStatus.servi
 import { RefundService } from "./Refund.service.ts";
 import { PaymentRateLimitService } from "./paymentRateLimit.service.ts";
 import { PaymentRiskScoreService } from "./paymentRiskScore.service.ts";
+import { SettlementService } from "./Settlement.service.ts";
 
 const PAYMENT_TTL_MS = 15 * 60 * 1000;
 
@@ -373,6 +374,18 @@ export class PaymentService{
           },
         });
       }
+
+      // The captured money now waits for the provider's payout, whether
+      // or not the order could take it (an unpayable order is refunded)
+      await SettlementService.recordPending({
+        tenantUuid: payment.tenantUuid,
+        storeUuid: payment.storeUuid,
+        paymentUuid: payment.uuid,
+        provider: payment.provider ?? payment.paymentMethod,
+        providerRef: input.providerRef,
+        amount: payment.amount,
+        currency: payment.currency,
+      }, tx);
 
       await tx.paymentAuditSnapshot.create({
         data: {

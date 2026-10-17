@@ -2,11 +2,18 @@ import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { withCache } from "../../infrastructure/cache/cache.ts";
+import type { Prisma, SettlementStatus } from "@prisma/client";
+import { LedgerAccounts, LedgerService } from "./ledger.service.ts";
+
+type Client = Prisma.TransactionClient | typeof prisma;
  
  
 export class SettlementService {
-    //RECORD PENDING SETTLEMENT
-    //Called from PAYMENT_CONFIRMED event handler for provider payments
+    // Records a captured provider payment as awaiting payout. Called in the
+    // transaction that marks the payment PAID (PaymentService
+    // .confirmFromProviderEvent), so every captured payment has exactly one
+    // settlement. The fee isn't known yet: 0 until the payout reports it
+    // (markSettled).
     static async recordPending(input: {
         tenantUuid: string;
         storeUuid: string;
@@ -16,41 +23,33 @@ export class SettlementService {
         amount: number;
         fee?: number;
         currency: string;
-    }) {
-        try {
-            // Idempotency — don't double-record
-            const existing = await prisma.settlement.findFirst({
-                where: { paymentUuid: input.paymentUuid },
-            });
-            if (existing) return existing;
-        
-            const settlement = await prisma.settlement.create({
-                data: {
-                    tenantUuid: input.tenantUuid,
-                    storeUuid: input.storeUuid,
-                    paymentUuid: input.paymentUuid,
-                    provider: input.provider,
-                    providerRef: input.providerRef,
-                    grossAmount: input.amount,
-                    providerFee: input.fee ?? 0,
-                    netAmount: input.amount - (input.fee ?? 0),
-                    currency: input.currency,
-                    status: "PENDING",
-                    // Estimated settlement: Stripe = 2 business days, EVC = 1 day
-                    estimatedSettlementAt: this.estimateSettlementDate(input.provider),
-                },
-            });
-        
-            return settlement;
-        } catch (error: any) {
-            logWithContext("error", "[Settlement] recordPending failed", {
+    }, client: Client = prisma) {
+        // Settlement.paymentUuid is unique: a repeat is a no-op
+        return client.settlement.upsert({
+            where: { paymentUuid: input.paymentUuid },
+            update: {},
+            create: {
+                tenantUuid: input.tenantUuid,
+                storeUuid: input.storeUuid,
                 paymentUuid: input.paymentUuid,
-                error: error.message,
-            });
-        }
+                provider: input.provider,
+                providerRef: input.providerRef,
+                grossAmount: input.amount,
+                providerFee: input.fee ?? 0,
+                netAmount: input.amount - (input.fee ?? 0),
+                currency: input.currency,
+                status: "PENDING",
+                // Estimated settlement: Stripe = 2 business days, EVC = 1 day
+                estimatedSettlementAt: this.estimateSettlementDate(input.provider),
+            },
+        });
     }
- 
-    //MARK AS SETTLED (called by sync job)
+
+    // Marks a settlement paid out (SettlementSyncJob) with the provider's
+    // real fee and net, and posts it to the ledger: the fee as an expense
+    // and the net as money arriving in the bank, both out of the
+    // provider's clearing account. Once per settlement: the PENDING ->
+    // SETTLED claim is conditional, and the postings have idempotency keys.
     static async markSettled(input: {
         paymentUuid?: string;
         providerRef?: string;
@@ -72,16 +71,54 @@ export class SettlementService {
         });
     
         if (!settlement) return null;
-    
-        return prisma.settlement.update({
-            where: { uuid: settlement.uuid },
-            data: {
-                status: "SETTLED",
-                settledAt: input.settledAt,
-                providerPayoutId: input.providerPayoutId,
-                providerFee: input.fee,
-                netAmount: input.netAmount,
-            },
+
+        return prisma.$transaction(async (tx) => {
+            const claimed = await tx.settlement.updateMany({
+                where: { uuid: settlement.uuid, status: "PENDING" },
+                data: {
+                    status: "SETTLED",
+                    settledAt: input.settledAt,
+                    providerPayoutId: input.providerPayoutId,
+                    providerFee: input.fee,
+                    netAmount: input.netAmount,
+                },
+            });
+            if (claimed.count === 0) return null;
+
+            const clearing = LedgerAccounts.providerClearing(settlement.provider);
+            const ref = {
+                tenantUuid: settlement.tenantUuid,
+                storeUuid: settlement.storeUuid,
+                currency: settlement.currency,
+                refType: "SETTLEMENT",
+                refUuid: settlement.uuid,
+                metadata: { providerPayoutId: input.providerPayoutId, paymentUuid: settlement.paymentUuid },
+                createdBy: "SYSTEM",
+            };
+            if (input.fee > 0) {
+                await LedgerService.record({
+                    ...ref,
+                    type: "FEE",
+                    amount: input.fee,
+                    debitAccount: LedgerAccounts.PROVIDER_FEES,
+                    creditAccount: clearing,
+                    idempotencyKey: `SETTLEMENT:${settlement.uuid}:fee`,
+                    description: `${settlement.provider} fee`,
+                }, tx);
+            }
+            if (input.netAmount > 0) {
+                await LedgerService.record({
+                    ...ref,
+                    type: "PAYOUT",
+                    amount: input.netAmount,
+                    debitAccount: LedgerAccounts.BANK,
+                    creditAccount: clearing,
+                    idempotencyKey: `SETTLEMENT:${settlement.uuid}:payout`,
+                    description: `${settlement.provider} payout ${input.providerPayoutId}`,
+                }, tx);
+            }
+
+            return tx.settlement.findUniqueOrThrow({ where: { uuid: settlement.uuid } });
         });
     }
     
@@ -193,7 +230,7 @@ export class SettlementService {
         const where = {
             tenantUuid: input.tenantUuid,
             ...(input.provider && { provider: input.provider }),
-            ...(input.status && { status: input.status }),
+            ...(input.status && { status: input.status as SettlementStatus }),
             ...(input.from && input.to && {
                 createdAt: { gte: input.from, lte: input.to },
             }),

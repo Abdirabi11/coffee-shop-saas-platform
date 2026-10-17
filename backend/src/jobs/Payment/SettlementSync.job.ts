@@ -49,9 +49,10 @@ export class SettlementSyncJob {
     private static async syncStripe() {
         let settled = 0;
         let failed = 0;
+        if (!process.env.STRIPE_SECRET_KEY) return { settled, failed };
     
         try {
-            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
         
             // Get recent payouts (last 7 days)
             const payouts = await stripe.payouts.list({
@@ -115,9 +116,9 @@ export class SettlementSyncJob {
     private static async syncEVC() {
         let settled = 0;
         let failed = 0;
+        if (!process.env.EVC_PLUS_API_URL || !process.env.EVC_PLUS_API_KEY) return { settled, failed };
     
         try {
-    
             const response = await axios.get(
                 `${process.env.EVC_PLUS_API_URL}/settlements`,
                 {

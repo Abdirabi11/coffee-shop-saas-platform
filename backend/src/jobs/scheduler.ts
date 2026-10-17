@@ -51,6 +51,7 @@ import { IdempotencyService } from "../services/order/Idempotency.service.ts";
 import { FraudEventCleanupJob } from "./auth/FraudEventCleanup.job.ts";
 import { RiskScoreDecayJob } from "./Payment/RiskScoreDecay.jobs.ts";
 import { ProviderReportReconciliationJob } from "./Payment/ProviderReportReconciliation.job.ts";
+import { SettlementSyncJob } from "./Payment/SettlementSync.job.ts";
 import { DeviceCleanupJob } from "./auth/DeviceCleanup.job.ts";
 import { OrderMetricsCalculationJob } from "./Order/orderMetricsCalculation.job.ts";
 import { MenuAnalyticsAggregationJob } from "./menu/MenuAnalyticsAggregation.job.ts";
@@ -156,7 +157,8 @@ export function startScheduler() {
   schedule("0 1 * * *",  "AnalyticsAggregationJob",         () => AnalyticsAggregationJob.run());
  
   // 02:00 — Reconciliation & metrics
-  schedule("0 2 * * *",  "DailyReconciliationJob",          () => DailyReconciliationJob.run());
+  // Hourly: each store's previous local day, once it is past 02:00 there
+  schedule("5 * * * *",  "DailyReconciliationJob",          () => DailyReconciliationJob.run());
   schedule("0 2 * * *",  "DailyStoreMetricsJob",            () => DailyStoreMetricsJob.run());
   schedule("0 2 * * *",  "PerformanceCalculationJob",       () => PerformanceCalculationJob.run());
   schedule("0 2 * * *",  "ProductMetricsCalculationJob",    () => ProductMetricsCalculationJob.run());
@@ -166,7 +168,8 @@ export function startScheduler() {
   schedule("30 2 * * *", "DashboardSnapshotJob",            () => DashboardSnapshotJob.execute());
  
   // 03:00 — Provider reconciliation & analytics
-  schedule("0 3 * * *",  "ProviderReportReconciliation",    () => ProviderReportReconciliationJob.run());
+  // Hourly: each tenant's previous local day, once it is past 03:00 there
+  schedule("15 * * * *", "ProviderReportReconciliation",    () => ProviderReportReconciliationJob.run());
   schedule("0 3 * * *",  "OrderMetricsCalculationJob",      () => OrderMetricsCalculationJob.run());
   schedule("0 3 * * *",  "DeviceCleanupJob",                () => DeviceCleanupJob.run());
   schedule("0 3 * * *",  "MenuAnalyticsAggregationJob",     () => MenuAnalyticsAggregationJob.run());
@@ -185,6 +188,9 @@ export function startScheduler() {
  
   // 05:00 — Orphaned detection
   schedule("0 5 * * *",  "OrphanedPaymentDetectionJob",     () => OrphanedPaymentDetectionJob.run());
+ 
+  // 06:00 — Provider payouts: settlements paid out, fees and payouts to the ledger
+  schedule("0 6 * * *",  "SettlementSyncJob",               () => SettlementSyncJob.run());
  
   // ─────────────────────────────────────────────────────────────────────────
   // 🟣 WEEKLY

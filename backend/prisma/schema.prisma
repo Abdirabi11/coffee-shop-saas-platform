@@ -691,6 +691,7 @@ enum LedgerEntryType {
   WALLET_DEBIT
   ADJUSTMENT
   FEE
+  PAYOUT
 }
 
 enum LimitType {
@@ -4423,6 +4424,10 @@ model PaymentReconciliation {
   providerRefundCount   Int
   providerRefundTotal   Int
   providerNetTotal      Int
+  // Fees the provider took; expected provider net is
+  // ourPaymentTotal - ourRefundTotal - providerFeeTotal
+  providerFeeTotal      Int                  @default(0)
+  expectedNetTotal      Int                  @default(0)
   // Variances
   paymentCountVariance  Int                  @default(0)
   paymentAmountVariance Int                  @default(0)
@@ -4501,6 +4506,9 @@ model LedgerEntry {
 
   description String?
   metadata    Json?
+
+  // One posting per key: retries and concurrent writers can't post twice
+  idempotencyKey String? @unique
 
   createdAt DateTime @default(now())
   createdBy String?
@@ -4633,6 +4641,23 @@ model DailyReconciliation {
   resolutionNotes  String?
   // Who performed reconciliation
   reconciledBy     String
+
+  // The store-local calendar day this row covers (date is that day at
+  // 00:00 UTC, as a key): [periodStart, periodEnd) in the store's timezone
+  timezone       String    @default("UTC")
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  // Money for the day, minor units. Gross is every payment collected that
+  // day (refunded later or not); refunds are those paid back that day.
+  // net = gross - refunds - providerFees
+  onlineDeclared Int       @default(0)
+  grossCollected Int       @default(0)
+  refundsTotal   Int       @default(0)
+  cashRefunds    Int       @default(0)
+  cardRefunds    Int       @default(0)
+  onlineRefunds  Int       @default(0)
+  providerFees   Int       @default(0)
+  netCollected   Int       @default(0)
   // Relationships
   tenant           Tenant    @relation(fields: [tenantUuid], references: [uuid])
   store            Store     @relation(fields: [storeUuid], references: [uuid])

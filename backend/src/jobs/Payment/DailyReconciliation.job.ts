@@ -1,38 +1,67 @@
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { DailyReconciliationService } from "../../services/payment/DailyReconciliation.service.ts";
 
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
+// Local hour from which a store's previous day is reconciled: late card
+// settlements and offline order syncs have landed by then
+const RECONCILE_FROM_LOCAL_HOUR = 2;
+
+// Runs hourly. Each store's previous calendar day, in the store's own
+// timezone, is reconciled once local time passes 02:00, so every store gets
+// its day reconciled at about 02:00 where it is, whatever the server's zone.
+// A day already reconciled is skipped (re-run one by hand with
+// DailyReconciliationService.reconcileStoreDay).
 export class DailyReconciliationJob {
-    static cronSchedule = "0 1 * * *";
-    
-    static async run(date: Date = new Date()) {
-        const startOfDay = dayjs(date).startOf("day").toDate();
-        const endOfDay = dayjs(date).endOf("day").toDate();
-    
-        logWithContext("info", "[DailyReconciliation] Starting", {
-            date: startOfDay.toISOString(),
-        });
-    
+    static cronSchedule = "5 * * * *";
+
+    // storeUuids narrows the run to those stores (catch-up for a few stores)
+    static async run(now: Date = new Date(), opts: { storeUuids?: string[] } = {}) {
+        // Stores that are open, or were recently (a store shut down today
+        // still had yesterday's sales)
+        const recent = dayjs(now).subtract(3, "day").toDate();
         const stores = await prisma.store.findMany({
-            where: { status: "ACTIVE" },
-            select: { uuid: true, tenantUuid: true, name: true },
+            where: {
+                ...(opts.storeUuids && { uuid: { in: opts.storeUuids } }),
+                OR: [
+                    { status: "ACTIVE" },
+                    { payments: { some: { createdAt: { gte: recent } } } },
+                ],
+            },
+            select: { uuid: true, timezone: true },
         });
-    
+
         let reconciled = 0;
         let withVariance = 0;
+        let skipped = 0;
         let failed = 0;
-    
+
         for (const store of stores) {
             try {
-                const result = await this.reconcileStore(
-                    store.uuid,
-                    store.tenantUuid,
-                    startOfDay,
-                    endOfDay
-                );
+                const tz = DailyReconciliationService.safeTimezone(store.timezone);
+                if (dayjs(now).tz(tz).hour() < RECONCILE_FROM_LOCAL_HOUR) {
+                    skipped++;
+                    continue;
+                }
+                const localDate = DailyReconciliationService.previousLocalDate(tz, now);
+                const { dateKey } = DailyReconciliationService.localDayWindow(tz, localDate);
+                const done = await prisma.dailyReconciliation.findUnique({
+                    where: { storeUuid_date: { storeUuid: store.uuid, date: dateKey } },
+                    select: { uuid: true },
+                });
+                if (done) {
+                    skipped++;
+                    continue;
+                }
+
+                const row = await DailyReconciliationService.reconcileStoreDay(store.uuid, localDate);
                 reconciled++;
-                if (result.hasVariance) withVariance++;
+                if (row.hasVariance) withVariance++;
             } catch (error: any) {
                 failed++;
                 logWithContext("error", "[DailyReconciliation] Store failed", {
@@ -41,126 +70,17 @@ export class DailyReconciliationJob {
                 });
             }
         }
-    
-        logWithContext("info", "[DailyReconciliation] Completed", {
-        stores: stores.length,
-        reconciled,
-        withVariance,
-        failed,
-        });
-    
-        return { reconciled, withVariance, failed };
-    }
-    
-    private static async reconcileStore(
-        storeUuid: string,
-        tenantUuid: string,
-        startOfDay: Date,
-        endOfDay: Date
-    ) {
-        //Using DB aggregation instead of loading all records
-        const [cashAgg, cardAgg, orderAgg, paymentCount, orderCount] =
-            await Promise.all([
-                // Cash total
-                prisma.payment.aggregate({
-                    where: {
-                        storeUuid,
-                        status: "COMPLETED",
-                        paymentFlow: "CASHIER",
-                        paymentMethod: "CASH",
-                        processedAt: { gte: startOfDay, lte: endOfDay },
-                    },
-                    _sum: { amount: true },
-                    _count: true,
-                }),
-                // Card total
-                prisma.payment.aggregate({
-                    where: {
-                        storeUuid,
-                        status: "COMPLETED",
-                        paymentFlow: "CASHIER",
-                        paymentMethod: "CARD_TERMINAL",
-                        processedAt: { gte: startOfDay, lte: endOfDay },
-                    },
-                    _sum: { amount: true },
-                    _count: true,
-                }),
-                // Orders total
-                prisma.order.aggregate({
-                    where: {
-                        storeUuid,
-                        status: "COMPLETED",
-                        createdAt: { gte: startOfDay, lte: endOfDay },
-                    },
-                    _sum: { totalAmount: true },
-                    _count: true,
-                }),
-                // Payment count (for missing detection)
-                prisma.payment.count({
-                    where: {
-                        storeUuid,
-                        paymentFlow: "CASHIER",
-                        processedAt: { gte: startOfDay, lte: endOfDay },
-                    },
-                }),
-                // Order count
-                prisma.order.count({
-                    where: {
-                        storeUuid,
-                        status: "COMPLETED",
-                        createdAt: { gte: startOfDay, lte: endOfDay },
-                    },
-                }),
-            ]);
-    
-        const cashTotal = cashAgg._sum.amount ?? 0;
-        const cardTotal = cardAgg._sum.amount ?? 0;
-        const totalPayments = cashTotal + cardTotal;
-        const ordersTotal = orderAgg._sum.totalAmount ?? 0;
-        const variance = totalPayments - ordersTotal;
-        const hasVariance = Math.abs(variance) > 100;
-    
-        await prisma.dailyReconciliation.upsert({
-            where: {
-                storeUuid_date: { storeUuid, date: startOfDay },
-            },
-            update: {
-                ordersCount: orderCount,
-                ordersTotal,
-                cashDeclared: cashTotal,
-                cardDeclared: cardTotal,
-                totalDeclared: totalPayments,
-                totalVariance: variance,
-                variancePercent: ordersTotal > 0 ? (variance / ordersTotal) * 100 : 0,
-                hasVariance,
-                status: hasVariance ? "NEEDS_REVIEW" : "RECONCILED",
-            },
-            create: {
-                storeUuid,
-                tenantUuid,
-                date: startOfDay,
-                ordersCount: orderCount,
-                ordersTotal,
-                cashDeclared: cashTotal,
-                cardDeclared: cardTotal,
-                totalDeclared: totalPayments,
-                totalVariance: variance,
-                variancePercent: ordersTotal > 0 ? (variance / ordersTotal) * 100 : 0,
-                hasVariance,
-                requiresReview: hasVariance,
-                status: hasVariance ? "NEEDS_REVIEW" : "RECONCILED",
-                reconciledBy: "SYSTEM",
-            },
-        });
-    
-        logWithContext(hasVariance ? "warn" : "info", "[DailyReconciliation] Store reconciled", {
-            storeUuid,
-            totalPayments,
-            ordersTotal,
-            variance,
-            hasVariance,
-        });
-    
-        return { hasVariance, variance };
+
+        if (reconciled > 0 || failed > 0) {
+            logWithContext("info", "[DailyReconciliation] Completed", {
+                stores: stores.length,
+                reconciled,
+                withVariance,
+                skipped,
+                failed,
+            });
+        }
+
+        return { reconciled, withVariance, skipped, failed };
     }
 }
