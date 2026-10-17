@@ -403,6 +403,9 @@ async function main() {
     const ctx = await setup();
 
     const app = express();
+    // As if behind one reverse proxy, so the X-Forwarded-For the invitation
+    // checks set per request names the client (a proxy would append it)
+    app.set("trust proxy", 1);
     app.use(express.json());
     app.use("/api/store", storeRoutes);
     app.use("/api/order", orderRoutes);
@@ -950,8 +953,8 @@ async function main() {
             });
             return raw;
         };
-        // Each request from its own address, so the per-IP limiter doesn't
-        // interfere with these checks
+        // Each request from its own address (via the trusted proxy hop), so
+        // the per-IP limiter doesn't interfere with these checks
         let inviteIp = 0;
         const accept = async (path: string, body: unknown, bearer?: string) => {
             const res = await fetch(`${base}/api/invitations${path}`, {
