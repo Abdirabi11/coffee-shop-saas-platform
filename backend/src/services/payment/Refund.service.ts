@@ -8,6 +8,7 @@ import { MetricsService } from "../../infrastructure/observability/MetricsServic
 import { PaymentProviderAdapter } from "../../infrastructure/payments/providers/paymentProvider.adapter.ts";
 import { RiskPolicyEnforcer } from "../fraud/riskPolicyEnforcer.service.ts";
 import { PaymentRestrictionService } from "./PaymentRestriction.service.ts";
+import { CashDrawerService } from "../staff/CashDrawer.service.ts";
 
 
 export class RefundService{
@@ -275,6 +276,15 @@ export class RefundService{
             });
             return refund;
         };
+
+        // A cash refund has no provider to call: staff pay it out of their
+        // drawer (payCashRefund). Left REQUESTED for that, not failed.
+        if (refund.provider === "CASH") {
+            logWithContext("info", "[Refund] Cash refund waits to be paid out at a till", {
+                refundUuid: refund.uuid,
+            });
+            return refund;
+        }
     
         RefundStateMachine.assertTransition(refund.status, "PROCESSING");
     
@@ -406,6 +416,93 @@ export class RefundService{
         }
     }
  
+    // Pays a cash refund out of an open cash drawer. A cash refund has no
+    // provider: it stays REQUESTED (processRefund and RefundProcessorJob
+    // leave it alone) until someone at a till hands the money over.
+    //
+    // One transaction, holding the drawer's row lock (the same lock as
+    // payments, drops and closing): the drawer must be OPEN, in the refund's
+    // store, the caller's own (or the caller a supervisor), and hold at least
+    // the refund in expected cash; the refund is claimed REQUESTED ->
+    // COMPLETED once and records the drawer, whose expected cash goes down by
+    // it. No open drawer: NO_OPEN_DRAWER, and the refund waits.
+    static async payCashRefund(input: {
+        tenantUuid: string;
+        refundUuid: string;
+        drawerUuid: string;
+        paidBy: string;
+        actorIsSupervisor: boolean;
+    }) {
+        const result = await prisma.$transaction(async (tx) => {
+            const refund = await tx.refund.findFirst({
+                where: { uuid: input.refundUuid, tenantUuid: input.tenantUuid },
+                include: { payment: true },
+            });
+            if (!refund) throw new Error("REFUND_NOT_FOUND");
+            if (refund.provider !== "CASH") throw new Error("NOT_A_CASH_REFUND");
+            if (refund.status !== "REQUESTED") throw new Error(`REFUND_NOT_PAYABLE: ${refund.status}`);
+
+            await tx.$queryRaw`
+                SELECT 1 FROM "CashDrawer"
+                WHERE "uuid" = ${input.drawerUuid} AND "tenantUuid" = ${input.tenantUuid}
+                FOR UPDATE
+            `;
+            const drawer = await tx.cashDrawer.findFirst({
+                where: { uuid: input.drawerUuid, tenantUuid: input.tenantUuid },
+                include: { cashDrops: true },
+            });
+            if (!drawer || drawer.status !== "OPEN") throw new Error("NO_OPEN_DRAWER");
+            if (drawer.storeUuid !== refund.storeUuid) throw new Error("DRAWER_WRONG_STORE");
+            if (drawer.userUuid !== input.paidBy && !input.actorIsSupervisor) throw new Error("DRAWER_NOT_YOURS");
+
+            const { expectedCash } = await CashDrawerService.expectedTotals(tx, drawer);
+            if (expectedCash < refund.amount) throw new Error("INSUFFICIENT_DRAWER_CASH");
+
+            RefundStateMachine.assertTransition("REQUESTED", "PROCESSING");
+            RefundStateMachine.assertTransition("PROCESSING", "COMPLETED");
+            const claimed = await tx.refund.updateMany({
+                where: { uuid: refund.uuid, status: "REQUESTED" },
+                data: {
+                    status: "COMPLETED",
+                    processedAt: new Date(),
+                    cashDrawerUuid: drawer.uuid,
+                    approvedBy: refund.approvedBy ?? input.paidBy,
+                },
+            });
+            if (claimed.count === 0) throw new Error("REFUND_NOT_PAYABLE: already paid");
+
+            const totals = await tx.refund.aggregate({
+                where: { paymentUuid: refund.paymentUuid, status: "COMPLETED" },
+                _sum: { amount: true },
+            });
+            const next = (totals._sum.amount || 0) >= refund.payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED";
+            PaymentStateMachine.assertTransition(refund.payment.status, next);
+            await tx.payment.update({ where: { uuid: refund.paymentUuid }, data: { status: next } });
+
+            return { refund, drawerUuid: drawer.uuid, paymentStatus: next };
+        });
+
+        const { refund } = result;
+        EventBus.emit("REFUND_COMPLETED", {
+            refundUuid: refund.uuid,
+            paymentUuid: refund.paymentUuid,
+            orderUuid: refund.orderUuid,
+            tenantUuid: refund.tenantUuid,
+            storeUuid: refund.storeUuid,
+            amount: refund.amount,
+        });
+
+        logWithContext("info", "[Refund] Cash refund paid out", {
+            refundUuid: refund.uuid,
+            drawerUuid: result.drawerUuid,
+            amount: refund.amount,
+            paidBy: input.paidBy,
+        });
+        MetricsService.increment("refund.cash.paid", 1);
+
+        return prisma.refund.findUniqueOrThrow({ where: { uuid: refund.uuid } });
+    }
+
     // Provider-side refund notification (Stripe charge.refunded).
     //
     // totalRefunded is the provider's CUMULATIVE amount refunded on the

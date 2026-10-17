@@ -2,6 +2,7 @@ import type { DayOfWeek } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { storeLocalTime } from "../../utils/date.ts";
+import { StoreStatusService } from "./StoreStatus.service.ts";
 
 
 const DAY_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
@@ -20,6 +21,9 @@ export class StoreHoursService {
                 select: { timezone: true },
             });
             if (!store) return false;
+
+            // A deactivated/suspended store (or tenant) is closed whatever its hours
+            if (!(await StoreStatusService.isOperational(storeUuid))) return false;
 
             const local = storeLocalTime(current, store.timezone);
             const currentTime = local.time; // "HH:mm"

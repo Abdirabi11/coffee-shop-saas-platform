@@ -8,6 +8,7 @@ import { MenuSnapshotService } from "../menu/menuSnapshot.service.ts";
 import { OrderNumberService } from "../order/OrderNumber.service.ts";
 import { OrderPricingService } from "../order/OrderPricing.service.ts";
 import { MANUALLY_SETTABLE_STATUSES, OrderStatusService } from "../order/OrderStatus.service.ts";
+import { StoreStatusService } from "../store/StoreStatus.service.ts";
 
 const MAX_SYNC_ITEMS = 100;
 
@@ -82,6 +83,8 @@ export class OrderSyncService{
             userUuid: input.userUuid,
             storeUuid: input.clientOrder.storeUuid,
         });
+        // A deactivated store takes no orders, offline ones included
+        await StoreStatusService.assertOperational(storeUuid);
 
         try {
             // TODO(schema): add Order.clientOrderUuid (@@unique with tenantUuid)

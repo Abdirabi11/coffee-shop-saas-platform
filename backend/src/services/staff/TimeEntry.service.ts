@@ -4,6 +4,7 @@ import prisma from "../../config/prisma.ts"
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { EventBus } from "../../events/eventBus.ts";
+import { StoreStatusService } from "../store/StoreStatus.service.ts";
 
 export class TimeEntryService {
   
@@ -31,18 +32,8 @@ export class TimeEntryService {
                 throw new Error("STAFF_NO_STORE_ACCESS");
             }
 
-            // 2. Check if already clocked in
-            const existingEntry = await prisma.timeEntry.findFirst({
-                where: {
-                    userUuid: input.userUuid,
-                    storeUuid: input.storeUuid,
-                    clockOutAt: null,
-                },
-            });
-
-            if (existingEntry) {
-                throw new Error("ALREADY_CLOCKED_IN");
-            }
+            // 2. The store must be operating
+            await StoreStatusService.assertOperational(input.storeUuid);
 
             // 3. Geofencing check (if coordinates provided)
             let distanceFromStore: number | undefined;
@@ -74,17 +65,37 @@ export class TimeEntryService {
                 }
             }
 
-            // 4. Check if late (if scheduled shift exists)
-            let requiresApproval = false;
-            let approvalReason: string | undefined;
-            let shift;
+            // 4-6. Under a lock on the user's row, so two clock-ins can't both
+            // pass the checks: one open time entry per person across every
+            // store (being clocked in at two stores at once is paid twice),
+            // and a shift only if it is theirs, at this store, and not
+            // already worked.
+            const timeEntry = await prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`SELECT 1 FROM "User" WHERE "uuid" = ${input.userUuid} FOR UPDATE`;
 
-            if (input.shiftUuid) {
-                shift = await prisma.shift.findUnique({
-                    where: { uuid: input.shiftUuid },
+                const existingEntry = await tx.timeEntry.findFirst({
+                    where: { userUuid: input.userUuid, clockOutAt: null },
+                    select: { storeUuid: true },
                 });
+                if (existingEntry) {
+                    throw new Error(existingEntry.storeUuid === input.storeUuid
+                        ? "ALREADY_CLOCKED_IN"
+                        : "ALREADY_CLOCKED_IN_ELSEWHERE");
+                }
 
-                if (shift) {
+                // Check if late (if scheduled shift exists)
+                let requiresApproval = false;
+                let approvalReason: string | undefined;
+                let shift;
+
+                if (input.shiftUuid) {
+                    shift = await tx.shift.findFirst({
+                        where: { uuid: input.shiftUuid, userUuid: input.userUuid, storeUuid: input.storeUuid },
+                    });
+                    if (!shift || shift.status !== "SCHEDULED") {
+                        throw new Error("SHIFT_NOT_FOUND");
+                    }
+
                     const scheduledStart = dayjs(shift.scheduledStart);
                     const actualStart = dayjs();
                     const minutesLate = actualStart.diff(scheduledStart, "minute");
@@ -95,51 +106,53 @@ export class TimeEntryService {
                         approvalReason = `Clocked in ${minutesLate} minutes late`;
                     }
                 }
-            }
 
-            // 5. Get pay rate
-            const tenantUser = await prisma.tenantUser.findUnique({
-                where: {
-                    tenantUuid_userUuid: {
-                        tenantUuid: userStore.tenantUuid,
-                        userUuid: input.userUuid,
-                    },
-                },
-            });
-
-            // 6. Create time entry
-            const timeEntry = await prisma.timeEntry.create({
-                data: {
-                    tenantUuid: userStore.tenantUuid,
-                    storeUuid: input.storeUuid,
-                    userUuid: input.userUuid,
-                    shiftUuid: input.shiftUuid,
-                    clockInAt: new Date(),
-                    clockInDevice: input.deviceId,
-                    clockInLat: input.latitude,
-                    clockInLng: input.longitude,
-                    clockInDistanceM: distanceFromStore,
-                    payRate: tenantUser?.payRate,
-                    requiresApproval: requiresApproval || geofenceViolation,
-                    approvalReason: approvalReason || (geofenceViolation ? "Geofence violation" : undefined),
-                },
-            });
-
-            // 7. Update shift status
-            if (shift) {
-                await prisma.shift.update({
-                    where: { uuid: shift.uuid },
-                    data: {
-                        status: "IN_PROGRESS",
-                        actualStart: new Date(),
+                // Get pay rate
+                const tenantUser = await tx.tenantUser.findUnique({
+                    where: {
+                        tenantUuid_userUuid: {
+                            tenantUuid: userStore.tenantUuid,
+                            userUuid: input.userUuid,
+                        },
                     },
                 });
-            };
+
+                // Create time entry
+                const timeEntry = await tx.timeEntry.create({
+                    data: {
+                        tenantUuid: userStore.tenantUuid,
+                        storeUuid: input.storeUuid,
+                        userUuid: input.userUuid,
+                        shiftUuid: shift?.uuid,
+                        clockInAt: new Date(),
+                        clockInDevice: input.deviceId,
+                        clockInLat: input.latitude,
+                        clockInLng: input.longitude,
+                        clockInDistanceM: distanceFromStore,
+                        payRate: tenantUser?.payRate,
+                        requiresApproval: requiresApproval || geofenceViolation,
+                        approvalReason: approvalReason || (geofenceViolation ? "Geofence violation" : undefined),
+                    },
+                });
+
+                // Update shift status
+                if (shift) {
+                    await tx.shift.update({
+                        where: { uuid: shift.uuid },
+                        data: {
+                            status: "IN_PROGRESS",
+                            actualStart: new Date(),
+                        },
+                    });
+                };
+
+                return timeEntry;
+            });
 
             logWithContext("info", "[TimeEntry] Clock in successful", {
                 timeEntryUuid: timeEntry.uuid,
                 userUuid: input.userUuid,
-                requiresApproval,
+                requiresApproval: timeEntry.requiresApproval,
                 geofenceViolation,
             });
 
@@ -156,13 +169,13 @@ export class TimeEntryService {
                 timeEntryUuid: timeEntry.uuid,
                 userUuid: input.userUuid,
                 storeUuid: input.storeUuid,
-                requiresApproval,
+                requiresApproval: timeEntry.requiresApproval,
             });
 
             return {
                 timeEntry,
-                requiresApproval,
-                approvalReason,
+                requiresApproval: timeEntry.requiresApproval,
+                approvalReason: timeEntry.approvalReason,
                 geofenceViolation,
                 distanceFromStore,
             };
@@ -283,23 +296,30 @@ export class TimeEntryService {
             autoReason?: string;
         }
     ) {
-        // Calculate hours worked
-        const hoursWorked = dayjs(data.at).diff(dayjs(timeEntry.clockInAt), "hour", true);
-
         await client.breakEntry.updateMany({
             where: { timeEntryUuid: timeEntry.uuid, breakEnd: null },
             data: { breakEnd: data.at },
         });
 
-        // Calculate total break time
+        // Break time: all of it is recorded; only UNPAID and MEAL breaks come
+        // off the paid hours (PAID rest breaks are working time)
         const breaks = await client.breakEntry.findMany({
             where: { timeEntryUuid: timeEntry.uuid },
+            select: { breakStart: true, breakEnd: true, breakType: true },
         });
+        let totalBreakMinutes = 0;
+        let unpaidBreakMinutes = 0;
+        for (const b of breaks) {
+            if (!b.breakEnd) continue;
+            const minutes = dayjs(b.breakEnd).diff(dayjs(b.breakStart), "minute", true);
+            totalBreakMinutes += minutes;
+            if (b.breakType !== "PAID") unpaidBreakMinutes += minutes;
+        }
 
-        const totalBreakMinutes = breaks.reduce((sum, b) => {
-            if (!b.breakEnd) return sum;
-            return sum + dayjs(b.breakEnd).diff(dayjs(b.breakStart), "minute");
-        }, 0);
+        // Paid hours: time on the clock minus unpaid breaks. hoursWorked is
+        // what payroll (PayrollExport) sums, so it holds paid hours.
+        const elapsedHours = dayjs(data.at).diff(dayjs(timeEntry.clockInAt), "hour", true);
+        const hoursWorked = Math.max(0, elapsedHours - unpaidBreakMinutes / 60);
 
         // Calculate pay
         const payRate = timeEntry.payRate || 0;
@@ -315,7 +335,7 @@ export class TimeEntryService {
                 clockOutLng: data.longitude,
                 clockOutDistanceM: data.distanceFromStore,
                 hoursWorked: Number(hoursWorked.toFixed(2)),
-                breakMinutes: totalBreakMinutes,
+                breakMinutes: Math.round(totalBreakMinutes),
                 totalPay,
                 ...(data.autoReason && { requiresApproval: true, approvalReason: data.autoReason }),
             },
@@ -343,10 +363,14 @@ export class TimeEntryService {
         // Someone else's (or no) entry reads as not found
         const owned = await prisma.timeEntry.findFirst({
             where: { uuid: input.timeEntryUuid, userUuid: input.userUuid },
-            select: { uuid: true },
+            select: { uuid: true, clockOutAt: true },
         });
         if (!owned) {
             throw new Error("TIME_ENTRY_NOT_FOUND");
+        }
+        // A break belongs inside a shift that is still on the clock
+        if (owned.clockOutAt) {
+            throw new Error("NOT_CLOCKED_IN");
         }
 
         // Check if already on break

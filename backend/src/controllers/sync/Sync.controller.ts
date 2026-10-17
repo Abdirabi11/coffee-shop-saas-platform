@@ -151,6 +151,9 @@ export class SyncController {
                 serverTimestamp: Date.now(),
             });
         } catch (error: any) {
+            if (error.message === "STORE_INACTIVE") {
+                return res.status(409).json({ error: "STORE_INACTIVE", message: "This store is not operating" });
+            }
             if (error.message === "STORE_ACCESS_DENIED") {
                 return res.status(403).json({ success: false, error: "STORE_ACCESS_DENIED" });
             }

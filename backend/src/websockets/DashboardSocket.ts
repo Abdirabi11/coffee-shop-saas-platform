@@ -3,6 +3,7 @@ import { Server } from "http";
 import { logWithContext } from "../infrastructure/observability/Logger.ts";
 import { EventBus } from "../events/eventBus.ts";
 import { KitchenTicketService } from "../services/realtime/KitchenTicket.service.ts";
+import { StoreStatusService } from "../services/store/StoreStatus.service.ts";
 import prisma from "../config/prisma.ts";
 import { verifyAccessToken } from "../utils/jwt.ts";
 import type { AccessTokenPayload } from "../types/auth.types.ts";
@@ -32,11 +33,18 @@ export async function canJoinDashboardRoom(identity: SocketIdentity, room: unkno
   if (scope === "user") return uuid === identity.userUuid;
   if (identity.isSuperAdmin) return scope === "tenant" || scope === "store";
 
-  if (scope === "tenant") return isTenantLevelMember(identity.userUuid, uuid);
+  // A suspended tenant, or a store that isn't operating, streams nothing to
+  // its staff (super admins above still can, to look into it)
+  if (scope === "tenant") {
+    const tenant = await prisma.tenant.findUnique({ where: { uuid }, select: { status: true } });
+    if (tenant?.status !== "ACTIVE") return false;
+    return isTenantLevelMember(identity.userUuid, uuid);
+  }
 
   if (scope === "store") {
     const store = await prisma.store.findUnique({ where: { uuid }, select: { tenantUuid: true } });
     if (!store) return false;
+    if (!(await StoreStatusService.isOperational(uuid))) return false;
     const assignment = await prisma.userStore.findFirst({
       where: { userUuid: identity.userUuid, storeUuid: uuid, tenantUuid: store.tenantUuid, isActive: true },
       select: { uuid: true },
@@ -198,6 +206,19 @@ export class DashboardSocket {
         storeUuid,
         timestamp: new Date(),
       });
+    });
+
+    // A store stopped operating, or a tenant was suspended: empty its rooms
+    // now (room joins check status, so nobody gets back in). Sockets stay
+    // connected for whatever else they're in.
+    EventBus.on("STORE_STATUS_CHANGED", async ({ storeUuid, operational }) => {
+      if (storeUuid && !operational) this.io.in(`store:${storeUuid}`).socketsLeave(`store:${storeUuid}`);
+    });
+    EventBus.on("TENANT_STATUS_CHANGED", async ({ tenantUuid, status }) => {
+      if (!tenantUuid || status === "ACTIVE") return;
+      this.io.in(`tenant:${tenantUuid}`).socketsLeave(`tenant:${tenantUuid}`);
+      const stores = await prisma.store.findMany({ where: { tenantUuid }, select: { uuid: true } });
+      for (const { uuid } of stores) this.io.in(`store:${uuid}`).socketsLeave(`store:${uuid}`);
     });
 
     // Someone lost access to a tenant (AccessRevocationService): drop every

@@ -87,12 +87,6 @@ export class CashierPaymentService{
             );
         };
  
-        const drawer = await this.getActiveCashDrawer(
-            order.storeUuid,
-            input.terminalId,
-            input.tenantUuid
-        );
-    
         // Create payment in transaction
         const payment = await prisma.$transaction(async (tx) => {
             // Same order lock as OrderModificationService: the amounts checked
@@ -102,6 +96,26 @@ export class CashierPaymentService{
             `;
             if (!locked || locked.totalAmount !== order.totalAmount || locked.status !== order.status) {
                 throw new Error("ORDER_CHANGED");
+            }
+
+            // The open drawer at this terminal, locked like closeDrawer locks
+            // it. If a close took the lock first, Postgres re-checks
+            // status = 'OPEN' after the wait and finds no row: the payment
+            // can't land on a drawer that has just been counted and closed.
+            const [drawer] = await tx.$queryRaw<Array<{ uuid: string }>>`
+                SELECT "uuid" FROM "CashDrawer"
+                WHERE "tenantUuid" = ${input.tenantUuid}
+                  AND "storeUuid" = ${order.storeUuid}
+                  AND "terminalId" = ${input.terminalId}
+                  AND "status" = 'OPEN'
+                ORDER BY "openedAt" ASC
+                LIMIT 1
+                FOR UPDATE
+            `;
+            // Cash taken with no open drawer belongs to no count: refuse it.
+            // Card payments don't touch the cash, so they go ahead unlinked.
+            if (input.paymentMethod === "CASH" && !drawer) {
+                throw new Error("NO_OPEN_DRAWER");
             }
 
             const payment = await tx.payment.create({
@@ -511,22 +525,6 @@ export class CashierPaymentService{
         });
 
         return updated;
-    }
-
-    //Get active cash drawer for terminal
-    private static async getActiveCashDrawer(
-        storeUuid: string,
-        terminalId: string,
-        tenantUuid: string,
-    ) {
-        return prisma.cashDrawer.findFirst({
-            where: {
-                tenantUuid,
-                storeUuid,
-                terminalId,
-                status: "OPEN",
-            },
-        });
     }
 
     //Correct payment amount (rare - accounting errors)

@@ -63,11 +63,20 @@ export class PayrollExportService {
                     lte: input.periodEnd,
                 },
                 clockOutAt: { not: null },
+                // Only hours that stand: an entry flagged for approval (late
+                // or out-of-geofence clock-in, automatic clock-out) is paid
+                // once a manager approves it (approveTimeEntry clears the
+                // flag); recalculate the period then
+                requiresApproval: false,
             };
 
             if (input.storeUuid) {
                 where.storeUuid = input.storeUuid;
             }
+
+            const pendingApprovalEntries = await prisma.timeEntry.count({
+                where: { ...where, requiresApproval: true },
+            });
 
             const timeEntries = await prisma.timeEntry.findMany({
                 where,
@@ -239,11 +248,13 @@ export class PayrollExportService {
                 payrollPeriodUuid: payrollPeriod.uuid,
                 totalHours,
                 totalGrossPay,
+                pendingApprovalEntries,
             });
 
             MetricsService.increment("payroll.calculated", 1);
 
-            return updated;
+            // Entries left out until approved, so the caller can chase them
+            return { ...updated, pendingApprovalEntries };
 
         } catch (error: any) {
             logWithContext("error", "[Payroll] Calculation failed", {

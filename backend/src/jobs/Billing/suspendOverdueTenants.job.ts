@@ -1,6 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { billingEnforcementEnabled } from "./billingEnforcement.ts";
 import dayjs from "dayjs";
+import { EventBus } from "../../events/eventBus.ts";
 
 export async function suspendOverdueTenants() {
     // Off until platform invoices can be paid: see billingEnforcement.ts
@@ -50,6 +51,9 @@ export async function suspendOverdueTenants() {
             data: { status: "UNPAID" },
             });
     
+            // Live screens of the tenant stop streaming (DashboardSocket)
+            EventBus.emit("TENANT_STATUS_CHANGED", { tenantUuid, status: "SUSPENDED" });
+
             suspended++;
         } catch (error: any) {
             console.error(`Failed to suspend tenant ${tenantUuid}:`, error.message);

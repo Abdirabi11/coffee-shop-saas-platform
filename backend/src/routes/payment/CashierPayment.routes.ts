@@ -38,6 +38,15 @@ router.post(
     CashierPaymentController.voidPayment
 );
  
+// Pay a requested cash refund out of an open drawer (the caller's own, or
+// any at the store for a supervisor). Role checked at the refund's store.
+// Body: { drawerUuid }
+router.post(
+    "/refunds/:refundUuid/pay-cash",
+    checkRole(["CASHIER", "MANAGER", "ADMIN"], storeOf.record("refund", "refundUuid")),
+    CashierPaymentController.payCashRefund
+);
+ 
 // Correct a payment amount (admin only, audit trail)
 // Body: { correctAmount: number, correctionReason: string }
 router.post(

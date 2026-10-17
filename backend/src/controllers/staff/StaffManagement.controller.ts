@@ -340,6 +340,9 @@ export class StaffManagementController {
                     message: "Invalid PIN",
                 });
             }
+            if (error.message === "STORE_INACTIVE") {
+                return res.status(409).json({ error: "STORE_INACTIVE", message: "This store is not operating" });
+            }
 
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",

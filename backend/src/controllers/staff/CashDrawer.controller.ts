@@ -20,6 +20,11 @@ const DRAWER_ERRORS: Record<string, number> = {
     DRAWER_NOT_OPEN: 409,
     DROP_ALREADY_VERIFIED: 409,
     DRAWER_NOT_RECONCILING: 409,
+    TERMINAL_REQUIRED: 400,
+    TERMINAL_DRAWER_ALREADY_OPEN: 409,
+    STORE_INACTIVE: 409,
+    COUNT_REQUIRED: 400,
+    DRAWER_ALREADY_COUNTED: 409,
 };
 
 function drawerError(res: Response, error: any, fallback: string) {
@@ -155,12 +160,15 @@ export class CashDrawerController {
     static async approveCashVariance(req: Request, res: Response) {
         try {
             const { drawerUuid } = req.params;
-            const { notes } = req.body ?? {};
+            // actualCash: the count, for a drawer that was taken out of
+            // service uncounted (staff lost access)
+            const { notes, actualCash } = req.body ?? {};
 
             const drawer = await CashDrawerService.approveCashVariance({
                 tenantUuid: req.tenant!.uuid,
                 drawerUuid,
                 approvedBy: req.user!.userUuid,
+                actualCash,
                 notes,
             });
 

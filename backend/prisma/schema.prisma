@@ -4321,8 +4321,9 @@ model CashDrawer {
   cashDrops  CashDrop[]
   cashCounts CashCount[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  cashRefunds Refund[] @relation("CashDrawerRefunds")
 
   @@index([tenantUuid, storeUuid, sessionStart])
   @@index([terminalId, sessionStart])
@@ -4579,12 +4580,18 @@ model Refund {
 
   metadata Json?
 
+  // Cash refunds: the drawer the cash was paid out of (its expected cash
+  // goes down by the refund). Null for provider refunds.
+  cashDrawerUuid String?
+  cashDrawer     CashDrawer? @relation("CashDrawerRefunds", fields: [cashDrawerUuid], references: [uuid])
+
   order   Order   @relation(fields: [orderUuid], references: [uuid])
   payment Payment @relation(fields: [paymentUuid], references: [uuid])
 
   @@index([tenantUuid, storeUuid, status])
   @@index([orderUuid])
   @@index([paymentUuid])
+  @@index([cashDrawerUuid])
 }
 
 model DailyReconciliation {

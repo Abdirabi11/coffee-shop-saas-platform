@@ -6,6 +6,7 @@ import { invalidateCache, withCache } from "../../infrastructure/cache/cache.ts"
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { PlanLimitService } from "../billing/PlanLimit.service.ts";
 import { AccessRevocationService } from "./AccessRevocation.service.ts";
+import { StoreStatusService } from "../store/StoreStatus.service.ts";
 
 export class StaffManagementService {
   
@@ -484,6 +485,9 @@ export class StaffManagementService {
         deviceId: string;
     }) {
         try {
+            // No logins at a store that isn't operating
+            await StoreStatusService.assertOperational(input.storeUuid);
+
             // Get all staff at this store
             const userStores = await prisma.userStore.findMany({
                 where: {
@@ -543,7 +547,7 @@ export class StaffManagementService {
             throw new Error("INVALID_PIN");
 
         } catch (error: any) {
-            if (error.message === "INVALID_PIN") {
+            if (error.message === "INVALID_PIN" || error.message === "STORE_INACTIVE") {
                 throw error;
             }
 

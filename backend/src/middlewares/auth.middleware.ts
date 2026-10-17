@@ -153,7 +153,7 @@ export const storeOf = {
     record: (
         model:
             | "cashDrawer" | "dailyReconciliation" | "product" | "category" | "optionGroup"
-            | "shift" | "timeEntry" | "staffApprovalRequest" | "tipPool",
+            | "shift" | "timeEntry" | "staffApprovalRequest" | "tipPool" | "refund",
         param: string
     ): StoreResolver => async (req) => {
         const uuid = stringParam(req.params?.[param]);

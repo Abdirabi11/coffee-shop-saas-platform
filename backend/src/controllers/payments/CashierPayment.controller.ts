@@ -1,9 +1,15 @@
 import type { Request, Response } from "express";
 import { CashierPaymentService } from "../../services/payment/cashier/payment.cashier.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { RefundService } from "../../services/payment/Refund.service.ts";
 import { correctPaymentSchema, processPaymentSchema, voidPaymentSchema } from "../../validators/payment.validator.ts";
 
  
+// Store roles that may pay a refund out of someone else's drawer
+const REFUND_SUPERVISOR_ROLES = new Set([
+    "SHIFT_SUPERVISOR", "MANAGER", "STORE_MANAGER", "ADMIN", "TENANT_ADMIN", "OWNER", "SUPER_ADMIN",
+]);
+
 export class CashierPaymentController {
     // POST /api/v1/payments/cashier/process
     static async processPayment(req: Request, res: Response) {
@@ -190,10 +196,41 @@ export class CashierPaymentController {
         }
     }
     
+    // POST /api/cashier/refunds/:refundUuid/pay-cash
+    // Body: { drawerUuid } - the open drawer the cash comes out of
+    static async payCashRefund(req: Request, res: Response) {
+        try {
+            const { refundUuid } = req.params;
+            const { drawerUuid } = req.body ?? {};
+            if (typeof drawerUuid !== "string" || !drawerUuid) {
+                return res.status(400).json({ success: false, error: "DRAWER_REQUIRED" });
+            }
+
+            const refund = await RefundService.payCashRefund({
+                tenantUuid: req.tenant!.uuid,
+                refundUuid,
+                drawerUuid,
+                paidBy: req.user!.userUuid,
+                // Supervisors may pay out of another person's drawer
+                actorIsSupervisor: (req.access?.roles ?? []).some((r) => REFUND_SUPERVISOR_ROLES.has(r)),
+            });
+
+            return res.status(200).json({ success: true, data: refund });
+        } catch (error: any) {
+            logWithContext("error", "[CashierPayment] Cash refund payout failed", { error: error.message });
+            return res.status(CashierPaymentController.errorToStatus(error)).json({
+                success: false,
+                error: error.message,
+            });
+        }
+    }
+
     private static errorToStatus(error: any): number {
         const msg = error.message || "";
         if (msg.includes("NOT_FOUND")) return 404;
-        if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN") || msg.includes("NOT_PAYABLE") || msg === "ORDER_CHANGED") return 409;
+        if (msg.includes("ALREADY_EXISTS") || msg.includes("ALREADY_OPEN") || msg.includes("NOT_PAYABLE") || msg === "ORDER_CHANGED" || msg === "NO_OPEN_DRAWER") return 409;
+        if (msg === "INSUFFICIENT_DRAWER_CASH" || msg === "NOT_A_CASH_REFUND") return 409;
+        if (msg === "DRAWER_NOT_YOURS" || msg === "DRAWER_WRONG_STORE") return 403;
         // Payment is no longer COMPLETED (e.g. lost a concurrent void)
         if (msg.includes("CANNOT_VOID_STATUS") || msg.includes("CANNOT_CORRECT_STATUS")) return 409;
         if (msg.includes("TOO_OLD") || msg.includes("INVALID") || msg.includes("MISMATCH")) return 400;

@@ -67,6 +67,21 @@ export class TimeEntryController {
                     message: "Already clocked in",
                 });
             }
+            if (error.message === "ALREADY_CLOCKED_IN_ELSEWHERE") {
+                return res.status(409).json({
+                    error: "ALREADY_CLOCKED_IN_ELSEWHERE",
+                    message: "Already clocked in at another store: clock out there first",
+                });
+            }
+            if (error.message === "SHIFT_NOT_FOUND") {
+                return res.status(404).json({ error: "SHIFT_NOT_FOUND", message: "No such scheduled shift of yours at this store" });
+            }
+            if (error.message === "STAFF_NO_STORE_ACCESS") {
+                return res.status(403).json({ error: "STAFF_NO_STORE_ACCESS" });
+            }
+            if (error.message === "STORE_INACTIVE") {
+                return res.status(409).json({ error: "STORE_INACTIVE", message: "This store is not operating" });
+            }
 
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
@@ -134,6 +149,9 @@ export class TimeEntryController {
         } catch (error: any) {
             if (error.message === "TIME_ENTRY_NOT_FOUND") {
                 return res.status(404).json({ error: error.message });
+            }
+            if (error.message === "NOT_CLOCKED_IN") {
+                return res.status(409).json({ error: error.message, message: "That shift is already clocked out" });
             }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",

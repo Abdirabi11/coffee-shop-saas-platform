@@ -11,7 +11,9 @@ export class RefundProcessorJob {
         // REQUESTED only: refunds parked as PENDING_APPROVAL (high fraud
         // risk) must wait for RefundService.approveRefund, never auto-process
         const pendingRefunds = await prisma.refund.findMany({
-            where: { status: "REQUESTED" },
+            // Cash refunds are paid out at a till (RefundService.payCashRefund),
+            // not sent to a provider
+            where: { status: "REQUESTED", provider: { not: "CASH" } },
             orderBy: { requestedAt: "asc" },
             take: 20,
         });
