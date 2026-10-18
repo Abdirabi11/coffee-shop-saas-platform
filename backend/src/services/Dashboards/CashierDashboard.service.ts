@@ -1,13 +1,17 @@
 import prisma from "../../config/prisma.ts"
 import dayjs from "dayjs";
-import { withCache } from "../../cache/cache.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
+import { bumpCacheVersion, getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 
 export class StaffDashboardService {
     //Personal shift dashboard for cashiers and staff
     static async getDashboard(tenantUuid: string, userUuid: string, storeUuid: string) {
-        const cacheKey = `staff:${userUuid}:${storeUuid}:dashboard`;
+        // Versioned per store, so the store's order and payment events can
+        // drop every staff member's entry at once (see invalidate)
+        const version = await getCacheVersion(`store:${storeUuid}:staff-dashboard`);
+        const cacheKey = `staff:${storeUuid}:${userUuid}:dashboard:v${version}`;
     
         return withCache(cacheKey, 30, async () => {
             const timer = MetricsService.startTimer("dashboard_build", { role: "staff" });
@@ -214,8 +218,8 @@ export class StaffDashboardService {
         });
     }
     
-    static async invalidate(userUuid: string, storeUuid: string) {
-        const cacheKey = `staff:${userUuid}:${storeUuid}:dashboard`;
-        await invalidateCacheVersion(cacheKey);
+    // Drops the cached dashboards of all the store's staff
+    static async invalidate(storeUuid: string) {
+        await bumpCacheVersion(`store:${storeUuid}:staff-dashboard`);
     }
 }

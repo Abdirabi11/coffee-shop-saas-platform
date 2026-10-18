@@ -12,8 +12,10 @@ export const getCacheVersion = async (key: string) => {
     try {
         // Upstash deserializes INCR'd values as numbers; normalize to string so
         // callers can compare against header values and embed in keys.
+        // Never bumped is "0": the first INCR makes it 1, so the first bump
+        // changes the version (with "1" it was a no-op).
         const version = await withTimeout(redis.get<string | number>(`v:${key}`), "cache version get");
-        return String(version ?? "1");
+        return String(version ?? "0");
     } catch (err: any) {
         logWithContext("warn", "[Cache] Version read failed, bypassing cache", {
             key,

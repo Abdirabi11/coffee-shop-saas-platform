@@ -14,6 +14,40 @@ dayjs.extend(timezone);
 // money out. Leaving it out would subtract a same-day refund twice.
 export const COLLECTED_STATUSES = ["PAID", "COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] as const;
 
+type Window = { gte: Date; lt: Date };
+
+// The definition of revenue, shared by the daily reconciliation,
+// StoreDailyMetrics and the dashboards:
+//
+//   gross  payments collected in the window: a collected status, timed by
+//          paidAt, or processedAt for cashier payments (no paidAt)
+//   refunds  refunds completed (paid back) in the window
+//   fees   provider fees on those payments, from their settlements
+//   net    gross - refunds - fees
+//
+// Callers add the store (storeUuid) to these.
+export function collectedPaymentsWhere(window: Window) {
+    return {
+        status: { in: [...COLLECTED_STATUSES] },
+        OR: [{ paidAt: window }, { paidAt: null, processedAt: window }],
+    } satisfies Prisma.PaymentWhereInput;
+}
+
+export function completedRefundsWhere(window: Window) {
+    return { status: "COMPLETED", processedAt: window } satisfies Prisma.RefundWhereInput;
+}
+
+// How a payment's money came in: the cashier's declared method, else the
+// provider (STRIPE, EVC_PLUS...)
+export function paymentMethodOf(p: { paymentFlow: string; paymentMethod: string; provider: string | null }) {
+    return p.paymentFlow === "CASHIER" ? p.paymentMethod : (p.provider ?? p.paymentMethod);
+}
+
+// The reconciliation's three channels, for a payment method or a refund's provider
+export function revenueChannel(method: string): "CASH" | "CARD_TERMINAL" | "ONLINE" {
+    return method === "CASH" || method === "CARD_TERMINAL" ? method : "ONLINE";
+}
+
 // Variance under this (minor units) is rounding, not a problem
 const VARIANCE_TOLERANCE = 100;
 
@@ -76,11 +110,7 @@ export class DailyReconciliationService {
         const window = { gte: start, lt: end };
 
         const payments = await prisma.payment.findMany({
-            where: {
-                storeUuid,
-                status: { in: [...COLLECTED_STATUSES] },
-                OR: [{ paidAt: window }, { paidAt: null, processedAt: window }],
-            },
+            where: { storeUuid, ...collectedPaymentsWhere(window) },
             select: {
                 uuid: true, amount: true, currency: true, status: true, paymentFlow: true, paymentMethod: true, provider: true,
                 order: { select: { uuid: true, status: true, totalAmount: true } },
@@ -88,7 +118,7 @@ export class DailyReconciliationService {
             },
         });
         const refunds = await prisma.refund.findMany({
-            where: { storeUuid, status: "COMPLETED", processedAt: window },
+            where: { storeUuid, ...completedRefundsWhere(window) },
             select: { amount: true, currency: true, provider: true },
         });
         const drawerVariance = await prisma.cashDrawer.aggregate({
@@ -97,14 +127,12 @@ export class DailyReconciliationService {
         });
 
         // Money in, per account
-        const methodOf = (p: (typeof payments)[number]) =>
-            p.paymentFlow === "CASHIER" ? p.paymentMethod : (p.provider ?? p.paymentMethod);
         let cash = 0, card = 0, online = 0, fees = 0, expected = 0;
         const extraPayments: string[] = [];
         for (const p of payments) {
-            const method = methodOf(p);
-            if (method === "CASH") cash += p.amount;
-            else if (method === "CARD_TERMINAL") card += p.amount;
+            const channel = revenueChannel(paymentMethodOf(p));
+            if (channel === "CASH") cash += p.amount;
+            else if (channel === "CARD_TERMINAL") card += p.amount;
             else online += p.amount;
             fees += p.settlements?.providerFee ?? 0;
             expected += p.order.totalAmount;
@@ -114,8 +142,9 @@ export class DailyReconciliationService {
         // Money out
         let cashRefunds = 0, cardRefunds = 0, onlineRefunds = 0;
         for (const r of refunds) {
-            if (r.provider === "CASH") cashRefunds += r.amount;
-            else if (r.provider === "CARD_TERMINAL") cardRefunds += r.amount;
+            const channel = revenueChannel(r.provider);
+            if (channel === "CASH") cashRefunds += r.amount;
+            else if (channel === "CARD_TERMINAL") cardRefunds += r.amount;
             else onlineRefunds += r.amount;
         }
         const refundsTotal = cashRefunds + cardRefunds + onlineRefunds;
@@ -192,7 +221,7 @@ export class DailyReconciliationService {
         };
         const grossByAccount = new Map<string, number>();
         for (const p of payments) {
-            const account = moneyAccount(methodOf(p));
+            const account = moneyAccount(paymentMethodOf(p));
             grossByAccount.set(account, (grossByAccount.get(account) ?? 0) + p.amount);
         }
         for (const [account, amount] of grossByAccount) add("PAYMENT", account, LedgerAccounts.SALES, amount, `Sales ${localDate}`);

@@ -2,7 +2,6 @@ import cron from "node-cron";
 import { trackJobExecution } from "../lib/jobMonitor.ts";
 import { withJobLock } from "./jobLock.ts";
 import { PaymentExpiryCleanupJob } from "./Payment/PaymentExpiryCleanup.job.ts";
-import { DashboardCacheWarmingJob } from "./dashboard/dashboardCacheWarming.Job.ts";
 import { ShiftReminderJob } from "./staff/ShiftReminder.job.ts";
 import { OrderExpiryCleanupJobs } from "./Order/orderExpiryCleanup.jobs.ts";
 import { AutoCancelOrdersJob } from "./Order/autoCancelOrders.job.ts";
@@ -90,7 +89,6 @@ export function startScheduler() {
   schedule("*/5 * * * *", "AutoCancelOrdersJob",            () => AutoCancelOrdersJob.run());
   schedule("*/5 * * * *", "OrderExpiryCleanupJob",          () => OrderExpiryCleanupJobs.run());
   schedule("*/5 * * * *", "ShiftReminderJob",               () => ShiftReminderJob.run());
-  schedule("*/5 * * * *", "DashboardCacheWarmingJob",       () => DashboardCacheWarmingJob.execute());
  
   // ─────────────────────────────────────────────────────────────────────────
   // 🟡 EVERY 10 MINUTES

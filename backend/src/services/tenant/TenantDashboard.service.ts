@@ -1,22 +1,44 @@
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
 import prisma from "../../config/prisma.ts"
 import { bumpCacheVersion, getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
 import { withCache } from "../../infrastructure/cache/cache.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import {
+    collectedRevenue,
+    collectedRevenueByStore,
+    failedPaymentsIn,
+    fixedWindows,
+    ordersCreatedIn,
+    periodWindows,
+    revenueByChannel,
+    revenueByLocalDay,
+    type Period,
+    type StoreWindow,
+} from "../Dashboards/storeRevenue.ts";
 
-type TimeRange = "today" | "week" | "month" | "quarter" | "year";
+dayjs.extend(utc);
+
+type TimeRange = Period;
  
 interface DateFilter {
     dateFrom?: Date;
     dateTo?: Date;
 }
 
+// Revenue is the daily reconciliation's: money collected (PAID / COMPLETED /
+// PARTIALLY_REFUNDED / REFUNDED payments, when it came in) minus refunds paid
+// back minus provider fees, over each store's own local period. `revenue`
+// fields are that net figure.
 interface RevenueBreakdown {
-    total: number;
-    cash: number;
+    total: number;          // net
+    gross: number;
+    refunds: number;
+    providerFees: number;
+    cash: number;           // per channel: collected - refunded
     card: number;
-    mobileMoney: number;
+    online: number;
     averageOrderValue: number;
 }
 
@@ -35,17 +57,6 @@ interface TopProduct {
     quantity: number;
     revenue: number;
 }
- 
-function getTimeRangeStart(range: TimeRange): Date {
-    const now = dayjs();
-    switch (range) {
-        case "today":   return now.startOf("day").toDate();
-        case "week":    return now.startOf("week").toDate();
-        case "month":   return now.startOf("month").toDate();
-        case "quarter": return now.subtract(3, "month").startOf("month").toDate();
-        case "year":    return now.startOf("year").toDate();
-    }
-}
 
 function getCacheTTL(range: TimeRange): number {
     switch (range) {
@@ -62,26 +73,66 @@ function percentChange(current: number, previous: number): number {
     return Math.round(((current - previous) / previous) * 100 * 100) / 100;
 }
 
+// The current UTC hour ("2026-10-18T14"), for cache keys of ranges that end
+// "now": entries are shared within the hour, and a store's new local day
+// (which starts on an hour) starts a new key
+const hourBucket = (now: Date = new Date()) => now.toISOString().slice(0, 13);
+
+const dateKey = (d: Date) => (Number.isNaN(d.getTime()) ? "invalid" : d.toISOString());
+
+// Every store of the tenant, open or not: a closed store's sales are still
+// the tenant's revenue
+const tenantStores = (tenantUuid: string) =>
+    prisma.store.findMany({ where: { tenantUuid }, select: { uuid: true, timezone: true } });
+
+// A dashboard range: the caller's dateFrom / dateTo (the same instants for
+// every store), or else today so far in each store's own timezone. `previous`
+// is the stretch just before it, for "change since".
 function resolveRange(filters?: DateFilter) {
-    const since = filters?.dateFrom ?? dayjs().startOf("day").toDate();
-    const until = filters?.dateTo ?? new Date();
-    return { since, until };
+    const from = filters?.dateFrom;
+    const to = filters?.dateTo;
+    return {
+        key: `${from ? dateKey(from) : "today"}:${to ? dateKey(to) : "now"}${from && to ? "" : `:${hourBucket()}`}`,
+        windows(stores: { uuid: string; timezone: string | null }[], now: Date = new Date()) {
+            const until = to ?? now;
+            if (from) {
+                const span = until.getTime() - from.getTime();
+                return {
+                    current: fixedWindows(stores, from, until),
+                    previous: fixedWindows(stores, new Date(from.getTime() - span), from),
+                };
+            }
+            const today = periodWindows(stores, "today", now);
+            return {
+                current: today.current.map((w) => ({ ...w, lt: until })),
+                previous: today.previous,
+            };
+        },
+    };
+}
+
+// The span covered by a set of store windows, for tenant-wide filters that
+// have no store (customers joining)
+function overallSpan(windows: StoreWindow[]) {
+    if (windows.length === 0) return { gte: new Date(), lt: new Date() };
+    return {
+        gte: new Date(Math.min(...windows.map((w) => w.gte.getTime()))),
+        lt: new Date(Math.max(...windows.map((w) => w.lt.getTime()))),
+    };
 }
  
 export class TenantDashboardService {
     //Main dashboard: revenue, orders, stores, staff, top products
     static async getDashboard(tenantUuid: string, timeRange: TimeRange = "today") {
         const version = await getCacheVersion(`tenant:${tenantUuid}:dashboard`);
-        const cacheKey = `tenant:${tenantUuid}:dashboard:${timeRange}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:dashboard:${timeRange}:${hourBucket()}:v${version}`;
         const ttl = getCacheTTL(timeRange);
 
         return withCache(cacheKey, ttl, async () => {
             const timer = MetricsService.startTimer("dashboard_build", { role: "tenant_admin" });
             try {
-                const rangeStart = getTimeRangeStart(timeRange);
-                const previousRangeStart = dayjs(rangeStart)
-                    .subtract(dayjs().diff(dayjs(rangeStart), "day"), "day")
-                    .toDate();
+                const stores = await tenantStores(tenantUuid);
+                const { current, previous } = periodWindows(stores, timeRange);
 
                 const [
                     overview,
@@ -92,11 +143,11 @@ export class TenantDashboardService {
                     staffSummary,
                     recentOrders,
                 ] = await Promise.all([
-                    TenantDashboardService.buildOverview(tenantUuid, rangeStart),
-                    TenantDashboardService.getRevenueAmount(tenantUuid, previousRangeStart, rangeStart),
-                    TenantDashboardService.buildRevenueBreakdown(tenantUuid, rangeStart),
-                    TenantDashboardService.buildStoreSnapshots(tenantUuid, rangeStart),
-                    TenantDashboardService.buildTopProducts(tenantUuid, rangeStart, 10),
+                    TenantDashboardService.buildOverview(tenantUuid, current),
+                    collectedRevenue(previous),
+                    TenantDashboardService.buildRevenueBreakdown(current),
+                    TenantDashboardService.buildStoreSnapshots(tenantUuid, current),
+                    TenantDashboardService.buildTopProducts(tenantUuid, current, 10),
                     TenantDashboardService.buildStaffSummary(tenantUuid),
                     TenantDashboardService.buildRecentOrders(tenantUuid, 20),
                 ]);
@@ -105,7 +156,7 @@ export class TenantDashboardService {
                     timeRange,
                     overview: {
                         ...overview,
-                        revenueChange: percentChange(overview.revenue, previousRevenue),
+                        revenueChange: percentChange(overview.revenue, previousRevenue.net),
                     },
                     revenueBreakdown,
                     stores: storeSnapshots,
@@ -122,24 +173,24 @@ export class TenantDashboardService {
 
     // GET /overview
     static async getOverview(tenantUuid: string, filters?: DateFilter) {
-        const { since, until } = resolveRange(filters);
+        const range = resolveRange(filters);
 
         const version = await getCacheVersion(`tenant:${tenantUuid}:overview`);
-        const cacheKey = `tenant:${tenantUuid}:overview:${since.getTime()}:${until.getTime()}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:overview:${range.key}:v${version}`;
 
         return withCache(cacheKey, 60, async () => {
-            const previousDuration = dayjs(until).diff(dayjs(since), "millisecond");
-            const previousStart = dayjs(since).subtract(previousDuration, "millisecond").toDate();
+            const { current, previous } = range.windows(await tenantStores(tenantUuid));
 
-            const [current, previousRevenue] = await Promise.all([
-                TenantDashboardService.buildOverview(tenantUuid, since),
-                TenantDashboardService.getRevenueAmount(tenantUuid, previousStart, since),
+            const [overview, previousRevenue] = await Promise.all([
+                TenantDashboardService.buildOverview(tenantUuid, current),
+                collectedRevenue(previous),
             ]);
 
+            const span = overallSpan(current);
             return {
-                ...current,
-                revenueChange: percentChange(current.revenue, previousRevenue),
-                period: { from: since.toISOString(), to: until.toISOString() },
+                ...overview,
+                revenueChange: percentChange(overview.revenue, previousRevenue.net),
+                period: { from: span.gte.toISOString(), to: span.lt.toISOString() },
                 generatedAt: new Date().toISOString(),
             };
         });
@@ -147,13 +198,14 @@ export class TenantDashboardService {
 
     // GET /stores/performance
     static async getStorePerformance(tenantUuid: string, filters?: DateFilter) {
-        const { since } = resolveRange(filters);
+        const range = resolveRange(filters);
 
         const version = await getCacheVersion(`tenant:${tenantUuid}:stores`);
-        const cacheKey = `tenant:${tenantUuid}:stores:${since.getTime()}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:stores:${range.key}:v${version}`;
 
         return withCache(cacheKey, 120, async () => {
-            return TenantDashboardService.buildStoreSnapshots(tenantUuid, since);
+            const { current } = range.windows(await tenantStores(tenantUuid));
+            return TenantDashboardService.buildStoreSnapshots(tenantUuid, current);
         });
     }
 
@@ -162,78 +214,67 @@ export class TenantDashboardService {
         tenantUuid: string,
         filters?: DateFilter & { limit?: number }
     ) {
-        const { since } = resolveRange(filters);
+        const range = resolveRange(filters);
         const limit = filters?.limit ?? 10;
 
         const version = await getCacheVersion(`tenant:${tenantUuid}:products`);
-        const cacheKey = `tenant:${tenantUuid}:products:${since.getTime()}:${limit}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:products:${range.key}:${limit}:v${version}`;
 
         return withCache(cacheKey, 300, async () => {
-            return TenantDashboardService.buildTopProducts(tenantUuid, since, limit);
+            const { current } = range.windows(await tenantStores(tenantUuid));
+            return TenantDashboardService.buildTopProducts(tenantUuid, current, limit);
         });
     }
 
     // GET /revenue/trend
+    // Buckets are store-local calendar days (weeks start on Sunday)
     static async getRevenueTrend(
         tenantUuid: string,
         filters?: DateFilter & { groupBy?: "day" | "week" | "month" }
     ) {
-        const { since, until } = resolveRange(filters);
+        const range = resolveRange(filters);
         const groupBy = filters?.groupBy ?? "day";
 
         const version = await getCacheVersion(`tenant:${tenantUuid}:revenue`);
-        const cacheKey = `tenant:${tenantUuid}:revenue:${since.getTime()}:${until.getTime()}:${groupBy}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:revenue:${range.key}:${groupBy}:v${version}`;
 
         return withCache(cacheKey, 300, async () => {
-            const payments = await prisma.payment.findMany({
-                where: {
-                    tenantUuid,
-                    status: "COMPLETED",
-                    processedAt: { gte: since, lte: until },
-                },
-                select: { amount: true, processedAt: true },
-                orderBy: { processedAt: "asc" },
-            });
+            const { current } = range.windows(await tenantStores(tenantUuid));
+            const days = await revenueByLocalDay(current);
 
-            // Group by time bucket
-            const buckets = new Map<string, { revenue: number; count: number }>();
-
-            for (const p of payments) {
-                if (!p.processedAt) continue;
-                const date = dayjs(p.processedAt);
-                let key: string;
-
-                switch (groupBy) {
-                    case "week":
-                        key = date.startOf("week").format("YYYY-MM-DD");
-                        break;
-                    case "month":
-                        key = date.format("YYYY-MM");
-                        break;
-                    default:
-                        key = date.format("YYYY-MM-DD");
-                }
-
-                const existing = buckets.get(key) ?? { revenue: 0, count: 0 };
-                existing.revenue += p.amount;
-                existing.count += 1;
-                buckets.set(key, existing);
+            const buckets = new Map<string, { revenue: number; gross: number; refunds: number; providerFees: number; count: number }>();
+            for (const [day, r] of days) {
+                const key =
+                    groupBy === "week" ? dayjs.utc(day).startOf("week").format("YYYY-MM-DD")
+                    : groupBy === "month" ? day.slice(0, 7)
+                    : day;
+                const b = buckets.get(key) ?? { revenue: 0, gross: 0, refunds: 0, providerFees: 0, count: 0 };
+                b.revenue += r.net;
+                b.gross += r.gross;
+                b.refunds += r.refunds;
+                b.providerFees += r.providerFees;
+                b.count += r.payments;
+                buckets.set(key, b);
             }
 
             const trend = Array.from(buckets.entries())
                 .map(([period, data]) => ({
                     period,
                     revenue: data.revenue,
+                    gross: data.gross,
+                    refunds: data.refunds,
+                    providerFees: data.providerFees,
                     orderCount: data.count,
                     averageOrderValue: data.count > 0
-                        ? Math.round((data.revenue / data.count) * 100) / 100
+                        ? Math.round((data.gross / data.count) * 100) / 100
                         : 0,
                 }))
                 .sort((a, b) => a.period.localeCompare(b.period));
 
+            const span = overallSpan(current);
             return {
                 groupBy,
-                period: { from: since.toISOString(), to: until.toISOString() },
+                period: { from: span.gte.toISOString(), to: span.lt.toISOString() },
                 data: trend,
                 totals: {
                     revenue: trend.reduce((sum, t) => sum + t.revenue, 0),
@@ -245,12 +286,16 @@ export class TenantDashboardService {
 
     // GET /customers
     static async getCustomerInsights(tenantUuid: string, filters?: DateFilter) {
-        const { since, until } = resolveRange(filters);
+        const range = resolveRange(filters);
 
         const version = await getCacheVersion(`tenant:${tenantUuid}:customers`);
-        const cacheKey = `tenant:${tenantUuid}:customers:${since.getTime()}:${until.getTime()}:v${version}`;
+        const cacheKey = `tenant:${tenantUuid}:customers:${range.key}:v${version}`;
 
         return withCache(cacheKey, 300, async () => {
+            const { current } = range.windows(await tenantStores(tenantUuid));
+            const span = overallSpan(current);
+            const completedInRange = { tenantUuid, status: "COMPLETED" as const, ...ordersCreatedIn(current) };
+
             const [totalCustomers, newCustomers, activeCustomers, topSpenders] = await Promise.all([
                 // Total customers (users with CUSTOMER globalRole who have a TenantUser)
                 prisma.tenantUser.count({
@@ -267,28 +312,20 @@ export class TenantDashboardService {
                         tenantUuid,
                         isActive: true,
                         user: { globalRole: "CUSTOMER" },
-                        createdAt: { gte: since, lte: until },
+                        createdAt: span,
                     },
                 }),
 
                 // Customers who placed an order in period
                 prisma.order.groupBy({
                     by: ["tenantUserUuid"],
-                    where: {
-                        tenantUuid,
-                        status: "COMPLETED",
-                        createdAt: { gte: since, lte: until },
-                    },
+                    where: completedInRange,
                 }).then((groups) => groups.length),
 
                 // Top spenders
                 prisma.order.groupBy({
                     by: ["tenantUserUuid"],
-                    where: {
-                        tenantUuid,
-                        status: "COMPLETED",
-                        createdAt: { gte: since, lte: until },
-                    },
+                    where: completedInRange,
                     _sum: { totalAmount: true },
                     _count: true,
                     orderBy: { _sum: { totalAmount: "desc" } },
@@ -308,7 +345,7 @@ export class TenantDashboardService {
                 total: totalCustomers,
                 newInPeriod: newCustomers,
                 activeInPeriod: activeCustomers,
-                period: { from: since.toISOString(), to: until.toISOString() },
+                period: { from: span.gte.toISOString(), to: span.lt.toISOString() },
                 topSpenders: topSpenders.map((s) => ({
                     tenantUserUuid: s.tenantUserUuid,
                     name: nameMap.get(s.tenantUserUuid!) ?? "Unknown",
@@ -361,17 +398,14 @@ export class TenantDashboardService {
         };
     }
 
-    // Core overview metrics
-    private static async buildOverview(tenantUuid: string, since: Date) {
-        const [totalRevenue, orderStats, activeOrders, failedPayments, totalStores] =
+    // Core overview metrics over the stores' windows
+    private static async buildOverview(tenantUuid: string, windows: StoreWindow[]) {
+        const [revenue, orderStats, activeOrders, failedPayments, totalStores] =
             await Promise.all([
-                prisma.payment.aggregate({
-                    where: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
-                    _sum: { amount: true },
-                }),
+                collectedRevenue(windows),
 
                 prisma.order.aggregate({
-                    where: { tenantUuid, createdAt: { gte: since }, status: "COMPLETED" },
+                    where: { tenantUuid, status: "COMPLETED", ...ordersCreatedIn(windows) },
                     _count: true,
                     _avg: { totalAmount: true },
                 }),
@@ -383,15 +417,14 @@ export class TenantDashboardService {
                     },
                 }),
 
-                prisma.payment.count({
-                    where: { tenantUuid, status: "FAILED", createdAt: { gte: since } },
-                }),
+                prisma.payment.count({ where: { tenantUuid, ...failedPaymentsIn(windows) } }),
 
                 prisma.store.count({ where: { tenantUuid, active: true } }),
             ]);
 
         return {
-            revenue: totalRevenue._sum.amount ?? 0,
+            revenue: revenue.net,
+            revenueDetail: revenue,
             completedOrders: orderStats._count,
             averageOrderValue: Math.round((orderStats._avg.totalAmount ?? 0) * 100) / 100,
             activeOrders,
@@ -400,75 +433,30 @@ export class TenantDashboardService {
         };
     }
 
-    // Revenue for a date range
-    private static async getRevenueAmount(
-        tenantUuid: string,
-        from: Date,
-        to: Date
-    ): Promise<number> {
-        const result = await prisma.payment.aggregate({
-            where: {
-                tenantUuid,
-                status: "COMPLETED",
-                createdAt: { gte: from, lt: to },
-            },
-            _sum: { amount: true },
-        });
-        return result._sum.amount ?? 0;
-    }
-
-    // Revenue by payment method
-    private static async buildRevenueBreakdown(
-        tenantUuid: string,
-        since: Date
-    ): Promise<RevenueBreakdown> {
-        const grouped = await prisma.payment.groupBy({
-            by: ["paymentMethod"],
-            where: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
-            _sum: { amount: true },
-            _count: true,
-        });
-
-        let cash = 0;
-        let card = 0;
-        let mobileMoney = 0;
-        let totalOrders = 0;
-
-        for (const g of grouped) {
-            const amount = g._sum.amount ?? 0;
-            totalOrders += g._count;
-
-            switch (g.paymentMethod) {
-                case "CASH":
-                    cash = amount;
-                    break;
-                case "CARD_TERMINAL":
-                case "STRIPE":
-                case "APPLE_PAY":
-                case "GOOGLE_PAY":
-                    card += amount;
-                    break;
-                case "WALLET":
-                    mobileMoney += amount;
-                    break;
-            }
-        }
-
-        const total = cash + card + mobileMoney;
+    // Revenue by reconciliation channel
+    private static async buildRevenueBreakdown(windows: StoreWindow[]): Promise<RevenueBreakdown> {
+        const [revenue, channels] = await Promise.all([
+            collectedRevenue(windows),
+            revenueByChannel(windows),
+        ]);
+        const kept = (c: { gross: number; refunds: number }) => c.gross - c.refunds;
 
         return {
-            total,
-            cash,
-            card,
-            mobileMoney,
-            averageOrderValue: totalOrders > 0 ? Math.round((total / totalOrders) * 100) / 100 : 0,
+            total: revenue.net,
+            gross: revenue.gross,
+            refunds: revenue.refunds,
+            providerFees: revenue.providerFees,
+            cash: kept(channels.CASH),
+            card: kept(channels.CARD_TERMINAL),
+            online: kept(channels.ONLINE),
+            averageOrderValue: revenue.payments > 0 ? Math.round((revenue.gross / revenue.payments) * 100) / 100 : 0,
         };
     }
 
     // Per-store performance
     private static async buildStoreSnapshots(
         tenantUuid: string,
-        since: Date
+        windows: StoreWindow[]
     ): Promise<StoreSnapshot[]> {
         const stores = await prisma.store.findMany({
             where: { tenantUuid, active: true },
@@ -476,19 +464,10 @@ export class TenantDashboardService {
         });
 
         const storeUuids = stores.map((s) => s.uuid);
+        const activeWindows = windows.filter((w) => storeUuids.includes(w.storeUuid));
 
         const [revenueByStore, activeByStore, staffByStore] = await Promise.all([
-            prisma.payment.groupBy({
-                by: ["storeUuid"],
-                where: {
-                    tenantUuid,
-                    status: "COMPLETED",
-                    storeUuid: { in: storeUuids },
-                    createdAt: { gte: since },
-                },
-                _sum: { amount: true },
-                _count: true,
-            }),
+            collectedRevenueByStore(activeWindows),
 
             prisma.order.groupBy({
                 by: ["storeUuid"],
@@ -510,9 +489,6 @@ export class TenantDashboardService {
             }),
         ]);
 
-        const revenueMap = new Map(
-            revenueByStore.map((r) => [r.storeUuid, { sum: r._sum.amount ?? 0, count: r._count }])
-        );
         const activeMap = new Map(activeByStore.map((a) => [a.storeUuid, a._count]));
         const staffMap = new Map(staffByStore.map((s) => [s.storeUuid, s._count]));
 
@@ -520,8 +496,8 @@ export class TenantDashboardService {
             .map((store) => ({
                 storeUuid: store.uuid,
                 storeName: store.name,
-                revenue: revenueMap.get(store.uuid)?.sum ?? 0,
-                orderCount: revenueMap.get(store.uuid)?.count ?? 0,
+                revenue: revenueByStore.get(store.uuid)?.net ?? 0,
+                orderCount: revenueByStore.get(store.uuid)?.payments ?? 0,
                 staffOnShift: staffMap.get(store.uuid) ?? 0,
                 activeOrders: activeMap.get(store.uuid) ?? 0,
             }))
@@ -531,13 +507,13 @@ export class TenantDashboardService {
     // Top products by quantity sold
     private static async buildTopProducts(
         tenantUuid: string,
-        since: Date,
+        windows: StoreWindow[],
         limit: number
     ): Promise<TopProduct[]> {
         const topItems = await prisma.orderItem.groupBy({
             by: ["productUuid"],
             where: {
-                order: { tenantUuid, status: "COMPLETED", createdAt: { gte: since } },
+                order: { tenantUuid, status: "COMPLETED", ...ordersCreatedIn(windows) },
             },
             _sum: { quantity: true, subtotal: true },
             orderBy: { _sum: { quantity: "desc" } },

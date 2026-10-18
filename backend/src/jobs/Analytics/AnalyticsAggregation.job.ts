@@ -1,7 +1,7 @@
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
-import { COLLECTED_STATUSES } from "../../services/payment/DailyReconciliation.service.ts";
+import { collectedPaymentsWhere, completedRefundsWhere } from "../../services/payment/DailyReconciliation.service.ts";
 import { storeDaysDue, type StoreDay } from "./storeDays.ts";
 
 // Runs hourly. Writes the money columns of StoreDailyMetrics for each store's
@@ -58,11 +58,7 @@ export class AnalyticsAggregationJob {
     static async aggregateStoreDay(day: StoreDay) {
         const { storeUuid, tenantUuid, dateKey } = day;
         const window = { gte: day.start, lt: day.end };
-        const collected = {
-            storeUuid,
-            status: { in: [...COLLECTED_STATUSES] },
-            OR: [{ paidAt: window }, { paidAt: null, processedAt: window }],
-        };
+        const collected = { storeUuid, ...collectedPaymentsWhere(window) };
 
         const [payments, fees, refunds, paymentsFailed] = await Promise.all([
             prisma.payment.aggregate({
@@ -75,7 +71,7 @@ export class AnalyticsAggregationJob {
                 _sum: { providerFee: true },
             }),
             prisma.refund.aggregate({
-                where: { storeUuid, status: "COMPLETED", processedAt: window },
+                where: { storeUuid, ...completedRefundsWhere(window) },
                 _sum: { amount: true },
             }),
             prisma.payment.count({

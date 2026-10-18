@@ -1,19 +1,41 @@
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
 import prisma from "../../config/prisma.ts"
 import { withCache } from "../../infrastructure/cache/cache.ts";
-import { getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
+import { bumpCacheVersion, getCacheVersion } from "../../infrastructure/cache/cacheVersion.ts";
+import { DailyReconciliationService } from "../payment/DailyReconciliation.service.ts";
+import { collectedRevenue, failedPaymentsIn, ordersCreatedIn, periodWindows } from "./storeRevenue.ts";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const storeTimezone = async (storeUuid: string) => {
+    const store = await prisma.store.findUnique({ where: { uuid: storeUuid }, select: { timezone: true } });
+    return DailyReconciliationService.safeTimezone(store?.timezone);
+};
+
+// Cache key part for an optional date range
+const rangeKey = (from?: Date, to?: Date) => `${from?.toISOString() ?? "-"}:${to?.toISOString() ?? "-"}`;
 
 export class StoreDashboardService{
+    // Today is the store's local day. Revenue is the daily reconciliation's:
+    // collected (PAID / COMPLETED / PARTIALLY_REFUNDED / REFUNDED, when the
+    // money came in) - refunds paid back - provider fees.
     static async getOverview(storeUuid: string) {
+        const tz = await storeTimezone(storeUuid);
+        const localDate = dayjs().tz(tz).format("YYYY-MM-DD");
         const version = await getCacheVersion(`store:${storeUuid}:dashboard`);
-        const cacheKey = `dashboard:store:${storeUuid}:overview:v${version}`;
+        const cacheKey = `dashboard:store:${storeUuid}:overview:${localDate}:v${version}`;
 
         return withCache(cacheKey, 60, async () => {
-            const todayStart= dayjs().startOf("day").toDate();
+            const today = periodWindows([{ uuid: storeUuid, timezone: tz }], "today").current;
+            const { gte: todayStart, lt: now } = today[0];
 
             const [
                 activeOrders,
-                todayRevenue,
+                revenue,
+                completedToday,
                 todayOrders,
                 avgPrepTime,
                 failedPayments,
@@ -25,48 +47,41 @@ export class StoreDashboardService{
                     },
                 }),
 
-                prisma.order.aggregate({
-                    where: {
-                        storeUuid,
-                        status: "COMPLETED",
-                        createdAt: { gte: todayStart },
-                    },
-                    _sum: { totalAmount: true },
-                    _count: { uuid: true },
+                collectedRevenue(today),
+
+                prisma.order.count({
+                    where: { status: "COMPLETED", ...ordersCreatedIn(today) },
                 }),
         
-                prisma.order.count({
-                    where: {
-                        storeUuid,
-                        createdAt: { gte: todayStart },
-                    },
-                }),
+                prisma.order.count({ where: ordersCreatedIn(today) }),
 
-                prisma.$queryRaw<{ avg_minutes: number }[]>`
-                    SELECT AVG(EXTRACT(EPOCH FROM ("actualReadyAt" - "createdAt")) / 60) as avg_minutes
+                // Bounds as UTC wall time: the columns are zone-less UTC
+                prisma.$queryRaw<{ avg_minutes: number | null }[]>`
+                    SELECT AVG(EXTRACT(EPOCH FROM ("actualReadyAt" - "createdAt")) / 60)::float8 as avg_minutes
                     FROM "Order"
                     WHERE "storeUuid" = ${storeUuid}
                     AND status = 'COMPLETED'
-                    AND "actualReadyAt" >= ${todayStart}
+                    AND "actualReadyAt" >= ${todayStart.toISOString()}::timestamp
+                    AND "actualReadyAt" < ${now.toISOString()}::timestamp
                 `,
                     
-                prisma.payment.count({
-                    where: {
-                        storeUuid,
-                        status: "FAILED",
-                        createdAt: { gte: todayStart },
-                    },
-                }),
+                prisma.payment.count({ where: failedPaymentsIn(today) }),
             ])
 
             return {
+                date: localDate,
+                timezone: tz,
                 orders: {
                     active: activeOrders,
                     today: todayOrders,
-                    completed: todayRevenue._count.uuid,
+                    completed: completedToday,
                 },
                 revenue: {
-                    today: todayRevenue._sum.totalAmount || 0,
+                    today: revenue.net,
+                    gross: revenue.gross,
+                    refunds: revenue.refunds,
+                    providerFees: revenue.providerFees,
+                    payments: revenue.payments,
                 },
                 performance: {
                     avgPrepTimeMinutes: avgPrepTime[0]?.avg_minutes || 0,
@@ -74,6 +89,14 @@ export class StoreDashboardService{
                 },
             };
         })
+    }
+
+    // Drops the store's cached overview and active orders
+    static async invalidate(storeUuid: string) {
+        await Promise.all([
+            bumpCacheVersion(`store:${storeUuid}:dashboard`),
+            bumpCacheVersion(`store:${storeUuid}:active-orders`),
+        ]);
     }
 
     static async getDashboard(tenantUuid: string, storeUuid: string) {
@@ -164,40 +187,31 @@ export class StoreDashboardService{
         dateFrom?: Date;
         dateTo?: Date;
     }) {
-        const cacheKey = `dashboard:store:${storeUuid}:peak-hours`;
+        const ranged = input?.dateFrom && input?.dateTo;
+        // The default range moves daily
+        const cacheKey = `dashboard:store:${storeUuid}:peak-hours:${ranged ? rangeKey(input.dateFrom, input.dateTo) : dayjs().format("YYYY-MM-DD")}`;
 
         return withCache(cacheKey, 300, async () => {
-            const where: any = { storeUuid };
-      
-            if (input?.dateFrom && input?.dateTo) {
-                where.createdAt = { gte: input.dateFrom, lte: input.dateTo };
-            } else {
-                // Default: last 30 days
-                where.createdAt = { gte: dayjs().subtract(30, "day").toDate() };
-            }
+            const tz = await storeTimezone(storeUuid);
+            // Default: last 30 days
+            const from = ranged ? input.dateFrom! : dayjs().subtract(30, "day").toDate();
+            const to = ranged ? input.dateTo! : new Date();
 
-            const orders = await prisma.order.findMany({
-                where,
-                select: { createdAt: true, totalAmount: true },
-            });
+            // Hours on the store's clock; grouped in the database. Bounds as
+            // UTC wall time: the columns are zone-less UTC.
+            const rows = await prisma.$queryRaw<{ hour: number; orders: number; revenue: bigint }[]>`
+                SELECT EXTRACT(HOUR FROM ("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::int AS hour,
+                       COUNT(*)::int AS orders,
+                       SUM("totalAmount")::bigint AS revenue
+                FROM "Order"
+                WHERE "storeUuid" = ${storeUuid}
+                  AND "createdAt" >= ${from.toISOString()}::timestamp
+                  AND "createdAt" <= ${to.toISOString()}::timestamp
+                GROUP BY 1
+            `;
 
-            const hourlyData = new Map<number, { orders: number; revenue: number }>();
-
-            orders.forEach((order) => {
-                const hour = order.createdAt.getHours();
-                const current = hourlyData.get(hour) || { orders: 0, revenue: 0 };
-                hourlyData.set(hour, {
-                    orders: current.orders + 1,
-                    revenue: current.revenue + order.totalAmount,
-                });
-            });
-
-            return Array.from(hourlyData.entries())
-                .map(([hour, data]) => ({
-                    hour,
-                    orders: data.orders,
-                    revenue: data.revenue,
-                }))
+            return rows
+                .map((r) => ({ hour: r.hour, orders: r.orders, revenue: Number(r.revenue) }))
                 .sort((a, b) => b.orders - a.orders);
         })
     }
@@ -206,7 +220,7 @@ export class StoreDashboardService{
         dateFrom: Date;
         dateTo: Date;
     }) {
-        const cacheKey = `dashboard:store:${storeUuid}:staff:${input.dateFrom.toISOString()}`;
+        const cacheKey = `dashboard:store:${storeUuid}:staff:${rangeKey(input.dateFrom, input.dateTo)}`;
 
         return withCache(cacheKey, 300, async () => {
             // Orders handled by each staff member
@@ -244,7 +258,7 @@ export class StoreDashboardService{
         dateTo: Date;
         limit?: number;
     }) {
-        const cacheKey = `dashboard:store:${storeUuid}:products:${input.dateFrom.toISOString()}`;
+        const cacheKey = `dashboard:store:${storeUuid}:products:${rangeKey(input.dateFrom, input.dateTo)}:${input.limit || 10}`;
 
         return withCache(cacheKey, 300, async () => {
             const productMetrics = await prisma.productDailyMetrics.groupBy({

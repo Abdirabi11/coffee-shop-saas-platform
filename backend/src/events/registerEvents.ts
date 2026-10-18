@@ -1,4 +1,5 @@
 import { registerInventoryEventHandlers } from "./inventory.handlers.ts";
+import { registerDashboardCacheHandlers } from "./dashboardCache.handlers.ts";
 
 // Single place where event listeners are switched on at startup. Only
 // listeners that have been reviewed against the current order/payment flow
@@ -19,4 +20,6 @@ export function registerEventHandlers() {
     registered = true;
 
     registerInventoryEventHandlers();
+    // Only bumps dashboard cache versions
+    registerDashboardCacheHandlers();
 }
