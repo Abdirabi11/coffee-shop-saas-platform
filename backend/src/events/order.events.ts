@@ -107,24 +107,10 @@ EventBus.on("ORDER_CANCELLED", async ({ orderUuid, storeUuid }) => {
   await bumpCacheVersion(`store:${storeUuid}:active-orders`);
 });
 
-// Order Stuck (alert)
-EventBus.on("ORDER_STUCK", async ({ orderUuid, storeUuid }) => {
+// Order Stuck: DetectStuckOrdersJob has already raised the (deduplicated)
+// admin alert before emitting this
+EventBus.on("ORDER_STUCK", async ({ orderUuid }) => {
   console.log(`[EVENT] ORDER_STUCK: ${orderUuid}`);
-  
-  await prisma.adminAlert.create({
-    data: {
-      tenantUuid: (await prisma.store.findUnique({ where: { uuid: storeUuid } }))?.tenantUuid!,
-      storeUuid,
-      alertType: "ORDER_ISSUE",
-      category: "OPERATIONAL",
-      level: "WARNING",
-      title: "Order Stuck in Processing",
-      message: `Order ${orderUuid} has been stuck in PAID status for too long`,
-      affectedEntity: "order",
-      affectedEntityId: orderUuid,
-      priority: "HIGH",
-    },
-  });
 });
 
 

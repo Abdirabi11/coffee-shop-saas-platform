@@ -30,7 +30,10 @@ export class EmailService {
         },
     });
 
-    //Send email with template
+    // Send email with template. Never throws: a failed send is logged (and
+    // recorded in EmailLog) and returned as { success: false }, so it can't
+    // abort the caller's work, e.g. roll back a staff invitation. Callers
+    // that must know check `success`.
     static async send(input: {
         to: string;
         subject: string;
@@ -101,17 +104,28 @@ export class EmailService {
                 template: input.template,
             });
         
-            // Log failure
-            await prisma.emailLog.create({
-                data: {
-                    type: input.template,
+            // Log failure; the log write failing too mustn't throw either
+            try {
+                await prisma.emailLog.create({
+                    data: {
+                        type: input.template,
+                        to: input.to,
+                        subject: input.subject,
+                        status: "FAILED",
+                        error: error.message,
+                    },
+                });
+            } catch (logError: any) {
+                logWithContext("error", "[Email] Failed to record email failure", {
                     to: input.to,
-                    subject: input.subject,
-                    status: "FAILED",
-                    error: error.message,
-                },
-            });
-            throw error;
+                    error: logError.message,
+                });
+            }
+
+            return {
+                success: false,
+                error: error.message as string,
+            };
         }
     }
 
@@ -126,8 +140,8 @@ export class EmailService {
             emails.map((email) => this.send(email))
         );
     
-        const sent = results.filter((r) => r.status === "fulfilled").length;
-        const failed = results.filter((r) => r.status === "rejected").length;
+        const sent = results.filter((r) => r.status === "fulfilled" && r.value.success).length;
+        const failed = results.length - sent;
     
         logWithContext("info", "[Email] Bulk email sent", {
             total: emails.length,

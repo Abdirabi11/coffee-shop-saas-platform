@@ -1,21 +1,24 @@
 import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
+import { AlertDedupService } from "../../services/alerts/AlertDedup.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
 const PREPARING_TIMEOUT_MINUTES = 30;
 
 export class OrderTimeoutAlertJob{
-    static async run (){
+    // storeUuids narrows the run to those stores
+    static async run(opts: { storeUuids?: string[] } = {}){
         const startTime = Date.now();
         const cutoff = new Date(Date.now() - PREPARING_TIMEOUT_MINUTES * 60 * 1000);
 
-        logWithContext("info", "[OrderTimeoutAlert] Starting job");
+        logWithContext("info", "[OrderTimeoutAlert] Starting job", {});
 
         try {
             const delayedOrders = await prisma.order.findMany({
                 where: {
                     status: "PREPARING",
+                    ...(opts.storeUuids && { storeUuid: { in: opts.storeUuids } }),
                     updatedAt: { lt: cutoff },
                 },
                 select: {
@@ -32,10 +35,33 @@ export class OrderTimeoutAlertJob{
                 count: delayedOrders.length,
             });
 
+            let alertsCreated = 0;
+
             for (const order of delayedOrders) {
                 const minutesDelayed = Math.floor(
                     (Date.now() - order.updatedAt.getTime()) / 60000
                 );
+
+                // At most one alert per order per day; the job sees the same
+                // order every 15 minutes until it is ready
+                const alert = await AlertDedupService.createOnce({
+                    groupKey: `ORDER_PREPARATION_DELAYED:${order.uuid}`,
+                    tenantUuid: order.tenantUuid,
+                    storeUuid: order.storeUuid,
+                    alertType: "ORDER_ISSUE",
+                    category: "OPERATIONAL",
+                    level: "WARNING",
+                    priority: "MEDIUM",
+                    title: "Order Preparation Delayed",
+                    message: `Order ${order.orderNumber} has been preparing for ${minutesDelayed} minutes`,
+                    affectedEntity: "order",
+                    affectedEntityId: order.uuid,
+                    context: {
+                        minutesDelayed,
+                    },
+                });
+                if (!alert) continue;
+                alertsCreated++;
 
                 // Emit event for notifications
                 EventBus.emit("ORDER_PREPARATION_DELAYED", {
@@ -44,25 +70,6 @@ export class OrderTimeoutAlertJob{
                     storeUuid: order.storeUuid,
                     orderNumber: order.orderNumber,
                     minutesDelayed,
-                });
-
-                // Create admin alert
-                await prisma.adminAlert.create({
-                    data: {
-                        tenantUuid: order.tenantUuid,
-                        storeUuid: order.storeUuid,
-                        alertType: "ORDER_ISSUE",
-                        category: "OPERATIONAL",
-                        level: "WARNING",
-                        priority: "MEDIUM",
-                        title: "Order Preparation Delayed",
-                        message: `Order ${order.orderNumber} has been preparing for ${minutesDelayed} minutes`,
-                        affectedEntity: "order",
-                        affectedEntityId: order.uuid,
-                        context: {
-                            minutesDelayed,
-                        },
-                    },
                 });
 
                 logWithContext("warn", "[OrderTimeoutAlert] Delayed order detected", {
@@ -79,6 +86,7 @@ export class OrderTimeoutAlertJob{
 
             logWithContext("info", "[OrderTimeoutAlert] Job completed", {
                 delayedOrders: delayedOrders.length,
+                alertsCreated,
                 durationMs: duration,
             });
       

@@ -12,7 +12,7 @@ dayjs.extend(timezone);
 // Payments that brought money in. REFUNDED belongs here too: the sale was
 // collected, and its refund is counted (on the day it was paid back) as
 // money out. Leaving it out would subtract a same-day refund twice.
-const COLLECTED_STATUSES = ["PAID", "COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] as const;
+export const COLLECTED_STATUSES = ["PAID", "COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] as const;
 
 // Variance under this (minor units) is rounding, not a problem
 const VARIANCE_TOLERANCE = 100;

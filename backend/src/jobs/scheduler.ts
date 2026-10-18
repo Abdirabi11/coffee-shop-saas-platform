@@ -22,7 +22,6 @@ import { QuotaResetJob } from "./Billing/QuotaReset.job.ts";
 import { MonthlyRevenueJob } from "./Analytics/monthlyRevenue.job.ts";
 import { GenerateBillingSnapshotsJob } from "./Analytics/generateBillingSnapshots.job.ts";
 import { CommissionCalculationJob } from "./staff/CommissionCalculation.job.ts";
-import { DashboardSnapshotCleanupJob } from "./dashboard/dashboardSnapshotCleanup.job.ts";
 import { OTPCleanupJob } from "./auth/OTPCleanup.job.ts";
 import { LowStockCheckJob } from "./Inventory/LowStockCheck.job.ts";
 import { AutoClockOutJob } from "./staff/AutoClockOut.job.ts";
@@ -44,7 +43,6 @@ import { AnalyticsSnapshotCleanupJob } from "./Analytics/Analyticssnapshotcleanu
 import { IdempotencyKeyCleanupJob } from "./Payment/IdempotencyKeyCleanup.job.ts";
 import { DailyStoreMetricsJob } from "./Order/dailyStoreMetrics.job.ts";
 import { InventoryReconciliationJob } from "./Inventory/InventoryReconciliation.job.ts";
-import { DashboardSnapshotJob } from "./dashboard/dashboardSnapshot.job.ts";
 import { OrphanedPaymentDetectionJob } from "./Payment/OrphanedPaymentDetection.job.ts";
 import { ArpuLtvJob } from "./Analytics/arpuLtv.job.ts";
 import { IdempotencyService } from "../services/order/Idempotency.service.ts";
@@ -130,6 +128,10 @@ export function startScheduler() {
   schedule("0 * * * *",  "LaborCostSnapshotJob",            () => LaborCostSnapshotJob.run());
   schedule("0 * * * *",  "LowStockAlertJob",                () => LowStockAlertJob.run());
   schedule("5 * * * *",  "HourlyRevenueJob",                () => HourlyRevenueJob.run());
+  // Store-day metrics: each store's previous local days, at 04:00 where it is
+  schedule("20 * * * *", "AnalyticsAggregationJob",         () => AnalyticsAggregationJob.run());
+  schedule("25 * * * *", "DailyStoreMetricsJob",            () => DailyStoreMetricsJob.run());
+  schedule("30 * * * *", "OrderMetricsCalculationJob",      () => OrderMetricsCalculationJob.run());
  
   // ─────────────────────────────────────────────────────────────────────────
   // 🟢 EVERY FEW HOURS
@@ -154,23 +156,19 @@ export function startScheduler() {
   // 01:00 — Subscriptions & tips
   schedule("0 1 * * *",  "SubscriptionRenewalJob",          () => SubscriptionRenewalJob.run());
   schedule("0 1 * * *",  "TipPoolCalculationJob",           () => TipPoolCalculationJob.run());
-  schedule("0 1 * * *",  "AnalyticsAggregationJob",         () => AnalyticsAggregationJob.run());
  
   // 02:00 — Reconciliation & metrics
   // Hourly: each store's previous local day, once it is past 02:00 there
   schedule("5 * * * *",  "DailyReconciliationJob",          () => DailyReconciliationJob.run());
-  schedule("0 2 * * *",  "DailyStoreMetricsJob",            () => DailyStoreMetricsJob.run());
   schedule("0 2 * * *",  "PerformanceCalculationJob",       () => PerformanceCalculationJob.run());
   schedule("0 2 * * *",  "ProductMetricsCalculationJob",    () => ProductMetricsCalculationJob.run());
   schedule("0 2 * * *",  "MenuSnapshotJob",                 () => MenuSnapshotJob.run());
   schedule("0 2 * * *",  "InventoryReconciliationJob",      () => InventoryReconciliationJob.run());
   schedule("30 2 * * *", "ProductPopularityJob",            () => ProductPopularityJob.runDaily());
-  schedule("30 2 * * *", "DashboardSnapshotJob",            () => DashboardSnapshotJob.execute());
  
   // 03:00 — Provider reconciliation & analytics
   // Hourly: each tenant's previous local day, once it is past 03:00 there
   schedule("15 * * * *", "ProviderReportReconciliation",    () => ProviderReportReconciliationJob.run());
-  schedule("0 3 * * *",  "OrderMetricsCalculationJob",      () => OrderMetricsCalculationJob.run());
   schedule("0 3 * * *",  "DeviceCleanupJob",                () => DeviceCleanupJob.run());
   schedule("0 3 * * *",  "MenuAnalyticsAggregationJob",     () => MenuAnalyticsAggregationJob.run());
   schedule("0 3 * * *",  "WebhookCleanupJob",               () => WebhookCleanupJob.run());
@@ -206,7 +204,6 @@ export function startScheduler() {
   schedule("0 0 1 * *",  "QuotaResetJob.monthly",           () => QuotaResetJob.runMonthly());
   schedule("30 0 1 * *", "MonthlyRevenueJob",               () => MonthlyRevenueJob.run());
   schedule("0 1 1 * *",  "GenerateBillingSnapshotsJob",     () => GenerateBillingSnapshotsJob.run());
-  schedule("0 2 1 * *",  "DashboardSnapshotCleanupJob",     () => DashboardSnapshotCleanupJob.execute());
   schedule("0 3 1 * *",  "CommissionCalculationJob",        () => CommissionCalculationJob.run());
   schedule("0 3 1 * *",  "AnalyticsSnapshotCleanupJob",     () => AnalyticsSnapshotCleanupJob.execute());
  
