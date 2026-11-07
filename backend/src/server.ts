@@ -18,6 +18,10 @@ import orderRoutes from "./routes/order/order.routes.ts"
 import paymentRoutes from "./routes/payment/Payment.routes.ts";
 import cashierPaymentRoutes from "./routes/payment/CashierPayment.routes.ts";
 import financialRoutes from "./routes/payment/Financial.routes.ts";
+import storeDashboardRoutes from "./routes/dashboards/store.routes.ts";
+import tenantDashboardRoutes from "./routes/dashboards/tenant.routes.ts";
+import staffDashboardRoutes from "./routes/dashboards/staff.routes.ts";
+import superAdminDashboardRoutes from "./routes/dashboards/superadmin.routes.ts";
 import { startScheduler } from "./jobs/scheduler.ts"
 import { MetricsService } from "./infrastructure/observability/MetricsService.ts";
 import { compressionMiddleware } from "./middlewares/compression.middleware.ts";
@@ -111,6 +115,10 @@ app.use("/api/order", orderRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/cashier", cashierPaymentRoutes);
 app.use("/api/financial", financialRoutes);
+app.use("/api/dashboards/store", storeDashboardRoutes);
+app.use("/api/dashboards/tenant", tenantDashboardRoutes);
+app.use("/api/dashboards/staff", staffDashboardRoutes);
+app.use("/api/admin/dashboard", superAdminDashboardRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/admin/webhooks", webhookAdminRoutes);
 

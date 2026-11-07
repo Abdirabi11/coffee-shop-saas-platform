@@ -133,6 +133,7 @@ enum AnalyticsType {
   // Platform-wide snapshots written by arpuLtv.job / churnAnalytics.job
   ARPU_LTV
   CHURN
+  MONTHLY_REVENUE // platform-wide, written by monthlyRevenue.job
 }
 
 enum AnomalySeverity {

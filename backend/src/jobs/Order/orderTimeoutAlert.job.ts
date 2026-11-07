@@ -6,6 +6,12 @@ import { MetricsService } from "../../infrastructure/observability/MetricsServic
 
 const PREPARING_TIMEOUT_MINUTES = 30;
 
+// Per run: candidates read a page at a time (oldest first), at most
+// MAX_SCANNED of them, and at most MAX_NEW_ALERTS new alerts raised
+const PAGE_SIZE = 50;
+const MAX_SCANNED = 2000;
+const MAX_NEW_ALERTS = 50;
+
 export class OrderTimeoutAlertJob{
     // storeUuids narrows the run to those stores
     static async run(opts: { storeUuids?: string[] } = {}){
@@ -15,21 +21,34 @@ export class OrderTimeoutAlertJob{
         logWithContext("info", "[OrderTimeoutAlert] Starting job", {});
 
         try {
-            const delayedOrders = await prisma.order.findMany({
-                where: {
-                    status: "PREPARING",
-                    ...(opts.storeUuids && { storeUuid: { in: opts.storeUuids } }),
-                    updatedAt: { lt: cutoff },
-                },
-                select: {
-                    uuid: true,
-                    tenantUuid: true,
-                    storeUuid: true,
-                    orderNumber: true,
-                    updatedAt: true,
-                },
-                take: 50,
-            });
+            // Oldest first, a page at a time. Already-alerted orders are
+            // skipped by the dedup, so walking past them (instead of taking one
+            // fixed batch of 50) lets newer stuck orders be reached too; new
+            // alerts per run are capped so a backlog can't flood the inbox.
+            const delayedOrders = [];
+            let cursor: string | undefined;
+            while (delayedOrders.length < MAX_SCANNED) {
+                const page = await prisma.order.findMany({
+                    where: {
+                        status: "PREPARING",
+                        ...(opts.storeUuids && { storeUuid: { in: opts.storeUuids } }),
+                        updatedAt: { lt: cutoff },
+                    },
+                    select: {
+                        uuid: true,
+                        tenantUuid: true,
+                        storeUuid: true,
+                        orderNumber: true,
+                        updatedAt: true,
+                    },
+                    orderBy: [{ updatedAt: "asc" }, { uuid: "asc" }],
+                    take: PAGE_SIZE,
+                    ...(cursor && { cursor: { uuid: cursor }, skip: 1 }),
+                });
+                delayedOrders.push(...page);
+                if (page.length < PAGE_SIZE) break;
+                cursor = page[page.length - 1].uuid;
+            }
         
             logWithContext("info", "[OrderTimeoutAlert] Found delayed orders", {
                 count: delayedOrders.length,
@@ -38,6 +57,8 @@ export class OrderTimeoutAlertJob{
             let alertsCreated = 0;
 
             for (const order of delayedOrders) {
+                if (alertsCreated >= MAX_NEW_ALERTS) break;
+
                 const minutesDelayed = Math.floor(
                     (Date.now() - order.updatedAt.getTime()) / 60000
                 );

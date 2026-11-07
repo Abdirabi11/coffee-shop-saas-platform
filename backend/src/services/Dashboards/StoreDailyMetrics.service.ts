@@ -1,9 +1,34 @@
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
+import { DailyReconciliationService } from "../payment/DailyReconciliation.service.ts";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
  
  
 export class StoreDailyMetricsService {
+    // The row key for the store's current local day: its local calendar date
+    // at 00:00 UTC, the same key the nightly dailyStoreMetrics job and the
+    // reconciliation use, so live increments and the nightly recompute land
+    // on one row. Never the server's midnight.
+    private static async todayKey(storeUuid: string, now: Date = new Date()): Promise<Date> {
+        const store = await prisma.store.findUnique({
+            where: { uuid: storeUuid },
+            select: { timezone: true },
+        });
+        return StoreDailyMetricsService.localDateKey(store?.timezone, now);
+    }
+
+    private static localDateKey(timezone: string | null | undefined, now: Date): Date {
+        const tz = DailyReconciliationService.safeTimezone(timezone);
+        const localDate = dayjs(now).tz(tz).format("YYYY-MM-DD");
+        return DailyReconciliationService.localDayWindow(tz, localDate).dateKey;
+    }
+
     //Called on every successful payment 
     static async recordPayment(input: {
         tenantUuid: string;
@@ -14,7 +39,7 @@ export class StoreDailyMetricsService {
         paymentMethod: string;
         paymentFlow: "CASHIER" | "PROVIDER";
     }) {
-        const today = dayjs().startOf("day").toDate();
+        const today = await StoreDailyMetricsService.todayKey(input.storeUuid);
         const tax = input.tax ?? 0;
         const discount = input.discount ?? 0;
     
@@ -69,7 +94,7 @@ export class StoreDailyMetricsService {
  
     //Called on payment failure 
     static async recordFailedPayment(tenantUuid: string, storeUuid: string) {
-        const today = dayjs().startOf("day").toDate();
+        const today = await StoreDailyMetricsService.todayKey(storeUuid);
     
         try {
             await prisma.storeDailyMetrics.upsert({
@@ -96,7 +121,7 @@ export class StoreDailyMetricsService {
  
     //Called on refund completion 
     static async recordRefund(tenantUuid: string, storeUuid: string, amount: number) {
-        const today = dayjs().startOf("day").toDate();
+        const today = await StoreDailyMetricsService.todayKey(storeUuid);
     
         try {
             await prisma.storeDailyMetrics.upsert({
@@ -127,7 +152,7 @@ export class StoreDailyMetricsService {
  
     //Called on void
     static async recordVoid(tenantUuid: string, storeUuid: string, amount: number) {
-        const today = dayjs().startOf("day").toDate();
+        const today = await StoreDailyMetricsService.todayKey(storeUuid);
     
         try {
             await prisma.storeDailyMetrics.upsert({
@@ -160,7 +185,7 @@ export class StoreDailyMetricsService {
  
     //Called on order cancellation
     static async recordCancellation(tenantUuid: string, storeUuid: string) {
-        const today = dayjs().startOf("day").toDate();
+        const today = await StoreDailyMetricsService.todayKey(storeUuid);
 
         try {
             await prisma.storeDailyMetrics.upsert({
@@ -210,7 +235,7 @@ export class StoreDailyMetricsService {
  
     //Read methods (for dashboards)
     static async getToday(tenantUuid: string, storeUuid: string) {
-        const today = dayjs().startOf("day").toDate();
+        const today = await StoreDailyMetricsService.todayKey(storeUuid);
         return prisma.storeDailyMetrics.findUnique({
             where: { tenantUuid_storeUuid_date: { tenantUuid, storeUuid, date: today } },
         });
@@ -223,18 +248,35 @@ export class StoreDailyMetricsService {
         });
     }
  
+    // date: a calendar day (its UTC date is taken). Without one, each store's
+    // own current local day, which differs between stores in different zones.
     static async getTenantSummary(tenantUuid: string, date?: Date) {
-        const targetDate = date
-            ? dayjs(date).startOf("day").toDate()
-            : dayjs().startOf("day").toDate();
+        let where: Prisma.StoreDailyMetricsWhereInput;
+        let reportedDate: string;
+        if (date) {
+            reportedDate = dayjs.utc(date).format("YYYY-MM-DD");
+            where = { tenantUuid, date: new Date(`${reportedDate}T00:00:00.000Z`) };
+        } else {
+            const now = new Date();
+            const stores = await prisma.store.findMany({
+                where: { tenantUuid },
+                select: { uuid: true, timezone: true },
+            });
+            const keys = stores.map((st) => ({
+                storeUuid: st.uuid,
+                date: StoreDailyMetricsService.localDateKey(st.timezone, now),
+            }));
+            reportedDate = "today";
+            where = { tenantUuid, OR: keys.length > 0 ? keys : [{ storeUuid: "" }] };
+        }
     
         const metrics = await prisma.storeDailyMetrics.findMany({
-            where: { tenantUuid, date: targetDate },
+            where,
             include: { store: { select: { name: true } } },
         });
     
         return {
-            date: targetDate,
+            date: reportedDate,
             storeCount: metrics.length,
             totals: {
                 revenueGross: metrics.reduce((s, m) => s + m.revenueGross, 0),
@@ -247,6 +289,7 @@ export class StoreDailyMetricsService {
             byStore: metrics.map((m) => ({
                 storeUuid: m.storeUuid,
                 storeName: (m as any).store?.name ?? "Unknown",
+                date: dayjs.utc(m.date).format("YYYY-MM-DD"), // the store's local day
                 revenueGross: m.revenueGross,
                 revenueNet: m.revenueNet,
                 ordersCompleted: m.ordersCompleted,
