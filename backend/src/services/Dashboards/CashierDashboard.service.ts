@@ -21,7 +21,7 @@ export class StaffDashboardService {
                 // Get tenantUser for this user + tenant
                 const tenantUser = await prisma.tenantUser.findFirst({
                     where: { tenantUuid, userUuid, isActive: true },
-                    select: { uuid: true, role: true },
+                    select: { uuid: true, userUuid: true, role: true },
                 });
         
                 if (!tenantUser) {
@@ -38,28 +38,30 @@ export class StaffDashboardService {
                     cashDrawer,
                     activeOrders,
                 ] = await Promise.all([
-                    // Current active time entry
+                    // Current active time entry (keyed by the User, not the TenantUser)
                     prisma.timeEntry.findFirst({
                         where: {
-                            tenantUserUuid: tenantUser.uuid,
+                            tenantUuid,
+                            userUuid: tenantUser.userUuid,
                             storeUuid,
-                            clockOut: null,
+                            clockOutAt: null,
                         },
                         select: {
                             uuid: true,
-                            clockIn: true,
-                            breaks: {
-                                where: { endTime: null },
-                                select: { uuid: true, startTime: true, breakType: true },
+                            clockInAt: true,
+                            breakEntries: {
+                                where: { breakEnd: null },
+                                select: { uuid: true, breakStart: true, breakType: true },
                             },
                         },
                     }),
         
-                    // Orders I processed today
+                    // Orders I took today (Order.tenantUserUuid is the staff member who created it)
                     prisma.order.count({
                         where: {
+                            tenantUuid,
                             storeUuid,
-                            processedBy: tenantUser.uuid,
+                            tenantUserUuid: tenantUser.uuid,
                             createdAt: { gte: todayStart },
                         },
                     }),
@@ -67,63 +69,73 @@ export class StaffDashboardService {
                     // Revenue from my orders
                     prisma.order.aggregate({
                         where: {
+                            tenantUuid,
                             storeUuid,
-                            processedBy: tenantUser.uuid,
+                            tenantUserUuid: tenantUser.uuid,
                             createdAt: { gte: todayStart },
                             status: "COMPLETED",
                         },
                         _sum: { totalAmount: true },
                     }),
         
-                    // My tips today
-                    prisma.tip.aggregate({
+                    // My tips today: tips are recorded on the order (Order.tipAmount);
+                    // pooled payouts live in TipDistribution and are settled per period
+                    prisma.order.aggregate({
                         where: {
-                            recipientUuid: tenantUser.uuid,
+                            tenantUuid,
+                            storeUuid,
+                            tenantUserUuid: tenantUser.uuid,
                             createdAt: { gte: todayStart },
+                            status: { not: "CANCELLED" },
                         },
-                        _sum: { amount: true },
+                        _sum: { tipAmount: true },
                     }),
             
                     // My commission (if volume-based 2.5%)
                     prisma.commission.findFirst({
                         where: {
-                            tenantUserUuid: tenantUser.uuid,
+                            tenantUuid,
+                            storeUuid,
+                            userUuid: tenantUser.userUuid,
                             periodStart: { lte: new Date() },
                             periodEnd: { gte: new Date() },
                         },
-                        select: { amount: true, salesVolume: true, rate: true },
+                        select: { commissionAmount: true, totalSales: true, commissionRate: true },
                     }),
             
                     // My next 3 scheduled shifts
                     prisma.shift.findMany({
                         where: {
-                            tenantUserUuid: tenantUser.uuid,
+                            tenantUuid,
+                            userUuid: tenantUser.userUuid,
                             storeUuid,
-                            startTime: { gte: new Date() },
+                            scheduledStart: { gte: new Date() },
                             status: "SCHEDULED",
                         },
                         select: {
                             uuid: true,
-                            startTime: true,
-                            endTime: true,
+                            scheduledStart: true,
+                            scheduledEnd: true,
                             shiftType: true,
                         },
-                        orderBy: { startTime: "asc" },
+                        orderBy: { scheduledStart: "asc" },
                         take: 3,
                     }),
                 
                     // My assigned cash drawer
                     prisma.cashDrawer.findFirst({
                         where: {
+                            tenantUuid,
                             storeUuid,
-                            assignedToUuid: tenantUser.uuid,
-                            status: { in: ["OPEN", "ACTIVE"] },
+                            userUuid: tenantUser.userUuid,
+                            status: "OPEN",
                         },
                         select: {
                             uuid: true,
                             drawerNumber: true,
                             openingBalance: true,
-                            currentBalance: true,
+                            // Running cash the system expects in the drawer (kept by the cashier payment flow)
+                            expectedCash: true,
                             status: true,
                         },
                     }),
@@ -131,9 +143,10 @@ export class StaffDashboardService {
                     // My active orders
                     prisma.order.findMany({
                         where: {
+                            tenantUuid,
                             storeUuid,
-                            processedBy: tenantUser.uuid,
-                            status: { in: ["PENDING", "IN_PROGRESS", "PREPARING"] },
+                            tenantUserUuid: tenantUser.uuid,
+                            status: { in: ["PENDING", "PAID", "PREPARING", "READY"] },
                         },
                         select: {
                             uuid: true,
@@ -147,21 +160,21 @@ export class StaffDashboardService {
                     }),
                 ]);
         
-                const isOnBreak = (currentShift?.breaks?.length ?? 0) > 0;
+                const isOnBreak = (currentShift?.breakEntries?.length ?? 0) > 0;
         
                 return {
                 shift: currentShift
                     ? {
                         timeEntryUuid: currentShift.uuid,
-                        clockedInAt: currentShift.clockIn,
-                        hoursWorked: dayjs().diff(dayjs(currentShift.clockIn), "hour", true).toFixed(1),
+                        clockedInAt: currentShift.clockInAt,
+                        hoursWorked: dayjs().diff(dayjs(currentShift.clockInAt), "hour", true).toFixed(1),
                         isOnBreak,
                         currentBreak: isOnBreak
                         ? {
-                            breakUuid: currentShift.breaks[0].uuid,
-                            startedAt: currentShift.breaks[0].startTime,
-                            type: currentShift.breaks[0].breakType,
-                            duration: dayjs().diff(dayjs(currentShift.breaks[0].startTime), "minute"),
+                            breakUuid: currentShift.breakEntries[0].uuid,
+                            startedAt: currentShift.breakEntries[0].breakStart,
+                            type: currentShift.breakEntries[0].breakType,
+                            duration: dayjs().diff(dayjs(currentShift.breakEntries[0].breakStart), "minute"),
                             }
                         : null,
                         status: isOnBreak ? "ON_BREAK" : "WORKING",
@@ -173,12 +186,12 @@ export class StaffDashboardService {
                         revenueToday: myRevenueToday._sum.totalAmount ?? 0,
                     },
                     earnings: {
-                        tips: myTips._sum.amount ?? 0,
+                        tips: myTips._sum.tipAmount ?? 0,
                         commission: myCommission
                         ? {
-                            amount: myCommission.amount,
-                            salesVolume: myCommission.salesVolume,
-                            rate: myCommission.rate,
+                            amount: myCommission.commissionAmount,
+                            salesVolume: myCommission.totalSales,
+                            rate: myCommission.commissionRate,
                             }
                         : null,
                     },
@@ -187,7 +200,7 @@ export class StaffDashboardService {
                             uuid: cashDrawer.uuid,
                             drawerNumber: cashDrawer.drawerNumber,
                             openingBalance: cashDrawer.openingBalance,
-                            currentBalance: cashDrawer.currentBalance,
+                            currentBalance: cashDrawer.expectedCash,
                             status: cashDrawer.status,
                         }
                         : null,
@@ -198,9 +211,9 @@ export class StaffDashboardService {
                         schedule: {
                             upcoming: upcomingShifts.map((s) => ({
                             uuid: s.uuid,
-                            date: dayjs(s.startTime).format("YYYY-MM-DD"),
-                            start: dayjs(s.startTime).format("HH:mm"),
-                            end: dayjs(s.endTime).format("HH:mm"),
+                            date: dayjs(s.scheduledStart).format("YYYY-MM-DD"),
+                            start: dayjs(s.scheduledStart).format("HH:mm"),
+                            end: dayjs(s.scheduledEnd).format("HH:mm"),
                             type: s.shiftType,
                         })),
                     },

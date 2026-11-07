@@ -223,30 +223,29 @@ export class StoreDashboardService{
         const cacheKey = `dashboard:store:${storeUuid}:staff:${rangeKey(input.dateFrom, input.dateTo)}`;
 
         return withCache(cacheKey, 300, async () => {
-            // Orders handled by each staff member
+            // Orders per staff member: Order.tenantUserUuid is the TenantUser who took it
             const staffOrders = await prisma.order.groupBy({
-                by: ["handledBy"],
+                by: ["tenantUserUuid"],
                 where: {
                     storeUuid,
                     status: "COMPLETED",
-                    handledBy: { not: null },
                     createdAt: { gte: input.dateFrom, lte: input.dateTo },
                 },
-                _count: { uuid: true },
+                _count: { _all: true },
                 _sum: { totalAmount: true },
             });
 
-            const staffDetails = await prisma.user.findMany({
-                where: { uuid: { in: staffOrders.map((s) => s.handledBy!) } },
-                select: { uuid: true, name: true },
+            const staffDetails = await prisma.tenantUser.findMany({
+                where: { uuid: { in: staffOrders.map((s) => s.tenantUserUuid) } },
+                select: { uuid: true, user: { select: { name: true } } },
             });
+            const nameByUuid = new Map(staffDetails.map((sd) => [sd.uuid, sd.user.name]));
 
             return staffOrders.map((s) => {
-                const staff = staffDetails.find((sd) => sd.uuid === s.handledBy);
                 return {
-                    staffUuid: s.handledBy,
-                    staffName: staff?.name || "Unknown",
-                    ordersHandled: s._count.uuid,
+                    staffUuid: s.tenantUserUuid,
+                    staffName: nameByUuid.get(s.tenantUserUuid) || "Unknown",
+                    ordersHandled: s._count._all,
                     revenue: s._sum.totalAmount || 0,
                 };
             }).sort((a, b) => b.ordersHandled - a.ordersHandled);

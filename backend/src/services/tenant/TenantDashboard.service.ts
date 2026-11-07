@@ -360,7 +360,9 @@ export class TenantDashboardService {
     static async getSubscriptionInfo(tenantUuid: string) {
         const subscription = await prisma.subscription.findFirst({
             where: { tenantUuid },
-            include: { plan: true },
+            // Price and interval live on the subscribed PlanPrice, not on Plan
+            include: { plan: true, planPrice: true },
+            orderBy: { createdAt: "desc" },
         });
 
         if (!subscription) return null;
@@ -384,8 +386,9 @@ export class TenantDashboardService {
             plan: {
                 name: subscription.plan.name,
                 tier: subscription.plan.tier,
-                price: subscription.plan.price,
-                billingInterval: subscription.plan.billingInterval,
+                price: subscription.planPrice.amount,
+                currency: subscription.planPrice.currency,
+                billingInterval: subscription.planPrice.interval,
             },
             status: subscription.status,
             currentPeriodStart: subscription.currentPeriodStart,

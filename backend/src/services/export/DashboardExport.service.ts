@@ -1,8 +1,8 @@
-import { Parser } from "json2csv";
+import { json2csv } from "json-2-csv";
 import ExcelJS from "exceljs";
-import { SuperAdminDashboardService } from "../Dashboards/SuperAdminDashboard.service.ts";
+import { SuperAdminDashboardService } from "../superAdmin/SuperAdminDashboard.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
-import { TenantDashboardService } from "../Dashboards/TenantDashboard.service.ts";
+import { TenantDashboardService } from "../tenant/TenantDashboard.service.ts";
 
 export class DashboardExportService {
   
@@ -18,6 +18,9 @@ export class DashboardExportService {
                 SuperAdminDashboardService.getGrowthMetrics(input),
             ]);
 
+            const subscriptionRevenue = revenue.invoices.revenue;
+            const orderRevenue = revenue.byFlow.reduce((sum, f) => sum + f.revenue, 0);
+
             const data = {
                 // Overview
                 totalTenants: overview.tenants.total,
@@ -25,9 +28,10 @@ export class DashboardExportService {
                 churnRate: overview.tenants.churnRate,
                 
                 // Revenue
-                totalRevenue: revenue.bySource.subscriptions + revenue.bySource.orders,
-                subscriptionRevenue: revenue.bySource.subscriptions,
-                orderRevenue: revenue.bySource.orders,
+                // Subscriptions are billed through invoices; order revenue is the payment flows
+                totalRevenue: subscriptionRevenue + orderRevenue,
+                subscriptionRevenue,
+                orderRevenue,
                 mrr: revenue.mrr,
                 
                 // Growth
@@ -36,10 +40,7 @@ export class DashboardExportService {
                 orderGrowth: growth.orders.growth,
             };
 
-            const parser = new Parser();
-            const csv = parser.parse([data]);
-
-            return csv;
+            return json2csv([data]);
         } catch (error: any) {
             logWithContext("error", "[Export] Failed to export super admin CSV", {
                 error: error.message,
@@ -76,13 +77,15 @@ export class DashboardExportService {
             ];
 
             overviewSheet.addRows([
-                { metric: "Total Stores", value: overview.stores.total },
-                { metric: "Active Stores", value: overview.stores.active },
-                { metric: "Total Orders", value: overview.orders.total },
-                { metric: "Completed Orders", value: overview.orders.completed },
-                { metric: "Total Revenue", value: (overview.revenue.total / 100).toFixed(2) },
-                { metric: "Total Customers", value: overview.customers.total },
-                { metric: "Active Customers", value: overview.customers.active },
+                { metric: "Stores", value: overview.totalStores },
+                { metric: "Completed Orders", value: overview.completedOrders },
+                { metric: "Average Order Value", value: (overview.averageOrderValue / 100).toFixed(2) },
+                { metric: "Net Revenue", value: (overview.revenue / 100).toFixed(2) },
+                { metric: "Gross Revenue", value: (overview.revenueDetail.gross / 100).toFixed(2) },
+                { metric: "Refunds", value: (overview.revenueDetail.refunds / 100).toFixed(2) },
+                { metric: "Failed Payments", value: overview.failedPayments },
+                { metric: "Total Customers", value: customers.total },
+                { metric: "Active Customers", value: customers.activeInPeriod },
             ]);
 
             // Store performance sheet
@@ -91,15 +94,13 @@ export class DashboardExportService {
                 { header: "Store", key: "storeName", width: 30 },
                 { header: "Revenue", key: "revenue", width: 15 },
                 { header: "Orders", key: "orders", width: 15 },
-                { header: "Avg Prep Time (min)", key: "avgPrepTime", width: 20 },
             ];
 
             storesSheet.addRows(
                 stores.map((s) => ({
                     storeName: s.storeName,
                     revenue: (s.revenue / 100).toFixed(2),
-                    orders: s.orders,
-                    avgPrepTime: s.avgPrepTime.toFixed(1),
+                    orders: s.orderCount,
                 }))
             );
 
@@ -113,8 +114,8 @@ export class DashboardExportService {
 
             productsSheet.addRows(
                 products.map((p) => ({
-                    productName: p.product?.name || "Unknown",
-                    quantity: p.quantitySold,
+                    productName: p.name || "Unknown",
+                    quantity: p.quantity,
                     revenue: (p.revenue / 100).toFixed(2),
                 }))
             );
@@ -128,16 +129,16 @@ export class DashboardExportService {
             ];
 
             revenueSheet.addRows(
-                revenue.map((r) => ({
-                    date: new Date(r.date).toLocaleDateString(),
+                revenue.data.map((r) => ({
+                    date: r.period,
                     revenue: (r.revenue / 100).toFixed(2),
-                    orders: r.orders,
+                    orders: r.orderCount,
                 }))
             );
 
             // Generate buffer
             const buffer = await workbook.xlsx.writeBuffer();
-            return buffer as Buffer;
+            return Buffer.from(buffer);
 
         } catch (error: any) {
             logWithContext("error", "[Export] Failed to export tenant Excel", {

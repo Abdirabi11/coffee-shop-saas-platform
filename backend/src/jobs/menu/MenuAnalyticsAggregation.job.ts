@@ -7,7 +7,7 @@ export class MenuAnalyticsAggregationJob {
   
     //Aggregate analytics data daily
     static async run() {
-        logWithContext("info", "[MenuAnalytics] Starting daily aggregation");
+        logWithContext("info", "[MenuAnalytics] Starting daily aggregation", {});
 
         try {
             const yesterday = dayjs().subtract(1, "day");
@@ -15,7 +15,7 @@ export class MenuAnalyticsAggregationJob {
             const dateTo = yesterday.endOf("day").toDate();
 
             // Get all events from yesterday
-            const events = await prisma.menuAnalyticEvent.findMany({
+            const events = await prisma.menuAnalyticEvents.findMany({
                 where: {
                     occurredAt: {
                         gte: dateFrom,
