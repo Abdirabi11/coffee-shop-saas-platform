@@ -17,16 +17,18 @@ export class CashDrawerReportService {
             throw new Error("DRAWER_NOT_FOUND");
         }
     
-        // Get all payments processed through this drawer's terminal during session
-        const sessionStart = drawer.sessionStart;
+        const sessionStart = drawer.sessionStart ?? drawer.openedAt ?? drawer.createdAt;
         const sessionEnd = drawer.sessionEnd ?? new Date();
     
+        // Payments linked to this drawer (Payment.drawerUuid), the same set
+        // closeDrawer counts expected cash from. Matching on terminalId instead
+        // would pull in every terminal-less payment when the drawer has none.
         const payments = await prisma.payment.findMany({
             where: {
+                tenantUuid: drawer.tenantUuid,
                 storeUuid: drawer.storeUuid,
-                terminalId: drawer.terminalId,
+                drawerUuid: drawer.uuid,
                 paymentFlow: "CASHIER",
-                processedAt: { gte: sessionStart, lte: sessionEnd },
                 status: { in: ["COMPLETED", "VOIDED"] },
             },
             select: {
@@ -256,7 +258,8 @@ export class CashDrawerReportService {
             >();
     
             for (const s of sessions) {
-                const existing = byTerminal.get(s.terminalId) ?? {
+                const terminalKey = s.terminalId ?? "UNASSIGNED";
+                const existing = byTerminal.get(terminalKey) ?? {
                     sessions: 0,
                     totalSales: 0,
                     totalTransactions: 0,
@@ -274,7 +277,7 @@ export class CashDrawerReportService {
                 existing.totalVariance += Math.abs(s.cashVariance ?? 0) + Math.abs(s.cardVariance ?? 0);
                 existing.avgSessionDuration += duration;
         
-                byTerminal.set(s.terminalId, existing);
+                byTerminal.set(terminalKey, existing);
             }
         
             // Calculate averages

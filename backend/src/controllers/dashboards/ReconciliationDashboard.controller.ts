@@ -147,6 +147,9 @@ export class ReconciliationDashboardController {
                 });
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
+            if (error.message === "INVALID_PROVIDER") {
+                return res.status(400).json({ success: false, error: "INVALID_PROVIDER" });
+            }
             logWithContext("error", "[ReconciliationCtrl] getProviderRecon failed", {
                 error: error.message,
             });
@@ -165,7 +168,7 @@ export class ReconciliationDashboardController {
             }
         
             const { StoreDailyMetricsService } = await import(
-                "../../services/dashboard/StoreDailyMetrics.service.js"
+                "../../services/Dashboards/StoreDailyMetrics.service.ts"
             );
         
             const data = await StoreDailyMetricsService.getTenantSummary(tenantUuid);

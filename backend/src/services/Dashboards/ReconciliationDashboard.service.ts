@@ -1,3 +1,4 @@
+import { PaymentProvider } from "@prisma/client";
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { withCache } from "../../infrastructure/cache/cache.ts"
@@ -164,12 +165,22 @@ export class ReconciliationDashboardService {
     
         const cacheKey = `recon:provider:${input.tenantUuid}:${input.provider ?? "all"}:${days}d`;
     
+        // ?provider=stripe → STRIPE; anything that isn't a PaymentProvider is rejected
+        let provider: PaymentProvider | undefined;
+        if (input.provider) {
+            const candidate = input.provider.toUpperCase();
+            if (!(Object.values(PaymentProvider) as string[]).includes(candidate)) {
+                throw new Error("INVALID_PROVIDER");
+            }
+            provider = candidate as PaymentProvider;
+        }
+    
         return withCache(cacheKey, 600, async () => {
             const reports = await prisma.paymentReconciliation.findMany({
                 where: {
                     tenantUuid: input.tenantUuid,
                     periodStart: { gte: since },
-                    ...(input.provider && { provider: input.provider.toUpperCase() }),
+                    ...(provider && { provider }),
                 },
                 orderBy: { periodStart: "desc" },
                 select: {

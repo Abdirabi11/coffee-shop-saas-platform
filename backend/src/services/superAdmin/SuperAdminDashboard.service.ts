@@ -510,7 +510,6 @@ export class SuperAdminDashboardService {
                     where: {
                         severity: { in: ["HIGH", "CRITICAL"] },
                         createdAt: { gte: last7d },
-                        userUuid: { not: null },
                     },
                     _count: { uuid: true },
                     having: { uuid: { _count: { gte: 3 } } },

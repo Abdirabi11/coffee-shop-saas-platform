@@ -1,4 +1,4 @@
-import { withCache } from "../../cache/cache.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
 import prisma from "../../config/prisma.ts"
 
 
@@ -219,7 +219,7 @@ export class InventoryDashboardService {
             // Current stock levels
             const inventory = await prisma.inventoryItem.findMany({
                 where: { tenantUuid: input.tenantUuid, storeUuid: input.storeUuid },
-                include: { product: { select: { name: true, price: true } } },
+                include: { product: { select: { name: true } } },
             });
         
             const inventoryMap = new Map(

@@ -40,7 +40,8 @@ export class DashboardService{
         const newCustomers = await prisma.tenantUser.count({
             where: {
                 tenantUuid: input.tenantUuid,
-                role: "CUSTOMER",
+                // Customers are Users with globalRole CUSTOMER (TenantRole is staff-only)
+                user: { globalRole: "CUSTOMER" },
                 createdAt: {
                     gte: input.dateFrom,
                     lte: input.dateTo,

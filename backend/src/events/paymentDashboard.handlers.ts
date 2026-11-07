@@ -144,5 +144,5 @@ export function registerPaymentDashboardHandlers() {
         }
     });
  
-    logWithContext("info", "[PaymentDashboard] Dashboard pipeline handlers registered");
+    logWithContext("info", "[PaymentDashboard] Dashboard pipeline handlers registered", {});
 }

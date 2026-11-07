@@ -1,5 +1,5 @@
 import express from "express"
-import { SuperAdminDashboardController } from "../../controllers/dashboards/SuperAdminDashboard.controller.ts";
+import { SuperAdminDashboardController } from "../../controllers/superAdmin/SuperAdminDashboard.controller.ts";
 import { authenticate, authorize } from "../../middlewares/auth.middleware.ts";
 
 const router= express.Router();
@@ -28,7 +28,10 @@ router.get("/risk", SuperAdminDashboardController.getRisk);
 // api/admin/dashboard/alerts
 router.get("/alerts", SuperAdminDashboardController.getAlerts);
 
-//GET /api/admin/dashboard/analytics
-router.get("/analytics", SuperAdminDashboardController.getAnalytics);
+// GET /api/admin/dashboard/tenant-health
+router.get("/tenant-health", SuperAdminDashboardController.getTenantHealth);
+
+// GET /api/admin/dashboard/tenant-list
+router.get("/tenant-list", SuperAdminDashboardController.getTenantList);
 
 export default router;
