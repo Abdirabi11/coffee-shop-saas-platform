@@ -130,6 +130,9 @@ enum AnalyticsType {
   ENGAGEMENT
   CONVERSION
   RETENTION
+  // Platform-wide snapshots written by arpuLtv.job / churnAnalytics.job
+  ARPU_LTV
+  CHURN
 }
 
 enum AnomalySeverity {
