@@ -24,9 +24,9 @@ export class PaymentDisputeService {
             throw new Error("PAYMENT_NOT_FOUND");
         }
     
-        // Idempotency (the provider's dispute id isn't a unique column, so
-        // look it up per provider; Stripe events are also deduped upstream
-        // by the webhook ledger)
+        // Idempotency: one dispute per (provider, providerDisputeUuid), unique
+        // in the database. The lookup answers a redelivery cheaply; the
+        // constraint settles two deliveries racing past it (P2002 below).
         const existing = await prisma.paymentDispute.findFirst({
             where: {
                 provider: input.provider.toUpperCase(),
@@ -38,30 +38,49 @@ export class PaymentDisputeService {
             return existing;
         }
     
-        const dispute = await prisma.paymentDispute.create({
-            data: {
-                tenantUuid: payment.tenantUuid,
-                paymentUuid: payment.uuid,
-                orderUuid: payment.orderUuid,
-                storeUuid: payment.storeUuid,
+        let dispute;
+        try {
+            dispute = await prisma.paymentDispute.create({
+                data: {
+                    tenantUuid: payment.tenantUuid,
+                    paymentUuid: payment.uuid,
+                    orderUuid: payment.orderUuid,
+                    storeUuid: payment.storeUuid,
         
-                provider: input.provider.toUpperCase(),
-                providerDisputeUuid: input.providerDisputeId,
+                    provider: input.provider.toUpperCase(),
+                    providerDisputeUuid: input.providerDisputeId,
         
-                amount: input.amount,
-                currency: payment.currency,
+                    amount: input.amount,
+                    currency: payment.currency,
         
-                reason: this.normalizeReason(input.reason),
-                reasonCode: input.reasonCode,
+                    reason: this.normalizeReason(input.reason),
+                    reasonCode: input.reasonCode,
         
-                status: "OPEN",
-                evidenceDueBy: input.evidenceDueBy,
+                    status: "OPEN",
+                    evidenceDueBy: input.evidenceDueBy,
         
-                snapshot: input.snapshot,
+                    snapshot: input.snapshot,
         
-                notifiedAt: new Date(),
-            },
-        });
+                    notifiedAt: new Date(),
+                },
+            });
+        } catch (error: any) {
+            if (error.code !== "P2002") throw error;
+            // A concurrent delivery created it first: return that one, and
+            // leave the alert and audit entry to it
+            const winner = await prisma.paymentDispute.findFirst({
+                where: {
+                    provider: input.provider.toUpperCase(),
+                    providerDisputeUuid: input.providerDisputeId,
+                },
+            });
+            if (!winner) throw error;
+            logWithContext("info", "[Dispute] Duplicate delivery, returning existing dispute", {
+                disputeUuid: winner.uuid,
+                providerDisputeId: input.providerDisputeId,
+            });
+            return winner;
+        }
     
         await prisma.adminAlert.create({
             data: {

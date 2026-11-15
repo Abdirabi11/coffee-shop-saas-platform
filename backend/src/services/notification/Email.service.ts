@@ -3,10 +3,57 @@ import prisma from "../../config/prisma.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 
-//sample
+// Values in templates come from customers and staff (names, addresses, item
+// options): escape them before they go into HTML
+function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+// Amounts are stored in cents
+function money(cents: unknown, currency: unknown): string {
+    const amount = Number(cents);
+    return `${Number.isFinite(amount) ? (amount / 100).toFixed(2) : "0.00"} ${escapeHtml(currency || "USD")}`;
+}
+
+function renderReceipt(data: any): string {
+    const currency = data.currency;
+    const items: any[] = Array.isArray(data.items) ? data.items : [];
+    const rows = items.map((item) => `
+        <tr>
+            <td>${escapeHtml(item.quantity)} × ${escapeHtml(item.name)}${item.options ? `<br><small>${escapeHtml(item.options)}</small>` : ""}</td>
+            <td style="text-align:right">${money(item.subtotal, currency)}</td>
+        </tr>`).join("");
+    const line = (label: string, cents: unknown) => `<tr><td>${label}</td><td style="text-align:right">${money(cents, currency)}</td></tr>`;
+    const orderDate = data.orderDate ? new Date(data.orderDate) : null;
+
+    return `
+        <h1>Receipt</h1>
+        <p>${escapeHtml(data.storeName)}${data.storeAddress ? `<br>${escapeHtml(data.storeAddress)}` : ""}</p>
+        <p>Hi ${escapeHtml(data.customerName || "there")}, thanks for your order.</p>
+        <p>Order #${escapeHtml(data.orderNumber)}${orderDate && !Number.isNaN(orderDate.getTime()) ? ` · ${escapeHtml(orderDate.toUTCString())}` : ""}<br>
+           Receipt ${escapeHtml(data.receiptNumber)}</p>
+        <table style="width:100%;border-collapse:collapse">
+            ${rows}
+            ${line("Subtotal", data.subtotal)}
+            ${Number(data.discount) ? line("Discount", -Number(data.discount)) : ""}
+            ${line("Tax", data.tax)}
+            <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${money(data.total, currency)}</strong></td></tr>
+            ${data.amountTendered != null ? line("Paid", data.amountTendered) : ""}
+            ${data.changeGiven != null ? line("Change", data.changeGiven) : ""}
+        </table>
+        <p>Paid by ${escapeHtml(data.paymentMethod)}${data.transactionId ? ` · Ref ${escapeHtml(data.transactionId)}` : ""}</p>`;
+}
+
 function renderEmailTemplate(template: string, data: any): string {
     // Simple template renderer — replace with Handlebars/EJS later
     switch (template) {
+        case "receipt":
+            return renderReceipt(data);
         case "email-verification":
             return `<h1>Verify Your Email</h1><p>Click here to verify: <a href="${data.verificationLink}">${data.verificationLink}</a></p><p>Expires in ${data.expiresIn}.</p>`;
         case "otp-verification":
@@ -16,7 +63,7 @@ function renderEmailTemplate(template: string, data: any): string {
         case "password-changed":
             return `<h1>Password Changed</h1><p>Your password was changed at ${data.timestamp}.</p>`;
         default:
-            return `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            return `<pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
     }
 }
 export class EmailService {

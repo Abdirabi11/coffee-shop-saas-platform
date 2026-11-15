@@ -1950,7 +1950,9 @@ model IPWhitelist {
   uuid       String @id @default(uuid())
   tenantUuid String
 
-  ipAddress   String
+  // A rule is a single address (ipAddress) or a CIDR block (ipRange);
+  // IpWhitelist.service requires exactly one
+  ipAddress   String?
   ipRange     String?
   description String?
 
@@ -3976,44 +3978,46 @@ model Payment {
   // CASHIER PAYMENT FIELDS (for manual declarations)
 
   // Who & When
-  processedBy         String?
-  processedAt         DateTime?
-  deviceId            String?
-  terminalId          String?
-  ipAddress           String?
+  processedBy          String?
+  processedAt          DateTime?
+  deviceId             String?
+  terminalId           String?
+  ipAddress            String?
   // Change given (for cash)
-  amountTendered      Int?
-  changeGiven         Int?
+  amountTendered       Int?
+  changeGiven          Int?
   // Receipt
-  receiptNumber       String?
-  receiptPrinted      Boolean        @default(false)
-  receiptPrintedAt    DateTime?
+  receiptNumber        String?
+  // Set once, when the automatic receipt email is queued (ReceiptService)
+  receiptEmailQueuedAt DateTime?
+  receiptPrinted       Boolean        @default(false)
+  receiptPrintedAt     DateTime?
   // Reconciliation
-  reconciledInReport  String?
-  reconciledAt        DateTime?
-  reconciliationNotes String?
+  reconciledInReport   String?
+  reconciledAt         DateTime?
+  reconciliationNotes  String?
   // Anomaly detection
-  flaggedForReview    Boolean        @default(false)
-  flagReason          String?
-  flaggedAt           DateTime?
-  reviewedBy          String?
-  reviewedAt          DateTime?
-  reviewNotes         String?
-  reviewOutcome       ReviewOutcome?
+  flaggedForReview     Boolean        @default(false)
+  flagReason           String?
+  flaggedAt            DateTime?
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  reviewNotes          String?
+  reviewOutcome        ReviewOutcome?
   // Corrections (if payment was wrong)
-  correctedBy         String?
-  correctedAt         DateTime?
-  correctionReason    String?
-  originalAmount      Int?
+  correctedBy          String?
+  correctedAt          DateTime?
+  correctionReason     String?
+  originalAmount       Int?
   // Disputes & corrections
-  disputedBy          String?
-  disputedAt          DateTime?
-  disputeReason       String?
-  disputeResolution   String?
+  disputedBy           String?
+  disputedAt           DateTime?
+  disputeReason        String?
+  disputeResolution    String?
   // Voids
-  voidedBy            String?
-  voidedAt            DateTime?
-  voidReason          String?
+  voidedBy             String?
+  voidedAt             DateTime?
+  voidReason           String?
 
   // PROVIDER PAYMENT FIELDS
   provider      PaymentProvider?
@@ -4255,6 +4259,7 @@ model PaymentDispute {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([provider, providerDisputeUuid])
   @@index([tenantUuid, status])
   @@index([paymentUuid])
   @@index([status, evidenceDueBy])
@@ -4663,9 +4668,9 @@ model DailyReconciliation {
   providerFees   Int       @default(0)
   netCollected   Int       @default(0)
   // Relationships
-  tenant           Tenant    @relation(fields: [tenantUuid], references: [uuid])
-  store            Store     @relation(fields: [storeUuid], references: [uuid])
-  payments         Payment[]
+  tenant         Tenant    @relation(fields: [tenantUuid], references: [uuid])
+  store          Store     @relation(fields: [storeUuid], references: [uuid])
+  payments       Payment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

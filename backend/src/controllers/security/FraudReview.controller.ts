@@ -101,7 +101,7 @@ export class FraudReviewController {
                     status,
                     resolution,
                     actionTaken,
-                    reviewedBy: staff.uuid,
+                    reviewedBy: staff.userUuid,
                     reviewedAt: new Date(),
                 },
             });
@@ -109,7 +109,7 @@ export class FraudReviewController {
             logWithContext("info", "[Security] Fraud event reviewed", {
                 fraudUuid: uuid,
                 status,
-                reviewedBy: staff.uuid,
+                reviewedBy: staff.userUuid,
             });
         
             return res.status(200).json({ success: true, data: event });

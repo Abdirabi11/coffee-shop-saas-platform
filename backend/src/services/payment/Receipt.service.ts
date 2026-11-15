@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
@@ -33,9 +34,48 @@ interface ReceiptData {
     processedBy?: string;
 }
  
+// Who the receipt email goes to, and where it is filed
+interface ReceiptContext {
+    tenantUuid: string;
+    storeUuid: string;
+    // The order's customer is staff at this store (a POS order entered by a
+    // cashier for a walk-in): no automatic email, it would go to the cashier
+    customerIsStaff: boolean;
+}
+
 export class ReceiptService {
-    //Main entry point — called from payment event handlers
+    // The receipt for a payment, for display. No email is sent. The receipt
+    // number is kept on the payment, so every view shows the same one.
     static async generate(paymentUuid: string): Promise<ReceiptData | null> {
+        return (await this.build(paymentUuid))?.receipt ?? null;
+    }
+
+    // After a payment completes (PAYMENT_CONFIRMED / CASHIER_PAYMENT_COMPLETED):
+    // queues the receipt email to the customer, once per payment.
+    static async issueOnPayment(paymentUuid: string): Promise<"QUEUED" | "NO_RECIPIENT" | "ALREADY_SENT" | "NOT_FOUND"> {
+        const built = await this.build(paymentUuid);
+        if (!built) return "NOT_FOUND";
+        const { receipt, context } = built;
+
+        if (!receipt.customerEmail || context.customerIsStaff) return "NO_RECIPIENT";
+
+        // Claim the one automatic email (a redelivered event can't send it
+        // twice) and queue it in the same transaction, so a failed insert
+        // releases the claim
+        const customerEmail = receipt.customerEmail;
+        return prisma.$transaction(async (tx) => {
+            const claimed = await tx.payment.updateMany({
+                where: { uuid: paymentUuid, receiptEmailQueuedAt: null },
+                data: { receiptEmailQueuedAt: new Date() },
+            });
+            if (claimed.count === 0) return "ALREADY_SENT" as const;
+
+            await this.queueEmailReceipt(customerEmail, receipt, context, tx);
+            return "QUEUED" as const;
+        });
+    }
+
+    private static async build(paymentUuid: string): Promise<{ receipt: ReceiptData; context: ReceiptContext } | null> {
         try {
             const payment = await prisma.payment.findUnique({
                 where: { uuid: paymentUuid },
@@ -52,7 +92,7 @@ export class ReceiptService {
                             },
                             tenantUser: {
                                 include: {
-                                    user: { select: { name: true, email: true, phoneNumber: true } },
+                                    user: { select: { uuid: true, name: true, email: true, phoneNumber: true } },
                                 },
                             },
                         },
@@ -69,8 +109,10 @@ export class ReceiptService {
             const store = order.store;
             const customer = order.tenantUser?.user;
     
-            // Generate receipt number
-            const receiptNumber = `RCP-${order.orderNumber}-${Date.now().toString(36).toUpperCase()}`;
+            // A number the POS supplied, or one derived from the payment so it
+            // is the same on every view
+            const receiptNumber = payment.receiptNumber
+                ?? `RCP-${order.orderNumber}-${payment.uuid.slice(0, 8).toUpperCase()}`;
         
             // Assemble receipt data
             const receiptData: ReceiptData = {
@@ -105,27 +147,22 @@ export class ReceiptService {
                 processedBy: payment.processedBy ?? undefined,
             };
         
-            // Store receipt reference on payment
+            // Keep the number on the payment (never overwrites one already set)
             if (!payment.receiptNumber) {
-                await prisma.payment.update({
-                    where: { uuid: paymentUuid },
+                await prisma.payment.updateMany({
+                    where: { uuid: paymentUuid, receiptNumber: null },
                     data: { receiptNumber },
                 });
             }
-        
-            // Queue email receipt if customer has email
-            if (customer?.email) {
-                await this.queueEmailReceipt(paymentUuid, customer.email, receiptData);
+
+            const customerIsStaff = customer
+                ? await this.isStaffAtStore(customer.uuid, payment.tenantUuid, payment.storeUuid)
+                : false;
+
+            return {
+                receipt: receiptData,
+                context: { tenantUuid: payment.tenantUuid, storeUuid: payment.storeUuid, customerIsStaff },
             };
-        
-            logWithContext("info", "[Receipt] Generated", {
-                paymentUuid,
-                receiptNumber,
-                orderNumber: order.orderNumber,
-                hasEmail: !!customer?.email,
-            });
-        
-            return receiptData;
         } catch (error: any) {
             logWithContext("error", "[Receipt] Generation failed", {
                 paymentUuid,
@@ -134,53 +171,60 @@ export class ReceiptService {
             return null;
         }
     }
+
+    private static async isStaffAtStore(userUuid: string, tenantUuid: string, storeUuid: string): Promise<boolean> {
+        const [assignment, tenant] = await Promise.all([
+            prisma.userStore.findFirst({
+                where: { userUuid, storeUuid, tenantUuid, isActive: true },
+                select: { uuid: true },
+            }),
+            prisma.tenant.findUnique({ where: { uuid: tenantUuid }, select: { ownerUuid: true } }),
+        ]);
+        return !!assignment || tenant?.ownerUuid === userUuid;
+    }
  
-    //Queue email receipt via existing EmailService
+    // Queue the receipt email; EmailOutboxProcessorJob sends it
     private static async queueEmailReceipt(
-        paymentUuid: string,
         email: string,
-        data: ReceiptData
+        data: ReceiptData,
+        context: ReceiptContext,
+        db: Prisma.TransactionClient = prisma
     ) {
-        try {
-            // Use the existing EmailService outbox pattern
-            await prisma.emailOutbox.create({
-                data: {
-                    to: [email],
-                    subject: `Receipt for Order ${data.orderNumber}`,
-                    templateKey: "receipt",
-                    templateData: {
-                        type: "PAYMENT_RECEIPT",
-                        customerName: data.customerName,
-                        orderNumber: data.orderNumber,
-                        orderDate: data.orderDate,
-                        storeName: data.storeName,
-                        storeAddress: data.storeAddress,
-                        paymentMethod: data.paymentMethod,
-                        transactionId: data.transactionId,
-                        items: data.items,
-                        subtotal: data.subtotal,
-                        tax: data.tax,
-                        discount: data.discount,
-                        total: data.total,
-                        amountTendered: data.amountTendered,
-                        changeGiven: data.changeGiven,
-                        currency: data.currency,
-                    },
-                    status: "PENDING",
-                    priority: "NORMAL",
+        await db.emailOutbox.create({
+            data: {
+                tenantUuid: context.tenantUuid,
+                storeUuid: context.storeUuid,
+                to: [email],
+                subject: `Receipt for Order ${data.orderNumber}`,
+                templateKey: "receipt",
+                templateData: {
+                    receiptNumber: data.receiptNumber,
+                    customerName: data.customerName,
+                    orderNumber: data.orderNumber,
+                    orderDate: data.orderDate.toISOString(),
+                    storeName: data.storeName,
+                    storeAddress: data.storeAddress,
+                    paymentMethod: data.paymentMethod,
+                    transactionId: data.transactionId,
+                    items: data.items,
+                    subtotal: data.subtotal,
+                    tax: data.tax,
+                    discount: data.discount,
+                    total: data.total,
+                    amountTendered: data.amountTendered,
+                    changeGiven: data.changeGiven,
+                    currency: data.currency,
                 },
-            });
-        
-            logWithContext("info", "[Receipt] Email queued", {
-                email,
-                orderNumber: data.orderNumber,
-            });
-        } catch (error: any) {
-            logWithContext("error", "[Receipt] Email queue failed", {
-                email,
-                error: error.message,
-            });
-        }
+                status: "PENDING",
+                priority: "NORMAL",
+                tags: ["receipt"],
+            },
+        });
+
+        logWithContext("info", "[Receipt] Email queued", {
+            orderNumber: data.orderNumber,
+            receiptNumber: data.receiptNumber,
+        });
     }
  
     //Get receipt for order (customer-facing endpoint)
@@ -197,24 +241,24 @@ export class ReceiptService {
         return this.generate(payment.uuid);
     }
  
-    // ── Re-send receipt email
+    // Staff re-send: one email, to the given address or the customer's
     static async resend(paymentUuid: string, email?: string) {
-        const receipt = await this.generate(paymentUuid);
-        if (!receipt) {
+        const built = await this.build(paymentUuid);
+        if (!built) {
             throw new Error("RECEIPT_NOT_FOUND");
         };
+        const { receipt, context } = built;
     
-        const targetEmail = email ?? receipt.customerEmail;
+        // A walk-in rung up under a cashier's account has no customer address:
+        // staff must give one rather than mail the cashier
+        const targetEmail = email ?? (context.customerIsStaff ? undefined : receipt.customerEmail);
         if (!targetEmail) {
             throw new Error("NO_EMAIL_ADDRESS");
         };
     
-        await this.queueEmailReceipt(paymentUuid, targetEmail, receipt);
+        await this.queueEmailReceipt(targetEmail, receipt, context);
     
-        logWithContext("info", "[Receipt] Resent", {
-            paymentUuid,
-            email: targetEmail,
-        });
+        logWithContext("info", "[Receipt] Resent", { paymentUuid });
     
         return receipt;
     }
@@ -235,7 +279,13 @@ export class ReceiptService {
  
     private static formatOptions(options: any): string {
         if (typeof options === "string") return options;
-        if (Array.isArray(options)) return options.join(", ");
+        // OrderItem.selectedOptions: [{ groupName, optionName, optionUuid, cost }]
+        if (Array.isArray(options)) {
+            return options
+                .map((o) => (o && typeof o === "object" ? o.optionName ?? o.name ?? "" : String(o)))
+                .filter(Boolean)
+                .join(", ");
+        }
         if (typeof options === "object") {
             return Object.entries(options)
                 .map(([k, v]) => `${k}: ${v}`)

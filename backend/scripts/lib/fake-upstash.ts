@@ -26,6 +26,7 @@ async function startFakeUpstash(): Promise<http.Server> {
             case "PING": return "PONG";
             case "GET": return data.get(args[0]) ?? null;
             case "SET": data.set(args[0], String(args[1])); return "OK";
+            case "SETEX": data.set(args[0], String(args[2])); return "OK"; // TTL ignored
             case "DEL": return args.filter((k) => data.delete(k)).length;
             case "INCR": {
                 const next = Number(data.get(args[0]) ?? 0) + 1;

@@ -1,5 +1,6 @@
 import { registerInventoryEventHandlers } from "./inventory.handlers.ts";
 import { registerDashboardCacheHandlers } from "./dashboardCache.handlers.ts";
+import { registerReceiptHandlers } from "./receipt.handlers.ts";
 
 // Single place where event listeners are switched on at startup. Only
 // listeners that have been reviewed against the current order/payment flow
@@ -22,4 +23,6 @@ export function registerEventHandlers() {
     registerInventoryEventHandlers();
     // Only bumps dashboard cache versions
     registerDashboardCacheHandlers();
+    // Queues one receipt email per completed payment (outbox, not inline)
+    registerReceiptHandlers();
 }

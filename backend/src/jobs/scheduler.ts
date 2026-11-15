@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { trackJobExecution } from "../lib/jobMonitor.ts";
 import { withJobLock } from "./jobLock.ts";
+import { EmailOutboxProcessorJob } from "./emailOutboxProcessor.job.ts";
 import { PaymentExpiryCleanupJob } from "./Payment/PaymentExpiryCleanup.job.ts";
 import { ShiftReminderJob } from "./staff/ShiftReminder.job.ts";
 import { OrderExpiryCleanupJobs } from "./Order/orderExpiryCleanup.jobs.ts";
@@ -76,7 +77,13 @@ function schedule(cronExpr: string, jobName: string, fn: () => Promise<unknown>)
 
 export function startScheduler() {
   console.log("🕒 Starting scheduler...");
- 
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 🔴 EVERY MINUTE (customer-facing delivery)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  schedule("* * * * *", "EmailOutboxProcessorJob",          () => EmailOutboxProcessorJob.run());
+
   // ─────────────────────────────────────────────────────────────────────────
   // 🔴 EVERY 5 MINUTES (real-time operations)
   // ─────────────────────────────────────────────────────────────────────────
@@ -212,7 +219,8 @@ export function startScheduler() {
   schedule("0 0 1 1 *",  "QuotaResetJob.yearly",            () => QuotaResetJob.runYearly());
  
 
-  console.log("✅ Scheduler started — 61 jobs registered");
+  console.log("✅ Scheduler started — 60 jobs registered");
+  console.log("  ⚡ Every minute:  1 job  (email outbox)");
   console.log("  ⚡ Every 5 min:   9 jobs (payments, orders, inventory, shifts, cache)");
   console.log("  🔄 Every 10 min:  5 jobs (refunds, stuck orders, breaks, webhooks, dashboards)");
   console.log("  🔄 Every 15 min:  4 jobs (webhooks, shifts, orders, menu cache)");
