@@ -94,7 +94,7 @@ export class PlanController{
             if (!validation.success) {
                 return res.status(400).json({
                     error: "VALIDATION_ERROR",
-                    details: validation.error.errors,
+                    details: validation.error.issues,
                 });
             };
 
@@ -124,7 +124,7 @@ export class PlanController{
             if (!validation.success) {
                 return res.status(400).json({
                 error: "VALIDATION_ERROR",
-                details: validation.error.errors,
+                details: validation.error.issues,
                 });
             };
 
@@ -155,7 +155,7 @@ export class PlanController{
             if (!validation.success) {
                 return res.status(400).json({
                 error: "VALIDATION_ERROR",
-                details: validation.error.errors,
+                details: validation.error.issues,
                 });
             };
 
@@ -185,7 +185,7 @@ export class PlanController{
             if (!validation.success) {
                 return res.status(400).json({
                 error: "VALIDATION_ERROR",
-                details: validation.error.errors,
+                details: validation.error.issues,
                 });
             }
 
@@ -216,7 +216,7 @@ export class PlanController{
             if (!validation.success) {
                 return res.status(400).json({
                 error: "VALIDATION_ERROR",
-                details: validation.error.errors,
+                details: validation.error.issues,
                 });
             }
 

@@ -77,53 +77,6 @@ router.post(
 // );
  
 // ══════════════════════════════════════════════════════════════════════════════
-//  CASH DRAWER
-//  Open/close drawer sessions, track cash per terminal/shift
-// ══════════════════════════════════════════════════════════════════════════════
- 
-// Open a cash drawer for a shift
-// Body: {
-//   storeUuid: string,       — which store
-//   terminalId: "POS-001",   — which terminal
-//   openingBalance: 10000,   — starting cash in cents ($100.00)
-//   notes?: string
-// }
-// router.post(
-//     "/drawer/open",
-//     checkRole(["CASHIER", "MANAGER", "ADMIN"]),
-//     CashDrawerController.openDrawer
-// );
- 
-// Close drawer at end of shift — triggers variance check
-// Body: {
-//   actualCash: 15000,       — counted cash in cents
-//   actualCard?: number,     — card total if tracked
-//   closingNotes?: string,
-//   cashCount?: {             — optional denomination breakdown
-//     pennies?, nickels?, dimes?, quarters?,
-//     ones?, fives?, tens?, twenties?, fifties?, hundreds?
-//   }
-// }
-// router.post(
-//     "/drawer/:drawerUuid/close",
-//     checkRole(["CASHIER", "MANAGER", "ADMIN"]),
-//     CashDrawerController.closeDrawer
-// );
- 
-// Get drawer details (open or closed)
-// router.get(
-//     "/drawer/:drawerUuid",
-//     CashDrawerController.getDrawer
-// );
- 
-// Get active (open) drawer by terminal ID
-// Query: ?storeUuid= (required if staff.storeUuid not set)
-// router.get(
-//     "/drawer/active/:terminalId",
-//     CashDrawerController.getActiveDrawer
-// );
- 
-// ══════════════════════════════════════════════════════════════════════════════
 //  PAYMENT ANOMALIES & FLAGGED PAYMENTS
 //  Auto-detected anomalies + manually flagged payments for review
 // ══════════════════════════════════════════════════════════════════════════════

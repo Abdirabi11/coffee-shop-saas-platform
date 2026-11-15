@@ -274,8 +274,25 @@ async function storeTimezone(ctx: Ctx) {
             isClosed: true,
         },
     });
+    // Short day on Thursday 2026-10-08: 12:00-14:00 instead of 09:00-17:00,
+    // added the way the API does (reason -> name, times -> customHours)
+    const shortDay = await StoreHoursService.addException(ctx.tenant.uuid, store.uuid, {
+        exceptionDate: new Date("2026-10-08"),
+        reason: "Staff training",
+        isClosed: false,
+        openTime: "12:00",
+        closeTime: "14:00",
+    });
+    check("addException stores custom hours", JSON.stringify(shortDay.customHours), '{"openTime":"12:00","closeTime":"14:00"}');
+    check("addException defaults the type of an open day", shortDay.exceptionType, "CUSTOM");
+    const duplicate = await StoreHoursService.addException(ctx.tenant.uuid, store.uuid, {
+        exceptionDate: new Date("2026-10-08"), reason: "Again", isClosed: true,
+    }).then(() => "created", (e: any) => e.code);
+    check("second exception on the same date is refused", duplicate, "P2002");
 
     const cases: Array<[string, string, boolean]> = [
+        ["2026-10-08T17:00:00Z", "Thu 10:00 LA, before the short day's custom hours", false],
+        ["2026-10-08T20:00:00Z", "Thu 13:00 LA, inside the short day's custom hours", true],
         ["2026-10-07T05:00:00Z", "Tue 22:00 LA (already Wed on a UTC+3 server)", true],
         ["2026-10-07T17:00:00Z", "Wed 10:00 LA (closed all Wednesday)", false],
         ["2026-10-09T17:00:00Z", "Fri 10:00 LA (20:00 on a UTC+3 server)", true],

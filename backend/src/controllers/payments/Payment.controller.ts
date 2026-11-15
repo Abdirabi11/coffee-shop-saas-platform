@@ -3,7 +3,7 @@ import { PaymentService } from "../../services/payment/payment.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 
 export class PaymentController {
-    // POST /api/v1/payments/start
+    // POST /api/payments/start
     static async startPayment(req: Request, res: Response) {
         try {
             // Both set by requireTenantContext. tenantUserUuid must be the
@@ -48,7 +48,7 @@ export class PaymentController {
         }
     }
     
-    // POST /api/v1/payments/:paymentUuid/retry
+    // POST /api/payments/:paymentUuid/retry
     static async retryPayment(req: Request, res: Response) {
         try {
             const { paymentUuid } = req.params;
@@ -77,7 +77,7 @@ export class PaymentController {
         }
     }
     
-    // GET /api/v1/payments/:paymentUuid/status
+    // GET /api/payments/:paymentUuid/status
     static async getStatus(req: Request, res: Response) {
         try {
             const { paymentUuid } = req.params;

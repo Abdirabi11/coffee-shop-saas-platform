@@ -11,7 +11,6 @@ import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.
 import { webhookRateLimit } from "../../middlewares/webhookRateLimit.middleware.ts";
 import { PaymentWebhookController } from "../../controllers/payments/Paymentwebhook.controller.ts";
 import { PaymentAnomalyController } from "../../controllers/payments/PaymentAnomaly.controller.ts";
-import { CashDrawerController } from "../../controllers/payments/CashDrawer.controller.ts";
 import { CashierPaymentController } from "../../controllers/payments/CashierPayment.controller.ts";
 import { checkRole } from "../../middlewares/checkRole.middleware.ts";
 import { rawBodyParser } from "../../middlewares/rawBodyParser.middleware.ts";
@@ -62,7 +61,7 @@ router.use(requireTenantContext);
 // Start a provider payment (creates Stripe PaymentIntent or EVC session)
 // Body: { orderUuid: string, provider: "STRIPE" | "EVC_PLUS" }
 router.post(
-    "/payments/start",
+    "/start",
     PaymentController.startPayment
 );
  
@@ -77,7 +76,7 @@ router.post(
  
 // Retry a failed payment (requires 2FA + PAYMENT_RETRY permission)
 router.post(
-  "/payments/:paymentUuid/retry",
+  "/:paymentUuid/retry",
   require2FA,
   requirePermission("PAYMENT_RETRY"),
   maintenanceGuard,
@@ -88,7 +87,7 @@ router.post(
  
 // Poll provider for current payment status
 router.get(
-  "/payments/:paymentUuid/status",
+  "/:paymentUuid/status",
   PaymentController.getStatus
 );
  

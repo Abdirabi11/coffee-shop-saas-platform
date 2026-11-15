@@ -2,7 +2,8 @@ import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
 import { redis } from "../../lib/redis.ts";
-import prisma from "../config/prisma.ts"
+import prisma from "../../config/prisma.ts"
+import { slugify } from "../../utils/slugify.ts";
 
 
 export class CategoryService{
@@ -134,14 +135,14 @@ export class CategoryService{
                     }
                     : false,
                 products: {
-                    where: { active: true },
+                    where: { isActive: true },
                     select: { uuid: true, name: true, basePrice: true, imageUrls: true },
                     take: 5,
                 },
                 _count: {
                     select: {
                         products: {
-                            where: { active: true },
+                            where: { isActive: true },
                         },
                     },
                 },
@@ -165,19 +166,18 @@ export class CategoryService{
             include: {
                 parent: true,
                 children: {
-                    where: { active: true },
+                    where: { isActive: true },
                     orderBy: { displayOrder: "asc" },
                 },
                 products: {
-                    where: { active: true },
+                    where: { isActive: true },
                     include: {
                         inventory: true,
                     },
                 },
                 availability: {
-                    where: { active: true },
+                    where: { isActive: true },
                 },
-                visibilitySchedules: true,
             },
         });
 
@@ -377,7 +377,7 @@ export class CategoryService{
         storeUuid: string,
         name: string
     ): Promise<string> {
-        let slug = slugify(name, { lower: true, strict: true });
+        let slug = slugify(name);
         let counter = 1;
 
         while (true) {
@@ -391,7 +391,7 @@ export class CategoryService{
 
             if (!existing) break;
 
-            slug = `${slugify(name, { lower: true, strict: true })}-${counter}`;
+            slug = `${slugify(name)}-${counter}`;
             counter++;
         };
 

@@ -1,3 +1,4 @@
+import { slugify } from "../../utils/slugify.ts";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { MetricsService } from "../../infrastructure/observability/MetricsService.ts";
@@ -21,7 +22,7 @@ export class PlanService{
                 where,
                 include: {
                     prices: {
-                        where: { active: true },
+                        where: { isActive: true },
                         orderBy: { amount: "asc" },
                     },
                     features: {
@@ -49,7 +50,7 @@ export class PlanService{
             where: { uuid: planUuid },
             include: {
                 prices: {
-                    where: { active: true },
+                    where: { isActive: true },
                     include: {
                         priceTiers: {
                         orderBy: { displayOrder: "asc" },
@@ -61,7 +62,7 @@ export class PlanService{
                 },
                 quotas: true,
                 versions: {
-                    where: { active: true },
+                    where: { isActive: true },
                     orderBy: { version: "desc" },
                     take: 1,
                 },
@@ -81,7 +82,7 @@ export class PlanService{
             where: { slug },
             include: {
                 prices: {
-                    where: { active: true },
+                    where: { isActive: true },
                 },
                 features: {
                     orderBy: { displayOrder: "asc" },
@@ -445,7 +446,7 @@ export class PlanService{
 
     //Generate unique slug
     private static async generateUniqueSlug(name: string, excludeUuid?: string): Promise<string> {
-        let slug = slugify(name, { lower: true, strict: true });
+        let slug = slugify(name);
         let counter = 1;
 
         while (true) {
@@ -458,7 +459,7 @@ export class PlanService{
 
             if (!existing) break;
 
-            slug = `${slugify(name, { lower: true, strict: true })}-${counter}`;
+            slug = `${slugify(name)}-${counter}`;
             counter++;
         }
 

@@ -85,12 +85,14 @@ export class ReceiptService {
                 paymentMethod: this.formatPaymentMethod(payment.paymentMethod),
                 paymentFlow: payment.paymentFlow,
                 transactionId: payment.providerRef ?? payment.receiptNumber ?? payment.uuid,
+                // Name and prices as frozen on the order item at order time
+                // (unitPrice includes options; subtotal = unitPrice x quantity)
                 items: order.items.map((item) => ({
-                    name: item.product?.name ?? item.productName ?? "Item",
+                    name: item.productName ?? item.product?.name ?? "Item",
                     quantity: item.quantity,
-                    unitPrice: item.unitPrice ?? item.price,
-                    options: item.options ? this.formatOptions(item.options) : undefined,
-                    subtotal: (item.unitPrice ?? item.price) * item.quantity,
+                    unitPrice: item.unitPrice,
+                    options: item.selectedOptions ? this.formatOptions(item.selectedOptions) : undefined,
+                    subtotal: item.subtotal,
                 })),
                 subtotal: payment.subtotal,
                 tax: payment.tax,
@@ -143,10 +145,10 @@ export class ReceiptService {
             // Use the existing EmailService outbox pattern
             await prisma.emailOutbox.create({
                 data: {
-                    to: email,
+                    to: [email],
                     subject: `Receipt for Order ${data.orderNumber}`,
-                    template: "receipt",
-                    payload: {
+                    templateKey: "receipt",
+                    templateData: {
                         type: "PAYMENT_RECEIPT",
                         customerName: data.customerName,
                         orderNumber: data.orderNumber,

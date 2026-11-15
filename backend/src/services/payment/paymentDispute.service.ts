@@ -2,6 +2,7 @@ import prisma from "../../config/prisma.ts"
 import { EventBus } from "../../events/eventBus.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import Stripe from "stripe";
+import type { DisputeReason, DisputeResolution, DisputeStatus } from "@prisma/client";
 
 export class PaymentDisputeService {
     static async createFromWebhook(input: {
@@ -23,9 +24,14 @@ export class PaymentDisputeService {
             throw new Error("PAYMENT_NOT_FOUND");
         }
     
-        // Idempotency
-        const existing = await prisma.paymentDispute.findUnique({
-            where: { providerDisputeId: input.providerDisputeId },
+        // Idempotency (the provider's dispute id isn't a unique column, so
+        // look it up per provider; Stripe events are also deduped upstream
+        // by the webhook ledger)
+        const existing = await prisma.paymentDispute.findFirst({
+            where: {
+                provider: input.provider.toUpperCase(),
+                providerDisputeUuid: input.providerDisputeId,
+            },
         });
     
         if (existing) {
@@ -40,7 +46,7 @@ export class PaymentDisputeService {
                 storeUuid: payment.storeUuid,
         
                 provider: input.provider.toUpperCase(),
-                providerDisputeId: input.providerDisputeId,
+                providerDisputeUuid: input.providerDisputeId,
         
                 amount: input.amount,
                 currency: payment.currency,
@@ -150,7 +156,7 @@ export class PaymentDisputeService {
         // Submit to provider
         await this.submitEvidenceToProvider(
             dispute.provider,
-            dispute.providerDisputeId,
+            dispute.providerDisputeUuid,
             input.evidence
         );
     
@@ -186,7 +192,7 @@ export class PaymentDisputeService {
         // Notify provider
         await this.acceptDisputeWithProvider(
             dispute.provider,
-            dispute.providerDisputeId
+            dispute.providerDisputeUuid
         );
     
         const updated = await prisma.paymentDispute.update({
@@ -216,8 +222,9 @@ export class PaymentDisputeService {
         resolution?: string;
         snapshot: any;
     }) {
-        const dispute = await prisma.paymentDispute.findUnique({
-            where: { providerDisputeId: input.providerDisputeId },
+        const dispute = await prisma.paymentDispute.findFirst({
+            where: { providerDisputeUuid: input.providerDisputeId },
+            orderBy: { createdAt: "desc" },
         });
     
         if (!dispute) {
@@ -258,7 +265,7 @@ export class PaymentDisputeService {
                     priority: status === "WON" ? "LOW" : "HIGH",
                     source: "WEBHOOK",
                     title: `Dispute ${status === "WON" ? "Won" : "Lost"}`,
-                    message: `Dispute ${dispute.providerDisputeId} was ${status.toLowerCase()} — Amount: ${dispute.amount / 100}`,
+                    message: `Dispute ${dispute.providerDisputeUuid} was ${status.toLowerCase()} — Amount: ${dispute.amount / 100}`,
                     context: {
                         subType: `DISPUTE_${status}`, // Distinguish in context
                         disputeUuid: dispute.uuid,
@@ -327,8 +334,8 @@ export class PaymentDisputeService {
         }
     }
     
-    private static normalizeReason(reason: string): string {
-        const mapping: Record<string, string> = {
+    private static normalizeReason(reason: string): DisputeReason {
+        const mapping: Record<string, DisputeReason> = {
             fraudulent: "FRAUDULENT",
             duplicate: "DUPLICATE",
             product_not_received: "PRODUCT_NOT_RECEIVED",
@@ -340,8 +347,8 @@ export class PaymentDisputeService {
         return mapping[reason.toLowerCase()] || "GENERAL";
     }
     
-    private static normalizeStatus(status: string): string {
-        const mapping: Record<string, string> = {
+    private static normalizeStatus(status: string): DisputeStatus {
+        const mapping: Record<string, DisputeStatus> = {
             warning_needs_response: "NEEDS_RESPONSE",
             warning_under_review: "UNDER_REVIEW",
             needs_response: "NEEDS_RESPONSE",
@@ -354,8 +361,8 @@ export class PaymentDisputeService {
         return mapping[status.toLowerCase()] || "OPEN";
     }
     
-    private static normalizeResolution(resolution: string): string {
-        const mapping: Record<string, string> = {
+    private static normalizeResolution(resolution: string): DisputeResolution {
+        const mapping: Record<string, DisputeResolution> = {
             won: "WON",
             lost: "LOST",
             accepted: "ACCEPTED",

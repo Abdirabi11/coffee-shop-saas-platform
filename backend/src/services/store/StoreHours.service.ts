@@ -1,4 +1,4 @@
-import type { DayOfWeek } from "@prisma/client";
+import type { DayOfWeek, ExceptionType, Prisma } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { storeLocalTime } from "../../utils/date.ts";
@@ -6,6 +6,16 @@ import { StoreStatusService } from "./StoreStatus.service.ts";
 
 
 const DAY_NAMES = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+
+// An exception day's own opening window, stored in StoreHourException.customHours
+type ExceptionHours = { openTime: string; closeTime: string };
+
+function exceptionHours(customHours: Prisma.JsonValue | null): ExceptionHours | null {
+    if (!customHours || typeof customHours !== "object" || Array.isArray(customHours)) return null;
+    const { openTime, closeTime } = customHours as Record<string, unknown>;
+    if (typeof openTime !== "string" || typeof closeTime !== "string") return null;
+    return { openTime, closeTime };
+}
  
 export class StoreHoursService {
  
@@ -44,9 +54,11 @@ export class StoreHoursService {
  
             if (exception) {
                 if (exception.isClosed) return false;
+                if (exception.is24Hours) return true;
                 // Custom hours for this exception day
-                if (exception.openTime && exception.closeTime) {
-                    return currentTime >= exception.openTime && currentTime <= exception.closeTime;
+                const custom = exceptionHours(exception.customHours);
+                if (custom) {
+                    return currentTime >= custom.openTime && currentTime <= custom.closeTime;
                 }
             }
  
@@ -61,6 +73,8 @@ export class StoreHoursService {
  
             if (!hours || hours.isClosed) return false;
             if (hours.is24Hours) return true;
+            // An open day with no times set can't be evaluated: treat as closed
+            if (!hours.openTime || !hours.closeTime) return false;
  
             return currentTime >= hours.openTime && currentTime <= hours.closeTime;
         } catch (error: any) {
@@ -161,22 +175,38 @@ export class StoreHoursService {
     }
  
     // Add exception (holiday, special event)
-    static async addException(storeUuid: string, data: {
+    // `reason` is stored as the exception's name. Custom hours (an open day
+    // with its own window) go in customHours. Added by a store owner/admin,
+    // so it takes effect at once (isApproved).
+    static async addException(tenantUuid: string, storeUuid: string, data: {
         exceptionDate: Date;
         reason: string;
         isClosed: boolean;
         openTime?: string;
         closeTime?: string;
+        exceptionType?: ExceptionType;
+        createdBy?: string;
     }) {
+        const customHours: ExceptionHours | undefined =
+            !data.isClosed && data.openTime && data.closeTime
+                ? { openTime: data.openTime, closeTime: data.closeTime }
+                : undefined;
+
         return prisma.storeHourException.create({
             data: {
+                tenantUuid,
                 storeUuid,
                 exceptionDate: data.exceptionDate,
-                reason: data.reason,
+                exceptionType: data.exceptionType ?? (data.isClosed ? "HOLIDAY" : "CUSTOM"),
+                name: data.reason,
                 isClosed: data.isClosed,
-                openTime: data.openTime,
-                closeTime: data.closeTime,
+                customHours,
                 isActive: true,
+                isApproved: true,
+                createdBy: data.createdBy,
+                requestedBy: data.createdBy,
+                approvedBy: data.createdBy,
+                approvedAt: new Date(),
             },
         });
     }

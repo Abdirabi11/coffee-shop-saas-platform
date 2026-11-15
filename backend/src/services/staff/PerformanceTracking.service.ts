@@ -1,3 +1,4 @@
+import type { PeriodType } from "@prisma/client";
 import dayjs from "dayjs";
 import prisma from "../../config/prisma.ts"
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
@@ -19,7 +20,7 @@ export class PerformanceTrackingService {
             const orders = await prisma.order.findMany({
                 where: {
                     storeUuid: input.storeUuid,
-                    createdBy: input.userUuid,
+                    takenBy: input.userUuid,
                     createdAt: {
                         gte: startOfDay,
                         lte: endOfDay,
@@ -77,25 +78,27 @@ export class PerformanceTrackingService {
 
             const missedShifts = shifts.filter((s) => s.status === "NO_SHOW").length;
 
-            // Get refunds and voids
-            const refundsGiven = await prisma.payment.count({
+            // Refunds this staff member requested that day (rejected or
+            // failed ones don't count)
+            const refundsGiven = await prisma.refund.count({
                 where: {
                     storeUuid: input.storeUuid,
-                    status: "REFUNDED",
-                    refundedBy: input.userUuid,
-                    createdAt: {
+                    requestedBy: input.userUuid,
+                    status: { notIn: ["REJECTED", "FAILED"] },
+                    requestedAt: {
                         gte: startOfDay,
                         lte: endOfDay,
                     },
                 },
             });
 
-            const voidsCreated = await prisma.order.count({
+            // Voids are recorded on the payment (orders have no void status)
+            const voidsCreated = await prisma.payment.count({
                 where: {
                     storeUuid: input.storeUuid,
-                    status: "VOID",
+                    status: "VOIDED",
                     voidedBy: input.userUuid,
-                    createdAt: {
+                    voidedAt: {
                         gte: startOfDay,
                         lte: endOfDay,
                     },
@@ -268,7 +271,7 @@ export class PerformanceTrackingService {
 
     static async getLeaderboard(input: {
         storeUuid: string;
-        periodType: string;
+        periodType: PeriodType;
         metric: string;
         limit?: number;
     }) {

@@ -235,18 +235,20 @@ export class WebhookDeadLetterQueue {
         MetricsService.increment("webhook.dlq.abandoned", 1);
     }
 
-    // Handlers are imported lazily (ES modules: there is no require). There
-    // is no Stripe handler module to replay through (the old code required a
-    // path that doesn't exist), so Stripe entries fail with a clear error.
+    // Replays through the same processing the live webhook uses
+    // (PaymentWebhookController). The payload is the verified event body the
+    // controller stored when processing failed. Imported lazily: the
+    // controller module pulls in the payment services.
     private static async getHandlerForProvider(provider: string): Promise<(payload: any) => Promise<void>> {
+        const { PaymentWebhookController } = await import("../../controllers/payments/Paymentwebhook.controller.ts");
+        const traceId = `dlq_${Date.now()}`;
+
         switch (provider.toLowerCase()) {
             case "stripe":
-                throw new Error("STRIPE_DLQ_HANDLER_UNAVAILABLE");
+                return async (payload: any) => { await PaymentWebhookController.replayStripeEvent(payload, traceId); };
 
-            case "evc_plus": {
-                const { EVCWebhookHandler } = await import("../../controllers/webhooks/EVCWebhook.handler.ts");
-                return (payload: any) => EVCWebhookHandler.process(payload);
-            }
+            case "evc_plus":
+                return async (payload: any) => { await PaymentWebhookController.replayEVCEvent(payload, traceId); };
 
             default:
                 throw new Error(`UNSUPPORTED_PROVIDER: ${provider}`);

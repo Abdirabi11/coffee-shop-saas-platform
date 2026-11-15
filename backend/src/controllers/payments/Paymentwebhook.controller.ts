@@ -367,40 +367,8 @@ export class PaymentWebhookController {
         }
 
         try {
-            const payment = await prisma.payment.findFirst({
-                where: { orderUuid, provider: "EVC_PLUS", providerRef: transaction_id },
-                select: { uuid: true },
-            });
-
-            if (!payment) {
-                await WebhookEventLedger.complete(provider, eventId, "IGNORED", { reason: "PAYMENT_NOT_FOUND" });
-                return res.status(200).json({ received: true, error: "Payment not found" });
-            }
-
-            if (normalizedStatus === "completed" || normalizedStatus === "success") {
-                const amount = Number(body.amount);
-                const { outcome } = await PaymentService.confirmFromProviderEvent({
-                    paymentUuid: payment.uuid,
-                    providerRef: transaction_id,
-                    // EVC reports major units; payments are stored in cents
-                    // TODO: confirm amount/currency field names against EVC docs
-                    amountReceived: Number.isFinite(amount) ? Math.round(amount * 100) : null,
-                    currency: typeof body.currency === "string" ? body.currency : null,
-                    snapshot: body,
-                    source: "WEBHOOK",
-                });
-                await WebhookEventLedger.complete(provider, eventId, "PROCESSED", { outcome });
-            } else if (normalizedStatus === "failed" || normalizedStatus === "rejected") {
-                await PaymentService.markFailedFromProvider({
-                    paymentUuid: payment.uuid,
-                    failureCode: "PROVIDER_DECLINED",
-                    failureReason: body.error_message || "EVC payment failed",
-                    snapshot: body,
-                });
-                await WebhookEventLedger.complete(provider, eventId, "PROCESSED");
-            } else {
-                await WebhookEventLedger.complete(provider, eventId, "IGNORED", { reason: "NON_FINAL_STATUS" });
-            }
+            const result = await PaymentWebhookController.processEVCEvent(body);
+            await WebhookEventLedger.complete(provider, eventId, result.status, result.detail);
 
             logWithContext("info", "[Webhook] EVC processed", {
                 traceId,
@@ -408,6 +376,9 @@ export class PaymentWebhookController {
                 status: normalizedStatus,
             });
 
+            if (result.detail?.reason === "PAYMENT_NOT_FOUND") {
+                return res.status(200).json({ received: true, error: "Payment not found" });
+            }
             return res.status(200).json({ received: true });
         } catch (err: any) {
             logWithContext("error", "[Webhook] EVC handler error", {
@@ -415,8 +386,89 @@ export class PaymentWebhookController {
                 error: err.message,
             });
             await WebhookEventLedger.fail(provider, eventId, err.message).catch(() => {});
+
+            // Dead letter queue for retry (WebhookDeadLetterQueueService.retry)
+            await prisma.webhookDeadLetter.create({
+                data: {
+                    provider: "EVC_PLUS",
+                    eventUuid: eventId,
+                    eventType: `payment.${normalizedStatus}`,
+                    payload: body,
+                    errorMessage: err.message,
+                    status: "FAILED",
+                },
+            }).catch(() => {});
+
             return res.status(500).json({ error: "Internal server error" });
         }
+    }
+
+    // Admin/DLQ replay of a verified EVC callback body (no raw bytes to
+    // re-verify; the body was verified when it first arrived). Throws on
+    // failure.
+    static async replayEVCEvent(body: any, traceId: string) {
+        const provider: WebhookProvider = "EVC_PLUS";
+        const status = typeof body?.status === "string" ? body.status.toLowerCase() : "unknown";
+        const eventId = `${body?.transaction_id}:${status}`;
+        try {
+            const result = await PaymentWebhookController.processEVCEvent(body);
+            await WebhookEventLedger.complete(provider, eventId, result.status, result.detail);
+            logWithContext("info", "[Webhook] EVC replayed", { traceId, eventId, status: result.status });
+            return result;
+        } catch (error: any) {
+            await WebhookEventLedger.fail(provider, eventId, error.message).catch(() => {});
+            throw error;
+        }
+    }
+
+    // Applies a verified EVC callback to its payment. Shared by the live
+    // webhook and replay; the caller records the outcome in the ledger.
+    private static async processEVCEvent(
+        body: any
+    ): Promise<{ status: "PROCESSED" | "IGNORED"; detail?: Record<string, any> }> {
+        const { transaction_id, status, metadata } = body ?? {};
+        const orderUuid = metadata?.orderUuid;
+        const normalizedStatus = typeof status === "string" ? status.toLowerCase() : "unknown";
+
+        if (!orderUuid || !transaction_id) {
+            return { status: "IGNORED", detail: { reason: "MISSING_DATA" } };
+        }
+
+        const payment = await prisma.payment.findFirst({
+            where: { orderUuid, provider: "EVC_PLUS", providerRef: transaction_id },
+            select: { uuid: true },
+        });
+
+        if (!payment) {
+            return { status: "IGNORED", detail: { reason: "PAYMENT_NOT_FOUND" } };
+        }
+
+        if (normalizedStatus === "completed" || normalizedStatus === "success") {
+            const amount = Number(body.amount);
+            const { outcome } = await PaymentService.confirmFromProviderEvent({
+                paymentUuid: payment.uuid,
+                providerRef: transaction_id,
+                // EVC reports major units; payments are stored in cents
+                // TODO: confirm amount/currency field names against EVC docs
+                amountReceived: Number.isFinite(amount) ? Math.round(amount * 100) : null,
+                currency: typeof body.currency === "string" ? body.currency : null,
+                snapshot: body,
+                source: "WEBHOOK",
+            });
+            return { status: "PROCESSED", detail: { outcome } };
+        }
+
+        if (normalizedStatus === "failed" || normalizedStatus === "rejected") {
+            await PaymentService.markFailedFromProvider({
+                paymentUuid: payment.uuid,
+                failureCode: "PROVIDER_DECLINED",
+                failureReason: body.error_message || "EVC payment failed",
+                snapshot: body,
+            });
+            return { status: "PROCESSED" };
+        }
+
+        return { status: "IGNORED", detail: { reason: "NON_FINAL_STATUS" } };
     }
 
     private static normalizeStripeError(error: any): string {

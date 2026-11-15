@@ -22,6 +22,11 @@ import storeDashboardRoutes from "./routes/dashboards/store.routes.ts";
 import tenantDashboardRoutes from "./routes/dashboards/tenant.routes.ts";
 import staffDashboardRoutes from "./routes/dashboards/staff.routes.ts";
 import superAdminDashboardRoutes from "./routes/dashboards/superadmin.routes.ts";
+import securityRoutes from "./routes/auth/security.routes.ts";
+import planRoutes from "./routes/billing/plan.routes.ts";
+import subscriptionRoutes from "./routes/billing/subscription.routes.ts";
+import metricsRoutes from "./routes/metrics/metrics.routes.ts";
+import publicCategoryRoutes from "./routes/public/category.routes.ts";
 import { startScheduler } from "./jobs/scheduler.ts"
 import { MetricsService } from "./infrastructure/observability/MetricsService.ts";
 import { compressionMiddleware } from "./middlewares/compression.middleware.ts";
@@ -89,9 +94,6 @@ app.use(deviceFingerprintMiddleware);
 //SECURITY & INFRASTRUCTURE
 app.use(corsMiddleware);
 
-//PUBLIC ROUTES (No auth)
-// app.use("/api/public", publicRoutes);
-
 // AUTHENTICATED ROUTES
 // app.use("/api", [
 //   authenticate,
@@ -121,6 +123,14 @@ app.use("/api/dashboards/staff", staffDashboardRoutes);
 app.use("/api/admin/dashboard", superAdminDashboardRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/admin/webhooks", webhookAdminRoutes);
+app.use("/api", securityRoutes); // /api/security/*
+app.use("/api", metricsRoutes); // /api/metrics
+app.use("/api/plans", planRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+
+// PUBLIC ROUTES (no auth; tenant from the x-tenant-id header). The customer
+// menu itself is public under /api/menu.
+app.use("/api/public/categories", publicCategoryRoutes);
 
 // app.use("/api/super_admin", superRoutes);
 // app.use("/api/admin", adminRoutes);

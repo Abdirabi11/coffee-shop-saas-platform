@@ -175,13 +175,18 @@ export class StoreController {
                 return res.status(400).json({ success: false, error: "DATE_AND_REASON_REQUIRED" });
             }
  
-            const exception = await StoreHoursService.addException(storeUuid, {
+            const exception = await StoreHoursService.addException(req.tenant!.uuid, storeUuid, {
                 exceptionDate: new Date(exceptionDate),
                 reason, isClosed: isClosed ?? true, openTime, closeTime,
+                createdBy: req.user?.userUuid,
             });
  
             return res.status(201).json({ success: true, data: exception });
         } catch (error: any) {
+            // One exception per store per date
+            if (error.code === "P2002") {
+                return res.status(409).json({ success: false, error: "EXCEPTION_ALREADY_EXISTS" });
+            }
             return res.status(500).json({ success: false, error: "ADD_EXCEPTION_FAILED" });
         }
     }
