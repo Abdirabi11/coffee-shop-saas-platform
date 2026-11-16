@@ -2,6 +2,7 @@ import prisma from "../../config/prisma.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
 import { invalidateOnTenantEvent } from "../../infrastructure/cache/superAdmin.cache.ts";
 import { PlatformSettingsError } from "./PlatformSettings.service.ts";
+import { EventBus } from "../../events/eventBus.ts";
 
 // Super admin actions on tenants and user accounts.
 //
@@ -12,6 +13,11 @@ import { PlatformSettingsError } from "./PlatformSettings.service.ts";
 // A banned user is refused by authenticate (401) on the next request: the
 // ban bumps tokenVersion, which voids every access token already issued,
 // and revokes all refresh tokens and sessions so none can be renewed.
+//
+// Both also emit an event after the commit so open WebSockets are dropped
+// now rather than at their next request (DashboardSocket):
+// TENANT_STATUS_CHANGED empties the tenant's rooms, USER_ACCESS_REVOKED
+// disconnects every socket of the banned user.
 export class PlatformModerationService {
     static async suspendTenant(input: { tenantUuid: string; reason: string; actorUuid: string }) {
         const tenant = await prisma.tenant.findUnique({
@@ -27,6 +33,7 @@ export class PlatformModerationService {
             select: { uuid: true, name: true, status: true, suspendedAt: true, suspendedReason: true },
         });
 
+        await EventBus.emit("TENANT_STATUS_CHANGED", { tenantUuid: input.tenantUuid, status: "SUSPENDED" });
         await invalidateOnTenantEvent().catch(() => {});
         logWithContext("warn", "[PlatformModeration] Tenant suspended", {
             tenantUuid: input.tenantUuid,
@@ -51,6 +58,7 @@ export class PlatformModerationService {
             select: { uuid: true, name: true, status: true, suspendedAt: true, suspendedReason: true },
         });
 
+        await EventBus.emit("TENANT_STATUS_CHANGED", { tenantUuid: input.tenantUuid, status: "ACTIVE" });
         await invalidateOnTenantEvent().catch(() => {});
         logWithContext("info", "[PlatformModeration] Tenant reactivated", {
             tenantUuid: input.tenantUuid,
@@ -106,6 +114,12 @@ export class PlatformModerationService {
                 },
             }),
         ]);
+
+        await EventBus.emit("USER_ACCESS_REVOKED", {
+            userUuid: input.userUuid,
+            revokedBy: input.actorUuid,
+            reason: `Account banned: ${input.reason}`,
+        });
 
         logWithContext("warn", "[PlatformModeration] User banned", {
             userUuid: input.userUuid,

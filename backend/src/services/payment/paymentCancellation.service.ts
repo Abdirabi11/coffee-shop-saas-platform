@@ -24,8 +24,10 @@ export class PaymentCancellationService {
         PaymentStateMachine.assertTransition(payment.status, "CANCELLED");
     
         const updated = await prisma.$transaction(async (tx) => {
-            const updated = await tx.payment.update({
-                where: { uuid: payment.uuid },
+            // Only from the status checked above: a provider webhook may have
+            // confirmed the payment since it was read, and that must win
+            const claimed = await tx.payment.updateMany({
+                where: { uuid: payment.uuid, status: payment.status },
                 data: {
                     status: "CANCELLED",
                     cancelledAt: new Date(),
@@ -34,6 +36,8 @@ export class PaymentCancellationService {
                     cancelledByUuid: input.cancelledByUuid,
                 },
             });
+            if (claimed.count === 0) throw new Error("PAYMENT_STATUS_CHANGED");
+            const updated = await tx.payment.findUniqueOrThrow({ where: { uuid: payment.uuid } });
     
             await tx.order.update({
                 where: { uuid: payment.orderUuid },
@@ -49,7 +53,9 @@ export class PaymentCancellationService {
                     paymentUuid: payment.uuid,
                     orderUuid: payment.orderUuid,
                     storeUuid: payment.storeUuid,
-                    reason: "PAYMENT_CANCELLED",
+                    // SnapshotReason has no CANCELLED value; afterStatus records
+                    // the cancellation, the reason who drove it (expiry job vs a person)
+                    reason: input.cancelledBy === "SYSTEM" ? "AUTO" : "MANUAL",
                     triggeredBy: input.cancelledByUuid || "SYSTEM",
                     beforeStatus: payment.status,
                     afterStatus: "CANCELLED",

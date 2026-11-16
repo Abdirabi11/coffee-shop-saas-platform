@@ -197,7 +197,7 @@ export class WebhookAdminController {
                 }),
                 prisma.webhookDelivery.count({
                     where: {
-                        status: "SUCCESS",
+                        status: "SUCCEEDED",
                         createdAt: { gte: since },
                     },
                 }),

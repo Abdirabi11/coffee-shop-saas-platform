@@ -23,7 +23,7 @@ export class MenuAnalyticsService {
     }) {
     try {
       // Don't block on analytics failure
-        await prisma.menuAnalyticEvent.create({
+        await prisma.menuAnalyticEvents.create({
             data: {
                 tenantUuid: input.tenantUuid,
                 storeUuid: input.storeUuid,
@@ -133,7 +133,7 @@ export class MenuAnalyticsService {
         dateTo: Date;
     }) {
         try {
-            const events = await prisma.menuAnalyticEvent.findMany({
+            const events = await prisma.menuAnalyticEvents.findMany({
                 where: {
                 storeUuid: input.storeUuid,
                 occurredAt: {

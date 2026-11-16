@@ -1,10 +1,9 @@
 import express from "express"
 import { PaymentController } from "../../controllers/payments/Payment.controller.ts";
-import { authenticate, require2FA } from "../../middlewares/auth.middleware.ts";
+import { authenticate, require2FA, storeOf } from "../../middlewares/auth.middleware.ts";
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { idempotencyMiddleware } from "../../middlewares/idempotency.middleware.ts";
 import { maintenanceGuard } from "../../middlewares/maintainence.ts";
-import { requirePermission } from "../../middlewares/permission.middleware.ts";
 import { verifyPaymentWebhook } from "../../middlewares/peymetWebhook.middleware.ts";
 import { rateLimit } from "../../middlewares/rateLimit.middleware.ts";
 import { webhookSignatureGuard } from "../../middlewares/verifyWebhookSignature.middleware.ts";
@@ -74,11 +73,12 @@ router.post(
 //     PaymentController.confirmPayment
 // );
  
-// Retry a failed payment (requires 2FA + PAYMENT_RETRY permission)
+// Retry a failed payment: 2FA, and MANAGER or ADMIN at the payment's own
+// store (tenant owners/admins count as ADMIN), as for voids at /api/cashier
 router.post(
   "/:paymentUuid/retry",
   require2FA,
-  requirePermission("PAYMENT_RETRY"),
+  checkRole(["MANAGER", "ADMIN"], storeOf.payment()),
   maintenanceGuard,
   idempotencyMiddleware,
   rateLimit({ keyPrefix: "payment.retry", limit: 5, windowSeconds: 300 }),

@@ -16,7 +16,7 @@ export class WebhookCleanupJob {
 
             const deletedDeliveries = await prisma.webhookDelivery.deleteMany({
                 where: {
-                status: "SUCCESS",
+                status: "SUCCEEDED",
                 completedAt: { lt: thirtyDaysAgo },
                 },
             });

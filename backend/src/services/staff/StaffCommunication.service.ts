@@ -65,21 +65,26 @@ export class StaffCommunicationService {
 
         const now = new Date();
 
+        // Three independent conditions, so they go in AND: an object can hold
+        // only one OR key (duplicates overwrite each other, which used to drop
+        // the tenant/store scope and the expiry filter)
         return prisma.shiftAnnouncement.findMany({
             where: {
-                OR: [
-                    { storeUuid: input.storeUuid },
-                    { storeUuid: null, tenantUuid: userStore.tenantUuid },
-                ],
+                tenantUuid: userStore.tenantUuid,
                 activeFrom: { lte: now },
-                OR: [
-                    { activeUntil: null },
-                    { activeUntil: { gte: now } },
-                ],
-                OR: [
-                    { targetRoles: { isEmpty: true } },
-                    { targetRoles: { has: userStore.role } },
-                    { targetUsers: { has: input.userUuid } },
+                AND: [
+                    // This store's, or tenant-wide (storeUuid null)
+                    { OR: [{ storeUuid: input.storeUuid }, { storeUuid: null }] },
+                    // Not expired
+                    { OR: [{ activeUntil: null }, { activeUntil: { gte: now } }] },
+                    // Aimed at everyone, at the user's role, or at the user
+                    {
+                        OR: [
+                            { targetRoles: { isEmpty: true } },
+                            { targetRoles: { has: userStore.role } },
+                            { targetUsers: { has: input.userUuid } },
+                        ],
+                    },
                 ],
             },
             orderBy: [

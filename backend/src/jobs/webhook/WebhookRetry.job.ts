@@ -80,7 +80,7 @@ export class WebhookRetryJob{
                         await prisma.webhookDelivery.update({
                         where: { uuid: delivery.uuid },
                         data: {
-                            status: "SUCCESS",
+                            status: "SUCCEEDED",
                             responseStatus: response.status,
                             responseBody: responseBody?.substring(0, 10000),
                             duration,

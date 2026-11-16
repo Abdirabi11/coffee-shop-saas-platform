@@ -66,7 +66,13 @@ export class TipsAndCommissionService {
                 });
             };
 
-            // Get all tips for this period
+            // Paid out already: recalculating would change what staff were paid
+            if (tipPool.status === "DISTRIBUTED" || tipPool.status === "CLOSED") {
+                throw new Error("TIP_POOL_ALREADY_DISTRIBUTED");
+            }
+
+            // Tips actually collected in this period: paid orders only (not
+            // unpaid, failed or cancelled ones), and not fully refunded
             const orders = await prisma.order.findMany({
                 where: {
                     storeUuid: input.storeUuid,
@@ -75,6 +81,8 @@ export class TipsAndCommissionService {
                         lte: input.periodEnd,
                     },
                     tipAmount: { gt: 0 },
+                    status: { in: ["PAID", "PREPARING", "READY", "COMPLETED"] },
+                    paymentStatus: { not: "REFUNDED" },
                 },
             });
 
@@ -125,35 +133,59 @@ export class TipsAndCommissionService {
                 0
             );
 
-            // Update tip pool
-            await prisma.tipPool.update({
-                where: { uuid: tipPool.uuid },
-                data: {
-                    totalTips,
-                    totalOrders,
-                    totalHoursWorked,
-                    status: "CALCULATED",
-                    calculatedAt: new Date(),
-                },
-            });
-
-            // Create distributions (equal split)
-            const staffCount = staffHours.size;
+            // Equal split in whole cents. The remainder goes one cent each to
+            // the first staff (by uuid, so a rerun gives the same answer): the
+            // shares always add up to totalTips exactly.
+            const staffUuids = Array.from(staffHours.keys()).sort();
+            const staffCount = staffUuids.length;
             const tipPerPerson = staffCount > 0 ? Math.floor(totalTips / staffCount) : 0;
+            const remainder = staffCount > 0 ? totalTips - tipPerPerson * staffCount : 0;
+            const shares = staffUuids.map((userUuid, i) => ({
+                userUuid,
+                ...staffHours.get(userUuid)!,
+                amount: tipPerPerson + (i < remainder ? 1 : 0),
+            }));
 
-            for (const [userUuid, data] of staffHours.entries()) {
-                await prisma.tipDistribution.create({
+            // One transaction, and a rerun (the daily job, or the route again)
+            // replaces the pending split instead of adding a second one
+            await prisma.$transaction(async (tx) => {
+                const pool = await tx.tipPool.updateMany({
+                    where: { uuid: tipPool!.uuid, status: { in: ["OPEN", "CALCULATED"] } },
                     data: {
-                        tipPoolUuid: tipPool.uuid,
-                        userUuid,
-                        storeUuid: input.storeUuid,
-                        hoursWorked: data.hours,
-                        ordersServed: data.orders,
-                        tipAmount: tipPerPerson,
-                        payoutStatus: "PENDING",
+                        totalTips,
+                        totalOrders,
+                        totalHoursWorked,
+                        status: "CALCULATED",
+                        calculatedAt: new Date(),
                     },
                 });
-            };
+                // Distributed between the check above and now
+                if (pool.count === 0) throw new Error("TIP_POOL_ALREADY_DISTRIBUTED");
+
+                await tx.tipDistribution.deleteMany({
+                    where: { tipPoolUuid: tipPool!.uuid, payoutStatus: "PENDING" },
+                });
+
+                if (shares.length > 0) {
+                    await tx.tipDistribution.createMany({
+                        data: shares.map((share) => ({
+                            tenantUuid: tipPool!.tenantUuid,
+                            storeUuid: input.storeUuid,
+                            tipPoolUuid: tipPool!.uuid,
+                            userUuid: share.userUuid,
+                            periodStart: input.periodStart,
+                            periodEnd: input.periodEnd,
+                            poolType: "EQUAL_SPLIT",
+                            totalTips,
+                            hoursWorked: share.hours,
+                            ordersServed: share.orders,
+                            tipAmount: share.amount,
+                            payoutStatus: "PENDING",
+                            distributions: { [share.userUuid]: { amount: share.amount, hours: share.hours } },
+                        })),
+                    });
+                }
+            });
 
             logWithContext("info", "[Tips] Pool calculated", {
                 tipPoolUuid: tipPool.uuid,
@@ -171,7 +203,10 @@ export class TipsAndCommissionService {
                 staffCount,
             });
 
-            return tipPool;
+            return prisma.tipPool.findUniqueOrThrow({
+                where: { uuid: tipPool.uuid },
+                include: { distributions: true },
+            });
 
         } catch (error: any) {
             logWithContext("error", "[Tips] Failed to calculate pool", {

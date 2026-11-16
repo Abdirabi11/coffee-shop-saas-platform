@@ -78,6 +78,12 @@ export class TipsAndCommissionController{
             });
 
         } catch (error: any) {
+            if (error.message === "TIP_POOL_ALREADY_DISTRIBUTED") {
+                return res.status(409).json({
+                    error: error.message,
+                    message: "This tip pool has been paid out and can't be recalculated",
+                });
+            }
             return res.status(500).json({
                 error: "INTERNAL_SERVER_ERROR",
                 message: error.message,

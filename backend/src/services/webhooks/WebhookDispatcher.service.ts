@@ -129,7 +129,7 @@ export class WebhookDispatcherService {
             await prisma.webhookDelivery.update({
                 where: { uuid: deliveryUuid },
                 data: {
-                    status: response.ok ? "SUCCESS" : "FAILED",
+                    status: response.ok ? "SUCCEEDED" : "FAILED",
                     responseStatus: response.status,
                     responseHeaders: response.headers as any,
                     responseBody: responseBody?.substring(0, 10000), // Limit size

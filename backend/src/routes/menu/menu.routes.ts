@@ -26,14 +26,6 @@ router.get(
 );
 
 router.get(
-    "/:storeUuid",
-    requireTenantHeader,
-    menuRateLimit,
-    menuCacheControl(60),
-    MenuController.getMenu
-);
-
-router.get(
     "/products/:productUuid",
     requireTenantHeader,
     menuRateLimit,
@@ -69,6 +61,16 @@ router.get(
     authenticate,
     requireTenantHeader,
     FavoriteController.getFavorites
+);
+
+// Catch-all single-segment GET: must stay below /search and /favorites,
+// or it matches them first
+router.get(
+    "/:storeUuid",
+    requireTenantHeader,
+    menuRateLimit,
+    menuCacheControl(60),
+    MenuController.getMenu
 );
 
 // ─── Analytics (public track, admin summary)
