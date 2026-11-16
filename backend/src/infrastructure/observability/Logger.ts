@@ -21,7 +21,7 @@ export function logWithContext(
       retryCount?: number;
       webhookEventId?: string;
       [key: string]: any;
-    }
+    } = {}
   ) {
     logger[level]({
       msg: message,

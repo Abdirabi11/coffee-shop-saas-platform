@@ -134,6 +134,8 @@ enum AnalyticsType {
   ARPU_LTV
   CHURN
   MONTHLY_REVENUE // platform-wide, written by monthlyRevenue.job
+  COHORT_RETENTION // platform-wide, written by cohortRetention.job
+  TENANT_COHORT_GROWTH // platform-wide, written by tenantCohortGrowth.job
 }
 
 enum AnomalySeverity {

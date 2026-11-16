@@ -149,6 +149,16 @@ export const storeOf = {
         });
         return violation?.storeUuid ?? null;
     },
+    // Option has no tenant/store columns: they're its option group's
+    option: (param = "optionUuid"): StoreResolver => async (req) => {
+        const uuid = stringParam(req.params?.[param]);
+        if (!uuid || !req.tenant) return null;
+        const option = await prisma.option.findFirst({
+            where: { uuid, optionGroup: { tenantUuid: req.tenant.uuid } },
+            select: { optionGroup: { select: { storeUuid: true } } },
+        });
+        return option?.optionGroup.storeUuid ?? null;
+    },
     // Any tenant-scoped model with uuid/tenantUuid/storeUuid columns
     record: (
         model:

@@ -72,139 +72,172 @@ function decodePullCursor(raw: string): PullCursor | null {
     }
 }
 
+const MAX_SYNC_BATCH = 50;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Errors that mean the order itself can't be accepted as sent (bad items,
+// unknown product, out of stock): resending won't help. Anything else
+// failed on the server side and is worth retrying.
+const FINAL_SYNC_ERRORS = new Set([
+    "ORDER_EMPTY", "TOO_MANY_ITEMS", "INVALID_ORDER_ITEM", "INVALID_MODIFIERS",
+    "PRODUCT_NOT_FOUND", "OUT_OF_STOCK", "INVENTORY_NOT_FOUND", "CLIENT_ORDER_UUID_CONFLICT",
+]);
+
+// "INVALID_MODIFIERS: option x ..." -> "INVALID_MODIFIERS"; the pricing
+// service's "Product not found: <uuid>" -> "PRODUCT_NOT_FOUND"
+function syncErrorCode(message: string | undefined): string {
+    if (!message) return "SYNC_FAILED";
+    if (message.startsWith("Product not found")) return "PRODUCT_NOT_FOUND";
+    const code = message.split(":")[0].trim();
+    return /^[A-Z][A-Z0-9_]*$/.test(code) ? code : "SYNC_FAILED";
+}
+
+type SyncOrderResult = {
+    clientOrderUuid: string;
+    status: "CREATED" | "REPLAYED" | "UPDATED" | "CONFLICT" | "REJECTED";
+    serverOrderUuid?: string;
+    orderNumber?: string;
+    totalAmount?: number;
+    priceAdjusted?: boolean;
+    resolution?: "CLIENT_WINS" | "SERVER_WINS";
+    serverOrder?: unknown;
+    error?: string;
+    message?: string;
+    requiresManualReview?: boolean;
+    retryable?: boolean;
+};
+
 export class SyncController {
-    //POST /api/sync/orders
-    //Sync order from client
-    static async syncOrder(req: Request, res: Response){
-        const traceId = req.headers["x-trace-id"] as string || `sync_${Date.now()}`;
+    // POST /api/staff/offline/sync-orders
+    //
+    // The POS pushes the orders it created offline once it reconnects.
+    // Body: { orders: [{ clientOrderUuid, storeUuid, orderType, items,
+    //   status, createdAt, lastModifiedAt, totalAmount?, tableNumber?,
+    //   customerNotes?, operation? ("CREATE" default | "UPDATE") }] }
+    // Header: x-device-id (recorded with each order).
+    //
+    // Each order is applied on its own, in the order sent, and gets its own
+    // result, so one bad order doesn't hold back the rest. Safe to retry the
+    // whole batch: clientOrderUuid is the idempotency key, and an order that
+    // already landed comes back REPLAYED. Prices are always the server's
+    // (priceAdjusted flags a different client total). Orders are created
+    // PENDING; take payment through /api/cashier/process once synced.
+    //
+    // 200 { results: [{ clientOrderUuid, status, ... }], summary } where status
+    // is CREATED | REPLAYED | UPDATED | CONFLICT | REJECTED. A REJECTED result
+    // with retryable: true failed on the server side and can be resent as is.
+    static async syncOrders(req: Request, res: Response) {
+        const traceId = (req.headers["x-trace-id"] as string) || `sync_${Date.now()}`;
+
+        const tenantUuid = req.tenant?.uuid;
+        const tenantUserUuid = req.tenantUser?.uuid;
+        const userUuid = req.user?.userUuid;
+        if (!tenantUuid || !tenantUserUuid || !userUuid) {
+            return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
+        }
+
+        const orders = req.body?.orders;
+        if (!Array.isArray(orders) || orders.length === 0 || orders.length > MAX_SYNC_BATCH) {
+            return res.status(400).json({
+                success: false,
+                error: "INVALID_SYNC_BATCH",
+                message: `orders must be an array of 1-${MAX_SYNC_BATCH} orders`,
+            });
+        }
+
+        const rawDeviceId = req.headers["x-device-id"];
+        const deviceId = typeof rawDeviceId === "string" ? rawDeviceId.slice(0, 200) : "unknown";
+
+        const results: SyncOrderResult[] = [];
+        for (const entry of orders) {
+            results.push(await SyncController.syncOne({ tenantUuid, tenantUserUuid, userUuid, deviceId, entry, traceId }));
+        }
+
+        const summary: Record<SyncOrderResult["status"], number> = {
+            CREATED: 0, REPLAYED: 0, UPDATED: 0, CONFLICT: 0, REJECTED: 0,
+        };
+        for (const r of results) summary[r.status]++;
+
+        logWithContext("info", "[Sync] Order batch synced", { traceId, deviceId, ...summary });
+        MetricsService.increment("sync.order.batch", 1);
+
+        return res.status(200).json({ success: true, results, summary, serverTimestamp: Date.now() });
+    }
+
+    private static async syncOne(input: {
+        tenantUuid: string;
+        tenantUserUuid: string;
+        userUuid: string;
+        deviceId: string;
+        entry: any;
+        traceId: string;
+    }): Promise<SyncOrderResult> {
+        const { entry } = input;
+        const clientOrderUuid = typeof entry?.clientOrderUuid === "string" ? entry.clientOrderUuid : "";
+
+        // It becomes the order's primary key, so it must be a real UUID
+        if (!UUID_PATTERN.test(clientOrderUuid)) {
+            return { clientOrderUuid, status: "REJECTED", error: "INVALID_CLIENT_ORDER_UUID", retryable: false };
+        }
+        const operation = entry.operation === "UPDATE" ? "UPDATE" : "CREATE";
 
         try {
-            const tenantUuid = req.tenant?.uuid;
-            const tenantUserUuid = req.tenantUser?.uuid;
-            const userUuid = req.user?.userUuid;
-            if (!tenantUuid || !tenantUserUuid || !userUuid) {
-                return res.status(400).json({ success: false, error: "TENANT_CONTEXT_REQUIRED" });
-            }
-            const { operation, clientOrderUuid, data, syncVersion } = req.body;
-            
-            logWithContext("info", "[Sync] Order sync request", {
-                traceId,
-                operation,
-                clientOrderUuid,
-                syncVersion,
-            });
-            
-            // Sync order
             // Ownership comes from the request context; any tenantUuid /
-            // tenantUserUuid inside `data` is ignored by the service.
+            // tenantUserUuid in the entry is ignored by the service.
             const result = await OrderSyncService.syncFromClient({
-                tenantUuid,
-                tenantUserUuid,
-                userUuid,
-                clientOrder: { ...data, clientOrderUuid },
-                deviceId: req.headers["x-device-id"] as string,
+                tenantUuid: input.tenantUuid,
+                tenantUserUuid: input.tenantUserUuid,
+                userUuid: input.userUuid,
+                clientOrder: { ...entry, clientOrderUuid },
+                deviceId: input.deviceId,
                 operation,
             });
 
             if (!result.success) {
-                return res.status(422).json({
-                    success: false,
-                    error: result.error,
+                MetricsService.increment("sync.order.failed", 1);
+                const code = syncErrorCode(result.error);
+                const final = FINAL_SYNC_ERRORS.has(code);
+                return {
+                    clientOrderUuid,
+                    status: "REJECTED",
+                    error: code,
+                    // Details for a final error (which modifier, which product);
+                    // internal messages stay in the server log
+                    ...(final && result.error !== code && { message: result.error }),
                     requiresManualReview: result.requiresManualReview,
-                });
+                    retryable: !final,
+                };
             }
 
-            if (result.resolution === "SERVER_WINS") {
-                // Conflict detected
-                logWithContext("warn", "[Sync] Order sync conflict", {
-                    traceId,
-                    clientOrderUuid,
-                    resolution: result.resolution,
-                });
-                
-                return res.status(409).json({
-                    conflict: true,
-                    resolution: result.resolution,
-                    serverData: result.serverOrder,
-                    clientData: data,
-                    message: "Conflict detected - review required",
-                });
-            }
-      
-            logWithContext("info", "[Sync] Order synced successfully", {
-                traceId,
-                serverOrderUuid: result.serverOrderUuid,
-            });
-            
-            MetricsService.increment("sync.order.success", 1, {
-                operation,
-            });
-      
-            return res.status(200).json({
-                success: true,
+            const base = {
+                clientOrderUuid,
                 serverOrderUuid: result.serverOrderUuid,
                 orderNumber: result.orderNumber,
                 totalAmount: result.totalAmount,
-                priceAdjusted: result.priceAdjusted ?? false,
-                replayed: result.replayed ?? false,
-                resolution: result.resolution,
-                serverTimestamp: Date.now(),
-            });
-        } catch (error: any) {
-            if (error.message === "STORE_INACTIVE") {
-                return res.status(409).json({ error: "STORE_INACTIVE", message: "This store is not operating" });
+            };
+
+            if (result.resolution === "SERVER_WINS") {
+                logWithContext("warn", "[Sync] Order sync conflict", { traceId: input.traceId, clientOrderUuid });
+                return { ...base, status: "CONFLICT", resolution: "SERVER_WINS", serverOrder: result.serverOrder };
             }
-            if (error.message === "STORE_ACCESS_DENIED") {
-                return res.status(403).json({ success: false, error: "STORE_ACCESS_DENIED" });
+            MetricsService.increment("sync.order.success", 1, { operation });
+            if (result.replayed) return { ...base, status: "REPLAYED" };
+            if (result.resolution === "CLIENT_WINS") return { ...base, status: "UPDATED", resolution: "CLIENT_WINS" };
+            return { ...base, status: "CREATED", priceAdjusted: result.priceAdjusted ?? false };
+        } catch (error: any) {
+            // Thrown before the order is touched: access and store state
+            if (error.message === "STORE_ACCESS_DENIED" || error.message === "STORE_INACTIVE") {
+                return { clientOrderUuid, status: "REJECTED", error: error.message, retryable: false };
             }
 
             logWithContext("error", "[Sync] Order sync failed", {
-                traceId,
+                traceId: input.traceId,
+                clientOrderUuid,
                 error: error.message,
             });
-              
             MetricsService.increment("sync.order.failed", 1);
-              
-            return res.status(500).json({
-                success: false,
-                error: error.message,
-                retryable: SyncController.isRetryableError(error),
-            });
-        }
-    }
-
-    //POST /api/sync/payments
-    //Sync payment from client
-    static async syncPayment(req: Request, res: Response) {
-        const traceId = req.headers["x-trace-id"] as string || `sync_${Date.now()}`;
-
-        try {
-            const tenantUuid = req.tenant!.uuid;
-            const { operation, clientPaymentUuid, data } = req.body;
-            
-            logWithContext("info", "[Sync] Payment sync request", {
-                traceId,
-                operation,
-                clientPaymentUuid,
-            });
-            
-            // Sync payment
-            const result = await PaymentSyncService.sync({
-                tenantUuid,
-                operation,
-                clientPaymentUuid,
-                clientData: data,
-            });
-        } catch (error: any) {
-            logWithContext("error", "[Sync] Payment sync failed", {
-                traceId,
-                error: error.message,
-            });
-              
-            return res.status(500).json({
-                success: false,
-                error: error.message,
-            });
+            // Unexpected server error; resending is safe (idempotent)
+            return { clientOrderUuid, status: "REJECTED", error: "SYNC_FAILED", retryable: true };
         }
     }
 
@@ -327,16 +360,5 @@ export class SyncController {
             nextCursor: { orders: o.next, products: pr.next, payments: pa.next },
             hasMore: o.hasMore || pr.hasMore || pa.hasMore,
         };
-    }
-
-    //Check if error is retryable
-    private static isRetryableError(error: any): boolean {
-        const retryableErrors = [
-            "NETWORK_ERROR",
-            "TIMEOUT",
-            "SERVER_OVERLOAD",
-        ];
-        
-        return retryableErrors.some(e => error.message.includes(e));
     }
 }

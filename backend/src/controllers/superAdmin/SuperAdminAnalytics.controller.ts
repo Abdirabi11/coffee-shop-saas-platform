@@ -1,9 +1,10 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
+import { AnalyticsType } from "@prisma/client";
 import { SuperAdminAnalyticsService } from "../../services/superAdmin/SuperAdminAnalytics.service.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
 export class SuperAdminAnalyticsController {
-    // GET /api/v1/admin/analytics/kpis
+    // GET /api/admin/analytics/kpis
     static async getKPIs(req: Request, res: Response) {
         try {
             const data = await SuperAdminAnalyticsService.getKPIs();
@@ -20,10 +21,10 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/revenue?months=12
+    // GET /api/admin/analytics/revenue?months=12
     static async getRevenueTrend(req: Request, res: Response) {
         try {
-            const months = parseInt(req.query.months as string) || 12;
+            const months = Math.min(Math.max(parseInt(req.query.months as string) || 12, 1), 36);
             const data = await SuperAdminAnalyticsService.getRevenueTrend(months);
             return res.status(200).json({ success: true, data });
         } catch (error: any) {
@@ -38,7 +39,7 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/churn
+    // GET /api/admin/analytics/churn
     static async getChurn(req: Request, res: Response) {
         try {
             const data = await SuperAdminAnalyticsService.getChurnAnalytics();
@@ -55,7 +56,7 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/arpu-ltv
+    // GET /api/admin/analytics/arpu-ltv
     static async getArpuLtv(req: Request, res: Response) {
         try {
             const data = await SuperAdminAnalyticsService.getArpuLtv();
@@ -72,7 +73,7 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/cohort-retention
+    // GET /api/admin/analytics/cohort-retention
     static async getCohortRetention(req: Request, res: Response) {
         try {
             const data = await SuperAdminAnalyticsService.getCohortRetention();
@@ -89,7 +90,7 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/tenant-growth
+    // GET /api/admin/analytics/tenant-growth
     static async getTenantGrowth(req: Request, res: Response) {
         try {
             const data = await SuperAdminAnalyticsService.getTenantCohortGrowth();
@@ -106,7 +107,7 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/fraud
+    // GET /api/admin/analytics/fraud
     static async getFraud(req: Request, res: Response) {
         try {
             const data = await SuperAdminAnalyticsService.getFraudAnalytics();
@@ -123,24 +124,26 @@ export class SuperAdminAnalyticsController {
         }
     }
     
-    // GET /api/v1/admin/analytics/snapshots?type=CHURN&limit=12
+    // GET /api/admin/analytics/snapshots?type=CHURN&limit=12
     static async getSnapshots(req: Request, res: Response) {
         try {
             const { type, limit, tenantUuid, storeUuid } = req.query;
-        
-            if (!type) {
+            const types = Object.values(AnalyticsType) as string[];
+
+            if (typeof type !== "string" || !types.includes(type)) {
                 return res.status(400).json({
                     success: false,
                     error: "VALIDATION_ERROR",
-                    message: "type query parameter is required",
+                    message: `type must be one of ${types.join(", ")}`,
                 });
             }
-        
+            const parsedLimit = Number.parseInt(String(limit ?? ""), 10);
+
             const data = await SuperAdminAnalyticsService.getSnapshots({
-                type: type as string,
-                limit: limit ? parseInt(limit as string) : undefined,
-                tenantUuid: tenantUuid as string,
-                storeUuid: storeUuid as string,
+                type: type as AnalyticsType,
+                limit: Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : undefined,
+                tenantUuid: typeof tenantUuid === "string" ? tenantUuid : undefined,
+                storeUuid: typeof storeUuid === "string" ? storeUuid : undefined,
             });
         
             return res.status(200).json({ success: true, data });

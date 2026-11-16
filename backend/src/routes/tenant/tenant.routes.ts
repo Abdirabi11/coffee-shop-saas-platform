@@ -5,12 +5,18 @@ import { rateLimitByIP } from "../../middlewares/menu/Ratelimitbyip.middleware.t
 import { TenantController } from "../../controllers/tenant/Tenant.controller.ts";
 import { TenantSecurityController } from "../../controllers/tenant/TenantSecurity.controller.ts";
 import { TenantStaffController } from "../../controllers/tenant/TenantStaff.controller.ts";
+import { OnboardingController } from "../../controllers/tenant/Onboarding.controller.ts";
 
 
 const router = express.Router();
  
 // All tenant routes require auth + tenant context
 router.use(authenticate);
+
+// ─── Onboarding (before tenant context: the caller has no tenant yet) ───
+// Any signed-in user may create the one tenant they own
+router.post("/", rateLimitByIP({ points: 5, duration: 3600 }), OnboardingController.createTenant);
+
 router.use(requireTenantContext);
 router.use(rateLimitByIP({ points: 60, duration: 60 }));
  

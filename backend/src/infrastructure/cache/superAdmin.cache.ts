@@ -1,4 +1,4 @@
-import { logWithContext } from "../infrastructure/observability/Logger.ts";
+import { logWithContext } from "../observability/Logger.ts";
 import { invalidateCache } from "./cache.ts";
 
 

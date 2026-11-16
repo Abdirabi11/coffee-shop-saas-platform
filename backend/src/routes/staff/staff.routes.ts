@@ -12,6 +12,7 @@ import { ShiftManagementController } from "../../controllers/staff/ShiftManageme
 import { warnIfNotClockedIn } from "../../middlewares/staff/requireClockIn.ts";
 import { CashDrawerController } from "../../controllers/staff/CashDrawer.controller.ts";
 import { OfflineSyncController } from "../../controllers/staff/OfflineSync.controller.ts";
+import { SyncController } from "../../controllers/sync/Sync.controller.ts";
 import { ApprovalRequestController } from "../../controllers/staff/ApprovalRequest.controller.ts";
 import { OrderAttributionController } from "../../controllers/staff/OrderAttribution.controller.ts";
 import { TipsAndCommissionController } from "../../controllers/staff/TipsAndCommission.controller.ts";
@@ -198,6 +199,9 @@ router.post(
  
 router.get("/offline/sync-package", OfflineSyncController.getSyncPackage);
 router.post("/offline/sync", OfflineSyncController.syncActions);
+// Orders the POS created offline (batch). Store access is checked per order:
+// the caller must be actively assigned to each order's store.
+router.post("/offline/sync-orders", SyncController.syncOrders);
  
 // ─── APPROVALS
  

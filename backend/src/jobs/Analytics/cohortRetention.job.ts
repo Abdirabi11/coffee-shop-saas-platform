@@ -77,7 +77,7 @@ export class CohortRetentionJob {
                             tenantUuid_storeUuid_type_granularity_periodStart: {
                                 tenantUuid: null as any, // Platform level
                                 storeUuid: null as any,
-                                type: "COHORT_RETENTION" as any,
+                                type: "COHORT_RETENTION",
                                 granularity: "MONTHLY",
                                 periodStart: cohortStart,
                             },
@@ -88,7 +88,7 @@ export class CohortRetentionJob {
                             calculatedAt: new Date(),
                         },
                         create: {
-                            type: "COHORT_RETENTION" as any,
+                            type: "COHORT_RETENTION",
                             granularity: "MONTHLY",
                             periodStart: cohortStart,
                             periodEnd: cohortEnd,

@@ -22,6 +22,8 @@ import storeDashboardRoutes from "./routes/dashboards/store.routes.ts";
 import tenantDashboardRoutes from "./routes/dashboards/tenant.routes.ts";
 import staffDashboardRoutes from "./routes/dashboards/staff.routes.ts";
 import superAdminDashboardRoutes from "./routes/dashboards/superadmin.routes.ts";
+import platformAdminRoutes from "./routes/superAdmin/superAdmin.routes.ts";
+import superAdminAnalyticsRoutes from "./routes/superAdmin/superAdminAnalytics.routes.ts";
 import securityRoutes from "./routes/auth/security.routes.ts";
 import planRoutes from "./routes/billing/plan.routes.ts";
 import subscriptionRoutes from "./routes/billing/subscription.routes.ts";
@@ -121,6 +123,8 @@ app.use("/api/dashboards/store", storeDashboardRoutes);
 app.use("/api/dashboards/tenant", tenantDashboardRoutes);
 app.use("/api/dashboards/staff", staffDashboardRoutes);
 app.use("/api/admin/dashboard", superAdminDashboardRoutes);
+app.use("/api/admin/analytics", superAdminAnalyticsRoutes);
+app.use("/api/admin/platform", platformAdminRoutes); // maintenance, flags, suspend/ban
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/admin/webhooks", webhookAdminRoutes);
 app.use("/api", securityRoutes); // /api/security/*
@@ -132,7 +136,6 @@ app.use("/api/subscriptions", subscriptionRoutes);
 // menu itself is public under /api/menu.
 app.use("/api/public/categories", publicCategoryRoutes);
 
-// app.use("/api/super_admin", superRoutes);
 // app.use("/api/admin", adminRoutes);
 // app.use("/api/product", productRoutes);
 

@@ -9,6 +9,15 @@ import { requireTenantContext } from "../../middlewares/requireTenantContext.mid
 import { MenuController } from "../../controllers/menu/Menu.controller.ts";
 import { MenuAnalyticsController } from "../../controllers/menu/Menuanalytics.controller.ts";
 import { OptionGroupAdminController } from "../../controllers/menu/admin/OptionGroupAdmin.controller.ts";
+import { MenuScheduleController } from "../../controllers/menu/admin/MenuSchedule.controller.ts";
+import { validateZod } from "../../middlewares/validateZod.ts";
+import {
+    createOptionSchema,
+    reorderCategoriesSchema,
+    scheduleSchema,
+    updateOptionGroupSchema,
+    updateOptionSchema,
+} from "../../validators/menuAdmin.validator.ts";
 
 
 const router= express.Router();
@@ -25,6 +34,7 @@ router.use(requireTenantContext);
 const productStore = storeOf.record("product", "productUuid");
 const categoryStore = storeOf.record("category", "categoryUuid");
 const groupStore = storeOf.record("optionGroup", "groupUuid");
+const optionStore = storeOf.option("optionUuid");
 
 // ─── Menu Preview & Cache ───────────────────────────────────
 router.get(
@@ -58,6 +68,22 @@ router.post(
     validateRequest(MenuValidators.createCategory),
     checkPermission("menu.create"),
     CategoryAdminController.createCategory
+);
+
+// Body: { storeUuid, categoryUuids } — every category of the store, in menu order
+router.post(
+    "/categories/reorder",
+    validateZod(reorderCategoriesSchema),
+    checkPermission("menu.update"),
+    MenuScheduleController.reorderCategories
+);
+
+// Replaces the category's days / time slots / date window (store-local)
+router.put(
+    "/categories/:categoryUuid/availability",
+    checkPermission("menu.update", categoryStore),
+    validateZod(scheduleSchema),
+    MenuScheduleController.setCategorySchedule
 );
 
 router.patch(
@@ -94,6 +120,13 @@ router.delete(
     ProductAdminController.deleteProduct
 );
 
+router.put(
+    "/products/:productUuid/availability",
+    checkPermission("menu.update", productStore),
+    validateZod(scheduleSchema),
+    MenuScheduleController.setProductSchedule
+);
+
 router.post(
     "/products/bulk/prices",
     validateRequest(MenuValidators.bulkUpdatePrices),
@@ -116,11 +149,45 @@ router.post(
     OptionGroupAdminController.createOptionGroup
 );
 
+router.get(
+    "/option-groups/store/:storeUuid",
+    checkPermission("menu.read"),
+    OptionGroupAdminController.listOptionGroups
+);
+
+router.patch(
+    "/option-groups/:groupUuid",
+    checkPermission("menu.update", groupStore),
+    validateZod(updateOptionGroupSchema),
+    OptionGroupAdminController.updateOptionGroup
+);
+
+// Deactivates the group and its options (past orders still reference them)
+router.delete(
+    "/option-groups/:groupUuid",
+    checkPermission("menu.delete", groupStore),
+    OptionGroupAdminController.deleteOptionGroup
+);
+
 router.post(
     "/option-groups/:groupUuid/options",
     checkPermission("menu.create", groupStore),
-    validateRequest(MenuValidators.createOption),
+    validateZod(createOptionSchema),
     OptionGroupAdminController.addOption
+);
+
+// ─── Options ────────────────────────────────────────────────
+router.patch(
+    "/options/:optionUuid",
+    checkPermission("menu.update", optionStore),
+    validateZod(updateOptionSchema),
+    OptionGroupAdminController.updateOption
+);
+
+router.delete(
+    "/options/:optionUuid",
+    checkPermission("menu.delete", optionStore),
+    OptionGroupAdminController.deleteOption
 );
 
 router.post(

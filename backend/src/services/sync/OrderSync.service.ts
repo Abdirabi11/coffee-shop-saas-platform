@@ -9,6 +9,7 @@ import { OrderNumberService } from "../order/OrderNumber.service.ts";
 import { OrderPricingService } from "../order/OrderPricing.service.ts";
 import { MANUALLY_SETTABLE_STATUSES, OrderStatusService } from "../order/OrderStatus.service.ts";
 import { StoreStatusService } from "../store/StoreStatus.service.ts";
+import { EventBus } from "../../events/eventBus.ts";
 
 const MAX_SYNC_ITEMS = 100;
 
@@ -145,6 +146,7 @@ export class OrderSyncService{
     private static async createOrder(input: {
         tenantUuid: string;
         tenantUserUuid: string;
+        userUuid: string;
         storeUuid: string;
         clientOrder: SyncPayload;
         deviceId: string;
@@ -175,6 +177,9 @@ export class OrderSyncService{
                     tenantUuid,
                     storeUuid,
                     tenantUserUuid: input.tenantUserUuid,
+                    // Synced by staff assigned to the store (assertStoreAccess):
+                    // credit them as the order taker, as attribution does
+                    takenBy: input.userUuid,
                     orderNumber,
                     orderType,
                     tableNumber: typeof clientOrder.tableNumber === "string" ? clientOrder.tableNumber : undefined,
@@ -249,6 +254,14 @@ export class OrderSyncService{
             });
 
             return order;
+        });
+
+        // After commit, as for online orders (tenant dashboards, sockets)
+        EventBus.emit("ORDER_CREATED", {
+            orderUuid: order.uuid,
+            tenantUuid: order.tenantUuid,
+            storeUuid: order.storeUuid,
+            totalAmount: order.totalAmount,
         });
 
         const priceAdjusted =

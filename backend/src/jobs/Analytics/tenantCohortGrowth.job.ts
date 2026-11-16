@@ -61,7 +61,7 @@ export class TenantCohortGrowthJob {
                             tenantUuid_storeUuid_type_granularity_periodStart: {
                                 tenantUuid: null as any,
                                 storeUuid: null as any,
-                                type: "TENANT_COHORT_GROWTH" as any,
+                                type: "TENANT_COHORT_GROWTH",
                                 granularity: "MONTHLY",
                                 periodStart: start,
                             },
@@ -72,7 +72,7 @@ export class TenantCohortGrowthJob {
                             calculatedAt: new Date(),
                         },
                         create: {
-                            type: "TENANT_COHORT_GROWTH" as any,
+                            type: "TENANT_COHORT_GROWTH",
                             granularity: "MONTHLY",
                             periodStart: start,
                             periodEnd: end,

@@ -49,50 +49,163 @@ export class OptionGroupAdminService {
         return optionGroup;
     }
 
+    // Options of a group live in the Option model: it's what the menu
+    // (MenuService) and order pricing read
     static async addOption(input: {
         groupUuid: string;
         name: string;
-        description?: string;
-        extraCost: number;
-        trackStock?: boolean;
-        stockQuantity?: number;
+        description?: string | null;
+        extraCost?: number;
+        order?: number;
+        isAvailable?: boolean;
+        trackInventory?: boolean;
+        currentStock?: number;
         triggeredBy: string;
         tenantUuid: string;
     }) {
-        await this.findGroup(input.tenantUuid, input.groupUuid);
+        const group = await this.findGroup(input.tenantUuid, input.groupUuid);
 
-        const option = await prisma.productOption.create({
+        const option = await prisma.option.create({
             data: {
-                tenantUuid: input.tenantUuid,
-                optionGroupUuid: input.groupUuid,
+                optionGroupUuid: group.uuid,
                 name: input.name,
-                description: input.description,
-                extraCost: input.extraCost,
-                trackStock: input.trackInventory,  
-                stockQuantity: input.currentStock,  
+                description: input.description ?? undefined,
+                extraCost: input.extraCost ?? 0,
+                order: input.order ?? 0,
+                isAvailable: input.isAvailable ?? true,
+                trackInventory: input.trackInventory ?? false,
+                currentStock: input.currentStock,
             },
         });
 
-        // Invalidate cache for the store this option group belongs to
-        const optionGroup = await prisma.optionGroup.findUnique({
-            where: { uuid: input.groupUuid },
-        });
-
-        if (optionGroup) {
-            await MenuCacheService.invalidate({
-                tenantUuid: optionGroup.tenantUuid,
-                storeUuid: optionGroup.storeUuid,
-                reason: "OPTION_ADDED",
-                triggeredBy: input.triggeredBy,
-            });
-        }
-
+        await this.invalidate(group, "OPTION_ADDED", input.triggeredBy);
         logWithContext("info", "[OptionGroupAdmin] Option added", {
             optionUuid: option.uuid,
-            name: option.name,
+            groupUuid: group.uuid,
+        });
+        return option;
+    }
+
+    // Groups of a store with their options; inactive ones included, so the
+    // admin can turn them back on
+    static async listOptionGroups(tenantUuid: string, storeUuid: string) {
+        return prisma.optionGroup.findMany({
+            where: { tenantUuid, storeUuid },
+            orderBy: [{ order: "asc" }, { name: "asc" }],
+            include: {
+                options: { orderBy: [{ order: "asc" }, { name: "asc" }] },
+                _count: { select: { productLinks: true } },
+            },
+        });
+    }
+
+    static async updateOptionGroup(input: {
+        tenantUuid: string;
+        groupUuid: string;
+        triggeredBy: string;
+        data: {
+            name?: string;
+            description?: string | null;
+            selectionType?: "SINGLE" | "MULTIPLE" | "QUANTITY";
+            minSelections?: number;
+            maxSelections?: number | null;
+            isRequired?: boolean;
+            order?: number;
+            isActive?: boolean;
+        };
+    }) {
+        const group = await this.findGroup(input.tenantUuid, input.groupUuid);
+
+        // Check the selection range as it will be after the update
+        const min = input.data.minSelections ?? group.minSelections;
+        const max = input.data.maxSelections !== undefined ? input.data.maxSelections : group.maxSelections;
+        if (max !== null && min > max) throw new Error("INVALID_SELECTION_RANGE");
+
+        const updated = await prisma.optionGroup.update({
+            where: { uuid: group.uuid },
+            data: input.data,
         });
 
+        await this.invalidate(group, "OPTION_GROUP_UPDATED", input.triggeredBy);
+        logWithContext("info", "[OptionGroupAdmin] Option group updated", {
+            groupUuid: group.uuid,
+            changes: Object.keys(input.data),
+        });
+        return updated;
+    }
+
+    // Soft delete: past orders still point at the group's options, so the
+    // group and its options are deactivated (hidden from the menu, refused at
+    // checkout) rather than removed. PATCH isActive: true restores it.
+    static async deleteOptionGroup(input: { tenantUuid: string; groupUuid: string; triggeredBy: string }) {
+        const group = await this.findGroup(input.tenantUuid, input.groupUuid);
+
+        await prisma.$transaction([
+            prisma.optionGroup.update({ where: { uuid: group.uuid }, data: { isActive: false } }),
+            prisma.option.updateMany({ where: { optionGroupUuid: group.uuid }, data: { isActive: false } }),
+        ]);
+
+        await this.invalidate(group, "OPTION_GROUP_DELETED", input.triggeredBy);
+        logWithContext("info", "[OptionGroupAdmin] Option group deactivated", { groupUuid: group.uuid });
+        return { deleted: true };
+    }
+
+    private static async findOption(tenantUuid: string, optionUuid: string) {
+        const option = await prisma.option.findFirst({
+            where: { uuid: optionUuid, optionGroup: { tenantUuid } },
+            include: { optionGroup: { select: { uuid: true, tenantUuid: true, storeUuid: true } } },
+        });
+        if (!option) throw new Error("OPTION_NOT_FOUND");
         return option;
+    }
+
+    static async updateOption(input: {
+        tenantUuid: string;
+        optionUuid: string;
+        triggeredBy: string;
+        data: {
+            name?: string;
+            description?: string | null;
+            extraCost?: number;
+            order?: number;
+            isActive?: boolean;
+            isAvailable?: boolean;
+            trackInventory?: boolean;
+            currentStock?: number | null;
+        };
+    }) {
+        const option = await this.findOption(input.tenantUuid, input.optionUuid);
+        const updated = await prisma.option.update({ where: { uuid: option.uuid }, data: input.data });
+
+        await this.invalidate(option.optionGroup, "OPTION_UPDATED", input.triggeredBy);
+        logWithContext("info", "[OptionGroupAdmin] Option updated", {
+            optionUuid: option.uuid,
+            changes: Object.keys(input.data),
+        });
+        return updated;
+    }
+
+    // Soft delete, as for groups: order items keep referencing the option
+    static async deleteOption(input: { tenantUuid: string; optionUuid: string; triggeredBy: string }) {
+        const option = await this.findOption(input.tenantUuid, input.optionUuid);
+        await prisma.option.update({ where: { uuid: option.uuid }, data: { isActive: false } });
+
+        await this.invalidate(option.optionGroup, "OPTION_DELETED", input.triggeredBy);
+        logWithContext("info", "[OptionGroupAdmin] Option deactivated", { optionUuid: option.uuid });
+        return { deleted: true };
+    }
+
+    private static async invalidate(
+        group: { tenantUuid: string; storeUuid: string },
+        reason: string,
+        triggeredBy: string
+    ) {
+        await MenuCacheService.invalidate({
+            tenantUuid: group.tenantUuid,
+            storeUuid: group.storeUuid,
+            reason,
+            triggeredBy,
+        });
     }
 
     static async linkToProduct(input: {

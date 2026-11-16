@@ -207,37 +207,7 @@ export class MenuValidators {
          return value;
     });
 
-    static updateOptionGroup = Joi.object({
-        name: Joi.string().min(1).max(100).optional(),
-        description: Joi.string().max(500).optional().allow(null),
-        selectionType: Joi.string()
-            .valid("SINGLE", "MULTIPLE", "QUANTITY")
-            .optional(),
-        minSelections: Joi.number().integer().min(0).optional(),
-        maxSelections: Joi.number().integer().min(1).optional(),
-        isRequired: Joi.boolean().optional(),
-        isActive: Joi.boolean().optional(),
-    });
-
-    // ADMIN - OPTION
-    static createOption = Joi.object({
-        // optionGroupUuid: Joi.string().uuid().required(),
-        name: Joi.string().min(1).max(100).required(),
-        description: Joi.string().max(500).optional().allow(null),
-        extraCost: Joi.number().integer().min(0).default(0),
-        trackStock: Joi.boolean().default(false),          // renamed
-        stockQuantity: Joi.number().integer().min(0).optional(),
-    });
-
-    static updateOption = Joi.object({
-        name: Joi.string().min(1).max(100).optional(),
-        description: Joi.string().max(500).optional().allow(null),
-        extraCost: Joi.number().integer().min(0).optional(),
-        isActive: Joi.boolean().optional(),
-        isAvailable: Joi.boolean().optional(),
-        trackInventory: Joi.boolean().optional(),
-        currentStock: Joi.number().integer().min(0).optional(),
-    });
+    // Option group updates and options: validators/menuAdmin.validator.ts (Zod)
 
     // BULK OPERATIONS
     static bulkUpdatePrices = Joi.object({

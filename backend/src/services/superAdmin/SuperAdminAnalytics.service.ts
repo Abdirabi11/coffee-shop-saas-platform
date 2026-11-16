@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
+import type { AnalyticsType } from "@prisma/client";
 import prisma from "../../config/prisma.ts"
-import { withCache } from "../../infrastructure/cache/redis.ts";
+import { withCache } from "../../infrastructure/cache/cache.ts";
 import { logWithContext } from "../../infrastructure/observability/Logger.ts";
  
  
@@ -249,18 +250,18 @@ export class SuperAdminAnalyticsService {
     //GENERIC SNAPSHOT QUERY (for custom analytics dashboard)
     // Allows querying any AnalyticsType with pagination
     static async getSnapshots(input: {
-        type: string;
+        type: AnalyticsType;
         limit?: number;
         tenantUuid?: string;
         storeUuid?: string;
     }) {
         const limit = input.limit ?? 12;
-        const cacheKey = `sa:analytics:snapshots:${input.type}:${input.tenantUuid ?? "platform"}:${limit}`;
+        const cacheKey = `sa:analytics:snapshots:${input.type}:${input.tenantUuid ?? "platform"}:${input.storeUuid ?? "all"}:${limit}`;
     
         return withCache(cacheKey, 300, async () => {
             const snapshots = await prisma.analyticsSnapshot.findMany({
                 where: {
-                    type: input.type as any,
+                    type: input.type,
                     status: "COMPLETED",
                     ...(input.tenantUuid ? { tenantUuid: input.tenantUuid } : { tenantUuid: null }),
                     ...(input.storeUuid ? { storeUuid: input.storeUuid } : {}),
@@ -325,10 +326,7 @@ export class SuperAdminAnalyticsService {
         
                 prisma.fraudEvent.groupBy({
                     by: ["userUuid"],
-                    where: {
-                        createdAt: { gte: last30d },
-                        userUuid: { not: null },
-                    },
+                    where: { createdAt: { gte: last30d } },
                     _count: true,
                     orderBy: { _count: { userUuid: "desc" } },
                     take: 20,

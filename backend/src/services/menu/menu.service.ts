@@ -204,7 +204,9 @@ export class MenuService {
             if (!entity.availableDays.includes(local.dayName)) return false;
         }
  
-        if (entity.timeSlots && Array.isArray(entity.timeSlots)) {
+        // An empty list means no time restriction (as for availableDays), not
+        // "never available"
+        if (Array.isArray(entity.timeSlots) && entity.timeSlots.length > 0) {
             const currentTime = local.time;
             const isInSlot = entity.timeSlots.some((slot: any) =>
                 currentTime >= slot.start && currentTime <= slot.end

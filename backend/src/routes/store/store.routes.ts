@@ -2,6 +2,7 @@ import express from "express"
 import { requireTenantContext } from "../../middlewares/requireTenantContext.middleware.ts";
 import { authenticate, authorize, authorizeStore } from "../../middlewares/auth.middleware.ts";
 import { StoreController } from "../../controllers/store/Store.controller.ts";
+import { OnboardingController } from "../../controllers/tenant/Onboarding.controller.ts";
 import { rateLimitByIP } from "../../middlewares/menu/Ratelimitbyip.middleware.ts";
 
 
@@ -17,7 +18,11 @@ router.use(rateLimitByIP({ points: 60, duration: 60 }));
 // Tenant-wide list: tenant-level roles only (authorize). Everything under
 // /:storeUuid is store scope (authorizeStore): the handler acts on that store.
 router.get("/", authorize("OWNER", "ADMIN", "MANAGER"),  StoreController.listStores);
+// New store in the caller's tenant: tenant admins only, within the plan's maxStores
+router.post("/", authorize("OWNER", "TENANT_ADMIN"), OnboardingController.createStore);
 router.get("/:storeUuid", authorizeStore("OWNER", "ADMIN", "MANAGER"),  StoreController.getStore);
+// Profile and timezone: tenant admins, or the store's own ADMIN (as for hours)
+router.patch("/:storeUuid", authorizeStore("OWNER", "ADMIN"), OnboardingController.updateStore);
 router.get("/:storeUuid/hours/status/public", StoreController.getOpenStatus);
 
  
